@@ -5,8 +5,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/JCKFinland/connect/backend/pkg/logger"
 )
 
 func NewRouter(log *slog.Logger, db *pgxpool.Pool) *gin.Engine {
@@ -19,7 +17,6 @@ func NewRouter(log *slog.Logger, db *pgxpool.Pool) *gin.Engine {
 
 	router.Use(gin.Recovery())
 
-	router.Use(logger.Middleware(log))
 
 	RegisterRoutes(router, db)
 
