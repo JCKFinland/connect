@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,11 +17,14 @@ import (
 
 func main() {
 
+	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
+		os.Exit(1)
 	}
 
+	// Initialize logger
 	log := logger.New(
 		cfg.Log.Level,
 		cfg.App.Env,
@@ -28,33 +32,54 @@ func main() {
 
 	log.Info("Starting CONNECT Backend")
 
+	// Connect to PostgreSQL
 	db, err := database.Connect(cfg)
 	if err != nil {
-		log.Error(err.Error())
+		log.Error("Database connection failed", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
-	if err := database.RunMigrations(log); err != nil {
-		log.Error(err.Error())
+	// Run database migrations
+	if err := database.RunMigrations(cfg, log); err != nil {
+		log.Error("Migration failed", "error", err)
 		os.Exit(1)
 	}
 
+	// Build router
 	router := api.NewRouter(log, db)
 
-	serverAddr := fmt.Sprintf(":%s", cfg.App.Port)
+	server := &http.Server{
+		Addr:              ":" + cfg.App.Port,
+		Handler:           router,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 
+	// Start server
 	go func() {
 
-		log.Info("HTTP server started",
-			"address", serverAddr,
+		log.Info(
+			"HTTP server started",
+			"address",
+			server.Addr,
 		)
 
-		if err := router.Run(serverAddr); err != nil {
-			log.Error(err.Error())
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+
+			log.Error(
+				"HTTP server failed",
+				"error",
+				err,
+			)
+
+			os.Exit(1)
 		}
 	}()
 
+	// Wait for shutdown signal
 	quit := make(chan os.Signal, 1)
 
 	signal.Notify(
@@ -65,7 +90,7 @@ func main() {
 
 	<-quit
 
-	log.Info("Shutting down CONNECT Backend...")
+	log.Info("Shutdown signal received")
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
@@ -73,7 +98,16 @@ func main() {
 	)
 	defer cancel()
 
-	_ = ctx
+	if err := server.Shutdown(ctx); err != nil {
 
-	log.Info("Shutdown complete")
+		log.Error(
+			"Graceful shutdown failed",
+			"error",
+			err,
+		)
+
+		os.Exit(1)
+	}
+
+	log.Info("CONNECT Backend stopped")
 }
