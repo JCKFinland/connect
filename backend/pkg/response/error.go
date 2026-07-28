@@ -54,6 +54,38 @@ func NotFound(c *gin.Context, message string) {
 	Error(c, http.StatusNotFound, message, nil)
 }
 
-func InternalServerError(c *gin.Context, message string) {
-	Error(c, http.StatusInternalServerError, message, nil)
+func InternalServerError(c *gin.Context) {
+	Error(
+		c,
+		http.StatusInternalServerError,
+		"Internal server error",
+		nil,
+	)
+}
+
+func Conflict(c *gin.Context, message string) {
+	Error(
+		c,
+		http.StatusConflict,
+		message,
+		nil,
+	)
+}
+
+func UnprocessableEntity(c *gin.Context, message string) {
+	Error(
+		c,
+		http.StatusUnprocessableEntity,
+		message,
+		nil,
+	)
+}
+
+func TooManyRequests(c *gin.Context, message string) {
+	Error(
+		c,
+		http.StatusTooManyRequests,
+		message,
+		nil,
+	)
 }

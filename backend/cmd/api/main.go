@@ -9,6 +9,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/JCKFinland/connect/backend/internal/repository"
+	"github.com/JCKFinland/connect/backend/internal/security"
+	authservice "github.com/JCKFinland/connect/backend/internal/services/auth"
+
 	"github.com/JCKFinland/connect/backend/internal/api"
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
@@ -46,8 +50,60 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Build router
-	router := api.NewRouter(log, db)
+	// ----------------------------------------------------------------------
+	// Repositories
+	// ----------------------------------------------------------------------
+
+	userRepo := repository.NewUserRepository(db)
+	roleRepo := repository.NewRoleRepository(db)
+	userRoleRepo := repository.NewUserRoleRepository(db)
+	refreshTokenRepo := repository.NewRefreshTokenRepository(db)
+
+	// ----------------------------------------------------------------------
+	// Security
+	// ----------------------------------------------------------------------
+
+	jwtService := security.NewJWTService(cfg)
+
+	// ----------------------------------------------------------------------
+	// Auth Service
+	// ----------------------------------------------------------------------
+
+	authService := authservice.NewService(
+		authservice.Dependencies{
+			Config: cfg,
+
+			Users: userRepo,
+
+			Roles: roleRepo,
+
+			UserRoles: userRoleRepo,
+
+			RefreshTokens: refreshTokenRepo,
+
+			JWT: jwtService,
+		},
+	)
+
+	// ----------------------------------------------------------------------
+	// HTTP Handlers
+	// ----------------------------------------------------------------------
+
+	authHandler := api.NewAuthHandler(authService)
+
+	// ----------------------------------------------------------------------
+	// Router
+	// ----------------------------------------------------------------------
+
+	router := api.NewRouter(
+		log,
+		db,
+		authHandler,
+		jwtService,
+		userRepo,
+	)
+
+	// ----------------------------------------------------------------------
 
 	server := &http.Server{
 		Addr:              ":" + cfg.App.Port,

@@ -13,10 +13,7 @@ func HealthHandler(db *pgxpool.Pool) gin.HandlerFunc {
 
 		if err := database.Health(db); err != nil {
 
-			response.InternalServerError(
-				c,
-				"Database unavailable",
-			)
+			response.InternalServerError(c)
 
 			return
 		}

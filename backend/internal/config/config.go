@@ -1,5 +1,9 @@
 package config
 
+import (
+	"time"
+)
+
 // AppConfig contains application configuration.
 type AppConfig struct {
 	Name string
@@ -19,8 +23,10 @@ type DatabaseConfig struct {
 
 // JWTConfig contains JWT configuration.
 type JWTConfig struct {
-	Secret     string
-	Expiration string
+	Secret               string
+	Issuer               string
+	AccessTokenDuration  time.Duration
+	RefreshTokenDuration time.Duration
 }
 
 // LogConfig contains logging configuration.
@@ -43,6 +49,20 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	accessDuration, err := time.ParseDuration(
+		GetEnv("JWT_ACCESS_TOKEN_DURATION", "15m"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	refreshDuration, err := time.ParseDuration(
+		GetEnv("JWT_REFRESH_TOKEN_DURATION", "720h"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 
 		App: AppConfig{
@@ -61,8 +81,10 @@ func Load() (*Config, error) {
 		},
 
 		JWT: JWTConfig{
-			Secret:     GetEnv("JWT_SECRET", ""),
-			Expiration: GetEnv("JWT_EXPIRES_IN", "24h"),
+			Secret:               GetEnv("JWT_SECRET", ""),
+			Issuer:               GetEnv("JWT_ISSUER", "connect-api"),
+			AccessTokenDuration:  accessDuration,
+			RefreshTokenDuration: refreshDuration,
 		},
 
 		Log: LogConfig{
