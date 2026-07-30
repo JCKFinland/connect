@@ -7,16 +7,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/JCKFinland/connect/backend/internal/middleware"
-	"github.com/JCKFinland/connect/backend/internal/repository"
-	"github.com/JCKFinland/connect/backend/internal/security"
 )
 
 func NewRouter(
 	log *slog.Logger,
 	db *pgxpool.Pool,
-	authHandler *AuthHandler,
-	jwtService *security.JWTService,
-	userRepo repository.UserRepository,
+	auth *AuthHandler,
+	authMiddleware *middleware.AuthMiddleware,
+	rbacMiddleware *middleware.RBACMiddleware,
+	userHandler *UserHandler,
 ) *gin.Engine {
 
 	router := gin.New()
@@ -37,19 +36,12 @@ func NewRouter(
 	router.Use(middleware.CORS())
 	router.Use(middleware.Logger(log))
 
-	// Authentication middleware
-	authMiddleware := middleware.NewAuthMiddleware(
-		jwtService,
-		userRepo,
-	)
-
-	userHandler := NewUserHandler()
-
 	RegisterRoutes(
 		router,
 		db,
-		authHandler,
+		auth,
 		authMiddleware,
+		rbacMiddleware,
 		userHandler,
 	)
 

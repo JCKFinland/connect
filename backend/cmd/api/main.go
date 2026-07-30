@@ -9,26 +9,29 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/JCKFinland/connect/backend/internal/repository"
-	"github.com/JCKFinland/connect/backend/internal/security"
-	authservice "github.com/JCKFinland/connect/backend/internal/services/auth"
-
 	"github.com/JCKFinland/connect/backend/internal/api"
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
+	"github.com/JCKFinland/connect/backend/internal/middleware"
+	"github.com/JCKFinland/connect/backend/internal/repository"
+	"github.com/JCKFinland/connect/backend/internal/security"
+	authservice "github.com/JCKFinland/connect/backend/internal/services/auth"
+	rbac "github.com/JCKFinland/connect/backend/internal/services/rbac"
 	"github.com/JCKFinland/connect/backend/pkg/logger"
 )
 
 func main() {
 
-	// Load configuration
+	// ----------------------------------------------------------------------
+	// Configuration
+	// ----------------------------------------------------------------------
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Initialize logger
 	log := logger.New(
 		cfg.Log.Level,
 		cfg.App.Env,
@@ -36,7 +39,10 @@ func main() {
 
 	log.Info("Starting CONNECT Backend")
 
-	// Connect to PostgreSQL
+	// ----------------------------------------------------------------------
+	// Database
+	// ----------------------------------------------------------------------
+
 	db, err := database.Connect(cfg)
 	if err != nil {
 		log.Error("Database connection failed", "error", err)
@@ -44,7 +50,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Run database migrations
 	if err := database.RunMigrations(cfg, log); err != nil {
 		log.Error("Migration failed", "error", err)
 		os.Exit(1)
@@ -59,6 +64,9 @@ func main() {
 	userRoleRepo := repository.NewUserRoleRepository(db)
 	refreshTokenRepo := repository.NewRefreshTokenRepository(db)
 
+	// RBAC
+	permissionRepo := repository.NewPermissionRepository(db)
+
 	// ----------------------------------------------------------------------
 	// Security
 	// ----------------------------------------------------------------------
@@ -66,7 +74,7 @@ func main() {
 	jwtService := security.NewJWTService(cfg)
 
 	// ----------------------------------------------------------------------
-	// Auth Service
+	// Services
 	// ----------------------------------------------------------------------
 
 	authService := authservice.NewService(
@@ -86,10 +94,30 @@ func main() {
 	)
 
 	// ----------------------------------------------------------------------
-	// HTTP Handlers
+	// RBAC Service
+	// ----------------------------------------------------------------------
+
+	rbacService := rbac.NewService(permissionRepo)
+
+	// ----------------------------------------------------------------------
+	// Middleware
+	// ----------------------------------------------------------------------
+
+	authMiddleware := middleware.NewAuthMiddleware(
+		jwtService,
+		userRepo,
+	)
+
+	rbacMiddleware := middleware.NewRBACMiddleware(
+		rbacService,
+	)
+
+	// ----------------------------------------------------------------------
+	// Handlers
 	// ----------------------------------------------------------------------
 
 	authHandler := api.NewAuthHandler(authService)
+	userHandler := api.NewUserHandler()
 
 	// ----------------------------------------------------------------------
 	// Router
@@ -99,10 +127,13 @@ func main() {
 		log,
 		db,
 		authHandler,
-		jwtService,
-		userRepo,
+		authMiddleware,
+		rbacMiddleware,
+		userHandler,
 	)
 
+	// ----------------------------------------------------------------------
+	// HTTP Server
 	// ----------------------------------------------------------------------
 
 	server := &http.Server{
@@ -114,7 +145,6 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Start server
 	go func() {
 
 		log.Info(
@@ -123,7 +153,8 @@ func main() {
 			server.Addr,
 		)
 
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil &&
+			err != http.ErrServerClosed {
 
 			log.Error(
 				"HTTP server failed",
@@ -135,7 +166,10 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal
+	// ----------------------------------------------------------------------
+	// Graceful Shutdown
+	// ----------------------------------------------------------------------
+
 	quit := make(chan os.Signal, 1)
 
 	signal.Notify(

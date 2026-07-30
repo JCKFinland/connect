@@ -12,28 +12,57 @@ func RegisterRoutes(
 	db *pgxpool.Pool,
 	authHandler *AuthHandler,
 	authMiddleware *middleware.AuthMiddleware,
+	rbacMiddleware *middleware.RBACMiddleware,
 	userHandler *UserHandler,
 ) {
 
 	v1 := router.Group("/api/v1")
 	{
 
-		// Public routes
+		// ---------------------------------------------------
+		// Public Routes
+		// ---------------------------------------------------
+
 		v1.GET("/health", HealthHandler(db))
 
-		authGroup := v1.Group("/auth")
+		auth := v1.Group("/auth")
 		{
-			authGroup.POST("/register", authHandler.Register)
-			authGroup.POST("/login", authHandler.Login)
-			authGroup.POST("/refresh", authHandler.Refresh)
-			authGroup.POST("/logout", authHandler.Logout)
+			auth.POST("/register", authHandler.Register)
+			auth.POST("/login", authHandler.Login)
+			auth.POST("/refresh", authHandler.Refresh)
+			auth.POST("/logout", authHandler.Logout)
 		}
 
-		// Protected routes
+		// ---------------------------------------------------
+		// Protected Routes
+		// ---------------------------------------------------
+
 		users := v1.Group("/users")
+
 		users.Use(authMiddleware.RequireAuth())
+
 		{
 			users.GET("/me", userHandler.Me)
+		}
+
+		// ---------------------------------------------------
+		// Example RBAC
+		// ---------------------------------------------------
+
+		admin := v1.Group("/admin")
+
+		admin.Use(authMiddleware.RequireAuth())
+		admin.Use(rbacMiddleware.RequirePermission("users.read"))
+
+		{
+			admin.GET("/ping", func(c *gin.Context) {
+
+				c.JSON(200, gin.H{
+					"success": true,
+					"message": "RBAC working",
+				})
+
+			})
 		}
 	}
 }
