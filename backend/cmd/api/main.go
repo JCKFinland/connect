@@ -14,8 +14,10 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/security"
 	authservice "github.com/JCKFinland/connect/backend/internal/services/auth"
+	presence "github.com/JCKFinland/connect/backend/internal/services/presence"
 	rbac "github.com/JCKFinland/connect/backend/internal/services/rbac"
 	"github.com/JCKFinland/connect/backend/pkg/logger"
 )
@@ -65,7 +67,7 @@ func main() {
 	refreshTokenRepo := repository.NewRefreshTokenRepository(db)
 
 	// RBAC
-	permissionRepo := repository.NewPermissionRepository(db)
+	driverPresenceRepo := postgresrepo.NewDriverPresenceRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -93,9 +95,19 @@ func main() {
 		},
 	)
 
+	presenceService := presence.NewService(
+		presence.Dependencies{
+			Config:   cfg,
+			Users:    userRepo,
+			Presence: driverPresenceRepo,
+		},
+	)
+
 	// ----------------------------------------------------------------------
 	// RBAC Service
 	// ----------------------------------------------------------------------
+
+	permissionRepo := repository.NewPermissionRepository(db)
 
 	rbacService := rbac.NewService(permissionRepo)
 
@@ -118,6 +130,9 @@ func main() {
 
 	authHandler := api.NewAuthHandler(authService)
 	userHandler := api.NewUserHandler()
+	driverPresenceHandler := api.NewDriverPresenceHandler(
+		presenceService,
+	)
 
 	// ----------------------------------------------------------------------
 	// Router
@@ -130,6 +145,7 @@ func main() {
 		authMiddleware,
 		rbacMiddleware,
 		userHandler,
+		driverPresenceHandler,
 	)
 
 	// ----------------------------------------------------------------------

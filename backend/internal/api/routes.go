@@ -14,6 +14,7 @@ func RegisterRoutes(
 	authMiddleware *middleware.AuthMiddleware,
 	rbacMiddleware *middleware.RBACMiddleware,
 	userHandler *UserHandler,
+	driverPresenceHandler *DriverPresenceHandler,
 ) {
 
 	v1 := router.Group("/api/v1")
@@ -63,6 +64,32 @@ func RegisterRoutes(
 				})
 
 			})
+		}
+
+		driver := v1.Group("/driver")
+
+		driver.Use(authMiddleware.RequireAuth())
+
+		{
+			driver.POST(
+				"/online",
+				driverPresenceHandler.GoOnline,
+			)
+
+			driver.POST(
+				"/offline",
+				driverPresenceHandler.GoOffline,
+			)
+
+			driver.POST(
+				"/heartbeat",
+				driverPresenceHandler.Heartbeat,
+			)
+
+			driver.PATCH(
+				"/availability",
+				driverPresenceHandler.UpdateAvailability,
+			)
 		}
 	}
 }
