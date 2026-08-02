@@ -17,6 +17,8 @@ func NewRouter(
 	rbacMiddleware *middleware.RBACMiddleware,
 	userHandler *UserHandler,
 	driverPresenceHandler *DriverPresenceHandler,
+	driverAssignmentHandler *DriverAssignmentHandler,
+	companyHandler *CompanyHandler,
 ) *gin.Engine {
 
 	router := gin.New()
@@ -45,6 +47,8 @@ func NewRouter(
 		rbacMiddleware,
 		userHandler,
 		driverPresenceHandler,
+		driverAssignmentHandler,
+		companyHandler,
 	)
 
 	return router

@@ -7,21 +7,31 @@ type Company struct {
 
 	Name string `db:"name" json:"name"`
 
-	RegistrationNumber string `db:"registration_number" json:"registration_number"`
+	LegalName string `db:"legal_name" json:"legal_name"`
 
-	TaxNumber string `db:"tax_number" json:"tax_number"`
+	BusinessID string `db:"business_id" json:"business_id"`
 
 	Email string `db:"email" json:"email"`
 
 	Phone string `db:"phone" json:"phone"`
 
-	Address string `db:"address" json:"address"`
+	Website string `db:"website" json:"website"`
+
+	CountryCode string `db:"country_code" json:"country_code"`
+
+	Timezone string `db:"timezone" json:"timezone"`
+
+	AddressLine1 string `db:"address_line1" json:"address_line1"`
+
+	AddressLine2 string `db:"address_line2" json:"address_line2"`
 
 	City string `db:"city" json:"city"`
 
+	State string `db:"state" json:"state"`
+
 	PostalCode string `db:"postal_code" json:"postal_code"`
 
-	Country string `db:"country" json:"country"`
+	LogoURL string `db:"logo_url" json:"logo_url"`
 
 	IsActive bool `db:"is_active" json:"is_active"`
 }

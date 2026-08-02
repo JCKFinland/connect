@@ -3,6 +3,8 @@ package presence
 import (
 	"context"
 	"errors"
+
+	"github.com/JCKFinland/connect/backend/internal/repository"
 )
 
 var ErrDriverAssignmentRequired = errors.New(
@@ -14,20 +16,30 @@ func (s *Service) GoOnline(
 	req GoOnlineRequest,
 ) error {
 
-	/*
-		This method will be fully implemented after
-		the Driver Assignment repository/service is introduced.
+	assignment, err := s.assignments.GetActiveByDriver(
+		ctx,
+		req.DriverID,
+	)
 
-		A driver cannot go ONLINE until CONNECT knows:
+	if err == repository.ErrNotFound {
+		return ErrDriverAssignmentRequired
+	}
 
-		- Company
-		- Branch
-		- Vehicle
-		- Assignment
+	if err != nil {
+		return err
+	}
 
-		This prevents orphaned presence records and ensures
-		the Dispatch Engine only works with valid driver assignments.
-	*/
+	if err := s.AttachAssignment(
+		ctx,
+		assignment,
+	); err != nil {
+		return err
+	}
 
-	return ErrDriverAssignmentRequired
+	return s.presence.UpdateAvailability(
+		ctx,
+		req.DriverID,
+		StatusAvailable,
+		true,
+	)
 }

@@ -15,10 +15,13 @@ func RegisterRoutes(
 	rbacMiddleware *middleware.RBACMiddleware,
 	userHandler *UserHandler,
 	driverPresenceHandler *DriverPresenceHandler,
+	driverAssignmentHandler *DriverAssignmentHandler,
+	companyHandler *CompanyHandler,
 ) {
 
 	v1 := router.Group("/api/v1")
 	{
+		// ...
 
 		// ---------------------------------------------------
 		// Public Routes
@@ -86,9 +89,55 @@ func RegisterRoutes(
 				driverPresenceHandler.Heartbeat,
 			)
 
+			driver.POST(
+				"/assign",
+				driverAssignmentHandler.Assign,
+			)
+
+			driver.POST(
+				"/unassign",
+				driverAssignmentHandler.Unassign,
+			)
+
 			driver.PATCH(
 				"/availability",
 				driverPresenceHandler.UpdateAvailability,
+			)
+		}
+
+
+		// ---------------------------------------------------
+		// Company Routes
+		// ---------------------------------------------------
+
+		companies := v1.Group("/companies")
+
+		companies.Use(authMiddleware.RequireAuth())
+
+		{
+			companies.POST(
+				"",
+				companyHandler.Create,
+			)
+
+			companies.GET(
+				"",
+				companyHandler.List,
+			)
+
+			companies.GET(
+				"/:id",
+				companyHandler.GetByID,
+			)
+
+			companies.PUT(
+				"/:id",
+				companyHandler.Update,
+			)
+
+			companies.DELETE(
+				"/:id",
+				companyHandler.Delete,
 			)
 		}
 	}

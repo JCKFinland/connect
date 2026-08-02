@@ -14,11 +14,21 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+
 	"github.com/JCKFinland/connect/backend/internal/security"
+
 	authservice "github.com/JCKFinland/connect/backend/internal/services/auth"
+
+	companyservice "github.com/JCKFinland/connect/backend/internal/services/company"
+
+	assignment "github.com/JCKFinland/connect/backend/internal/services/assignment"
+
 	presence "github.com/JCKFinland/connect/backend/internal/services/presence"
+
 	rbac "github.com/JCKFinland/connect/backend/internal/services/rbac"
+
 	"github.com/JCKFinland/connect/backend/pkg/logger"
 )
 
@@ -66,8 +76,9 @@ func main() {
 	userRoleRepo := repository.NewUserRoleRepository(db)
 	refreshTokenRepo := repository.NewRefreshTokenRepository(db)
 
-	// RBAC
 	driverPresenceRepo := postgresrepo.NewDriverPresenceRepository(db)
+	driverAssignmentRepo := postgresrepo.NewDriverAssignmentRepository(db)
+	companyRepo := postgresrepo.NewCompanyRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -95,11 +106,29 @@ func main() {
 		},
 	)
 
+	companyService := companyservice.NewService(
+		companyservice.Dependencies{
+			Config: cfg,
+			Companies: companyRepo,
+		},
+	)
+
 	presenceService := presence.NewService(
 		presence.Dependencies{
-			Config:   cfg,
-			Users:    userRepo,
+			Config: cfg,
+
+			Users: userRepo,
+
 			Presence: driverPresenceRepo,
+
+			Assignments: driverAssignmentRepo,
+		},
+	)
+
+	assignmentService := assignment.NewService(
+		assignment.Dependencies{
+			Assignments: driverAssignmentRepo,
+			Presence:    presenceService,
 		},
 	)
 
@@ -134,6 +163,14 @@ func main() {
 		presenceService,
 	)
 
+	companyHandler := api.NewCompanyHandler(
+		companyService,
+	)
+
+	driverAssignmentHandler := api.NewDriverAssignmentHandler(
+		assignmentService,
+	)
+
 	// ----------------------------------------------------------------------
 	// Router
 	// ----------------------------------------------------------------------
@@ -146,6 +183,8 @@ func main() {
 		rbacMiddleware,
 		userHandler,
 		driverPresenceHandler,
+		driverAssignmentHandler,
+		companyHandler,
 	)
 
 	// ----------------------------------------------------------------------
