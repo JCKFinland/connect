@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	// CONNECT internal architecture imports
 	"github.com/JCKFinland/connect/backend/internal/api"
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
@@ -20,6 +21,8 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/security"
 
 	authservice "github.com/JCKFinland/connect/backend/internal/services/auth"
+
+	branchservice "github.com/JCKFinland/connect/backend/internal/services/branch"
 
 	companyservice "github.com/JCKFinland/connect/backend/internal/services/company"
 
@@ -38,12 +41,15 @@ func main() {
 	// Configuration
 	// ----------------------------------------------------------------------
 
+	// Reads environment variables and config files into a Go struct.
 	cfg, err := config.Load()
 	if err != nil {
+		// Hard exit if application settings are corrupt or missing.
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
 		os.Exit(1)
 	}
 
+	// Instantiates structured logging matching the current environment (e.g., JSON for Production).
 	log := logger.New(
 		cfg.Log.Level,
 		cfg.App.Env,
@@ -55,126 +61,134 @@ func main() {
 	// Database
 	// ----------------------------------------------------------------------
 
+	// Establishes the database connection pool using configurations.
 	db, err := database.Connect(cfg)
 	if err != nil {
 		log.Error("Database connection failed", "error", err)
 		os.Exit(1)
 	}
+	// Ensures database connections safely close when the main function terminates.
 	defer db.Close()
 
+	// Automatically executes SQL schema migrations to keep database tables updated.
 	if err := database.RunMigrations(cfg, log); err != nil {
 		log.Error("Migration failed", "error", err)
 		os.Exit(1)
 	}
 
 	// ----------------------------------------------------------------------
-	// Repositories
+	// Repositories (Data Access Layer)
 	// ----------------------------------------------------------------------
 
+	// Mounts core application tables to interface with database queries.
 	userRepo := repository.NewUserRepository(db)
 	roleRepo := repository.NewRoleRepository(db)
 	userRoleRepo := repository.NewUserRoleRepository(db)
 	refreshTokenRepo := repository.NewRefreshTokenRepository(db)
 
+	// Mounts taxi-specific operational storage modules mapping to PostgreSQL.
 	driverPresenceRepo := postgresrepo.NewDriverPresenceRepository(db)
 	driverAssignmentRepo := postgresrepo.NewDriverAssignmentRepository(db)
 	companyRepo := postgresrepo.NewCompanyRepository(db)
+	branchRepo := postgresrepo.NewBranchRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
 	// ----------------------------------------------------------------------
 
+	// Generates a utility manager for signing and validating JWT tokens.
 	jwtService := security.NewJWTService(cfg)
 
 	// ----------------------------------------------------------------------
-	// Services
+	// Services (Business Logic Layer)
 	// ----------------------------------------------------------------------
 
+	// Injects data tables and JWT tools to form the Authentication logic engine.
 	authService := authservice.NewService(
 		authservice.Dependencies{
-			Config: cfg,
-
-			Users: userRepo,
-
-			Roles: roleRepo,
-
-			UserRoles: userRoleRepo,
-
+			Config:        cfg,
+			Users:         userRepo,
+			Roles:         roleRepo,
+			UserRoles:     userRoleRepo,
 			RefreshTokens: refreshTokenRepo,
-
-			JWT: jwtService,
+			JWT:           jwtService,
 		},
 	)
 
+	// Encapsulates taxi company onboarding and fleet management processes.
 	companyService := companyservice.NewService(
 		companyservice.Dependencies{
-			Config: cfg,
+			Config:    cfg,
 			Companies: companyRepo,
 		},
 	)
 
+	branchService := branchservice.NewService(
+		branchservice.Dependencies{
+			Config:   cfg,
+			Branches: branchRepo,
+		},
+	)
+
+	// Tracks driver shifts, live maps, and online/offline status values.
 	presenceService := presence.NewService(
 		presence.Dependencies{
-			Config: cfg,
-
-			Users: userRepo,
-
-			Presence: driverPresenceRepo,
-
+			Config:      cfg,
+			Users:       userRepo,
+			Presence:    driverPresenceRepo,
 			Assignments: driverAssignmentRepo,
 		},
 	)
 
+	// Matches trip orders to close by active drivers using presence data.
 	assignmentService := assignment.NewService(
 		assignment.Dependencies{
 			Assignments: driverAssignmentRepo,
-			Presence:    presenceService,
+			Presence:    presenceService, // Cross-service dependency interaction.
 		},
 	)
 
 	// ----------------------------------------------------------------------
-	// RBAC Service
+	// RBAC Service (Access Control)
 	// ----------------------------------------------------------------------
 
 	permissionRepo := repository.NewPermissionRepository(db)
 
+	// Evaluates granular user rights (e.g., checking if a user is an admin, driver, or passenger).
 	rbacService := rbac.NewService(permissionRepo)
 
 	// ----------------------------------------------------------------------
-	// Middleware
+	// Middleware (Request Interceptors)
 	// ----------------------------------------------------------------------
 
+	// Intercepts inbound calls to validate incoming user tokens.
 	authMiddleware := middleware.NewAuthMiddleware(
 		jwtService,
 		userRepo,
 	)
 
+	// Intercepts validated routes to ensure the user has acceptable role rights.
 	rbacMiddleware := middleware.NewRBACMiddleware(
 		rbacService,
 	)
 
 	// ----------------------------------------------------------------------
-	// Handlers
+	// Handlers (API Route Controllers)
 	// ----------------------------------------------------------------------
 
+	// Maps standard HTTP endpoints to specific application business logic.
 	authHandler := api.NewAuthHandler(authService)
 	userHandler := api.NewUserHandler()
-	driverPresenceHandler := api.NewDriverPresenceHandler(
-		presenceService,
-	)
-
-	companyHandler := api.NewCompanyHandler(
-		companyService,
-	)
-
-	driverAssignmentHandler := api.NewDriverAssignmentHandler(
-		assignmentService,
-	)
+	driverPresenceHandler := api.NewDriverPresenceHandler(presenceService)
+	companyHandler := api.NewCompanyHandler(companyService)
+	branchHandler := api.NewBranchHandler(branchService)
+	driverAssignmentHandler := api.NewDriverAssignmentHandler(assignmentService)
 
 	// ----------------------------------------------------------------------
 	// Router
 	// ----------------------------------------------------------------------
 
+	// Combines logging, endpoints, security middleware, and routes into a uniform network matrix.
 	router := api.NewRouter(
 		log,
 		db,
@@ -184,13 +198,14 @@ func main() {
 		userHandler,
 		driverPresenceHandler,
 		driverAssignmentHandler,
+		branchHandler,
 		companyHandler,
 	)
-
 	// ----------------------------------------------------------------------
-	// HTTP Server
+	// HTTP Server Configuration
 	// ----------------------------------------------------------------------
 
+	// Instantiates server properties with custom protective connection timeouts.
 	server := &http.Server{
 		Addr:              ":" + cfg.App.Port,
 		Handler:           router,
@@ -200,8 +215,8 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
+	// Fires off the network listener inside a concurrent background goroutine.
 	go func() {
-
 		log.Info(
 			"HTTP server started",
 			"address",
@@ -222,9 +237,10 @@ func main() {
 	}()
 
 	// ----------------------------------------------------------------------
-	// Graceful Shutdown
+	// Graceful Shutdown System
 	// ----------------------------------------------------------------------
 
+	// Creates a channel listening for OS-level kills (Ctrl+C, termination commands).
 	quit := make(chan os.Signal, 1)
 
 	signal.Notify(
@@ -233,18 +249,20 @@ func main() {
 		syscall.SIGTERM,
 	)
 
+	// Pauses execution stream here until a cancellation signal arrives.
 	<-quit
 
 	log.Info("Shutdown signal received")
 
+	// Allocates a safe window of 10 seconds to process remaining active requests.
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
 		10*time.Second,
 	)
 	defer cancel()
 
+	// Forces server down neatly without terminating active passenger/driver operations abruptly.
 	if err := server.Shutdown(ctx); err != nil {
-
 		log.Error(
 			"Graceful shutdown failed",
 			"error",
