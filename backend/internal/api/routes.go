@@ -22,6 +22,7 @@ func RegisterRoutes(
 	branchHandler *BranchHandler,
 	companyHandler *CompanyHandler,
 	fleetHandler *FleetHandler,
+	vehicleHandler *VehicleHandler,
 ) {
 
 	// Establishes a base versioning group to prevent breaking mobile client contracts during API updates.
@@ -141,6 +142,23 @@ fleets.Use(authMiddleware.RequireAuth())
     fleets.PUT("/:id", fleetHandler.Update)
 
     fleets.DELETE("/:id", fleetHandler.Delete)
+}
+
+
+vehicles := v1.Group("/vehicles")
+
+vehicles.Use(authMiddleware.RequireAuth())
+
+{
+    vehicles.POST("", vehicleHandler.Create)
+
+    vehicles.GET("", vehicleHandler.List)
+
+    vehicles.GET("/:id", vehicleHandler.GetByID)
+
+    vehicles.PUT("/:id", vehicleHandler.Update)
+
+    vehicles.DELETE("/:id", vehicleHandler.Delete)
 }
 	}
 }

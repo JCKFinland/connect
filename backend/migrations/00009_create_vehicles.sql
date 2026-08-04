@@ -18,9 +18,8 @@ CREATE TABLE IF NOT EXISTS vehicles
     color VARCHAR(50),
 
     vehicle_type VARCHAR(50) NOT NULL,
-    fuel_type VARCHAR(30),
 
-    seat_capacity INTEGER NOT NULL DEFAULT 4,
+    seating_capacity INTEGER NOT NULL DEFAULT 4,
 
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
 
@@ -44,11 +43,9 @@ CREATE TABLE IF NOT EXISTS vehicles
         ON DELETE RESTRICT
 );
 
--- Registration numbers must be unique.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration
 ON vehicles(registration_number);
 
--- VINs should also be unique when present.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_vin
 ON vehicles(vin)
 WHERE vin IS NOT NULL;

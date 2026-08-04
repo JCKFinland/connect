@@ -1,6 +1,6 @@
 package models
 
-// Vehicle represents a vehicle available for trips.
+// Vehicle represents a taxi vehicle belonging to a fleet.
 type Vehicle struct {
 	BaseModel
 	SoftDelete
@@ -13,17 +13,19 @@ type Vehicle struct {
 
 	RegistrationNumber string `db:"registration_number" json:"registration_number"`
 
+	VIN string `db:"vin" json:"vin"`
+
 	Make string `db:"make" json:"make"`
 
 	Model string `db:"model" json:"model"`
 
-	Year int `db:"year" json:"year"`
+	ModelYear int `db:"model_year" json:"model_year"`
 
 	Color string `db:"color" json:"color"`
 
 	VehicleType string `db:"vehicle_type" json:"vehicle_type"`
 
-	SeatCount int `db:"seat_count" json:"seat_count"`
+	SeatingCapacity int `db:"seating_capacity" json:"seating_capacity"`
 
 	IsActive bool `db:"is_active" json:"is_active"`
 }

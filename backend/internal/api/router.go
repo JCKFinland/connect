@@ -14,17 +14,18 @@ import (
 
 // NewRouter serves as the master wiring constructor called during application initialization in main.go.
 func NewRouter(
-    log *slog.Logger,
-    db *pgxpool.Pool,
-    auth *AuthHandler,
-    authMiddleware *middleware.AuthMiddleware,
-    rbacMiddleware *middleware.RBACMiddleware,
-    userHandler *UserHandler,
-    driverPresenceHandler *DriverPresenceHandler,
-    driverAssignmentHandler *DriverAssignmentHandler,
-    branchHandler *BranchHandler,
-    companyHandler *CompanyHandler,
+	log *slog.Logger,
+	db *pgxpool.Pool,
+	auth *AuthHandler,
+	authMiddleware *middleware.AuthMiddleware,
+	rbacMiddleware *middleware.RBACMiddleware,
+	userHandler *UserHandler,
+	driverPresenceHandler *DriverPresenceHandler,
+	driverAssignmentHandler *DriverAssignmentHandler,
+	branchHandler *BranchHandler,
+	companyHandler *CompanyHandler,
 	fleetHandler *FleetHandler,
+	vehicleHandler *VehicleHandler,
 ) *gin.Engine {
 
 	// Instantiates a blank Gin engine instance without default middleware (like default logger/recovery).
@@ -67,6 +68,7 @@ func NewRouter(
 		branchHandler,
 		companyHandler,
 		fleetHandler,
+		vehicleHandler,
 	)
 
 	// Returns the ready-to-run HTTP network multiplexer pool back to main.go.

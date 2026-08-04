@@ -26,13 +26,17 @@ import (
 
 	companyservice "github.com/JCKFinland/connect/backend/internal/services/company"
 
+	fleetservice "github.com/JCKFinland/connect/backend/internal/services/fleet"
+
+	vehicleservice "github.com/JCKFinland/connect/backend/internal/services/vehicle"
+
 	assignment "github.com/JCKFinland/connect/backend/internal/services/assignment"
 
 	presence "github.com/JCKFinland/connect/backend/internal/services/presence"
 
 	rbac "github.com/JCKFinland/connect/backend/internal/services/rbac"
 
-	fleetservice "github.com/JCKFinland/connect/backend/internal/services/fleet"
+	
 
 	"github.com/JCKFinland/connect/backend/pkg/logger"
 )
@@ -94,6 +98,7 @@ func main() {
 	companyRepo := postgresrepo.NewCompanyRepository(db)
 	branchRepo := postgresrepo.NewBranchRepository(db)
 	fleetRepository := postgresrepo.NewFleetRepository(db)
+	vehicleRepo := postgresrepo.NewVehicleRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -127,6 +132,8 @@ func main() {
 	)
 
 	fleetService := fleetservice.NewService(fleetRepository)
+
+	vehicleService := vehicleservice.NewService(vehicleRepo)
 	
 
 	branchService := branchservice.NewService(
@@ -189,6 +196,7 @@ func main() {
 	branchHandler := api.NewBranchHandler(branchService)
 	driverAssignmentHandler := api.NewDriverAssignmentHandler(assignmentService)
 	fleetHandler := api.NewFleetHandler(fleetService)
+	vehicleHandler := api.NewVehicleHandler(vehicleService)
 
 	// ----------------------------------------------------------------------
 	// Router
@@ -207,6 +215,7 @@ func main() {
 		branchHandler,
 		companyHandler,
 		fleetHandler,
+		vehicleHandler,
 	)
 	// ----------------------------------------------------------------------
 	// HTTP Server Configuration
