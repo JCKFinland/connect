@@ -32,6 +32,8 @@ import (
 
 	rbac "github.com/JCKFinland/connect/backend/internal/services/rbac"
 
+	fleetservice "github.com/JCKFinland/connect/backend/internal/services/fleet"
+
 	"github.com/JCKFinland/connect/backend/pkg/logger"
 )
 
@@ -91,6 +93,7 @@ func main() {
 	driverAssignmentRepo := postgresrepo.NewDriverAssignmentRepository(db)
 	companyRepo := postgresrepo.NewCompanyRepository(db)
 	branchRepo := postgresrepo.NewBranchRepository(db)
+	fleetRepository := postgresrepo.NewFleetRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -123,6 +126,9 @@ func main() {
 		},
 	)
 
+	fleetService := fleetservice.NewService(fleetRepository)
+	
+
 	branchService := branchservice.NewService(
 		branchservice.Dependencies{
 			Config:   cfg,
@@ -147,7 +153,6 @@ func main() {
 			Presence:    presenceService, // Cross-service dependency interaction.
 		},
 	)
-
 	// ----------------------------------------------------------------------
 	// RBAC Service (Access Control)
 	// ----------------------------------------------------------------------
@@ -183,6 +188,7 @@ func main() {
 	companyHandler := api.NewCompanyHandler(companyService)
 	branchHandler := api.NewBranchHandler(branchService)
 	driverAssignmentHandler := api.NewDriverAssignmentHandler(assignmentService)
+	fleetHandler := api.NewFleetHandler(fleetService)
 
 	// ----------------------------------------------------------------------
 	// Router
@@ -200,6 +206,7 @@ func main() {
 		driverAssignmentHandler,
 		branchHandler,
 		companyHandler,
+		fleetHandler,
 	)
 	// ----------------------------------------------------------------------
 	// HTTP Server Configuration

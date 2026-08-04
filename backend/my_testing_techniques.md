@@ -312,3 +312,142 @@ Delete All Refresh Tokens (Development Only)
 
 DELETE FROM refresh_tokens;
 
+
+# Create Branch
+
+POST /api/v1/branches
+
+BODY
+{
+  "company_id": "YOUR_COMPANY_UUID",
+  "code": "HQ",
+  "name": "Helsinki Head Office",
+  "email": "helsinki@connect.fi",
+  "phone": "+358401234567",
+  "address_line1": "Keilaranta 1",
+  "address_line2": "",
+  "city": "Espoo",
+  "state": "Uusimaa",
+  "postal_code": "02150",
+  "latitude": 60.1719,
+  "longitude": 24.941,
+  "is_active": true
+}
+
+
+# List Branches
+GET /api/v1/branches
+
+Expected:
+
+HTTP 200
+Array containing the branch
+
+
+# Get Branch
+GET /api/v1/branches/{id}
+
+Expected:
+
+HTTP 200
+Correct branch object
+
+# Update Branch
+PUT /api/v1/branches/{id}
+
+Example:
+{
+  "code": "HQ",
+  "name": "CONNECT Headquarters",
+  "email": "hq@connect.fi",
+  "phone": "+358409999999",
+  "address_line1": "Keilaranta 1",
+  "address_line2": "Building B",
+  "city": "Espoo",
+  "state": "Uusimaa",
+  "postal_code": "02150",
+  "latitude": 60.1719,
+  "longitude": 24.941,
+  "is_active": true
+}
+
+# Delete Branch
+DELETE /api/v1/branches/{id}
+
+Then verify the soft delete:
+
+SELECT
+    id,
+    name,
+    deleted_at
+FROM branches;
+
+You should see a non-NULL deleted_at timestamp.
+
+# How to find company's ID
+SELECT
+    id,
+    name,
+    legal_name
+FROM companies
+WHERE deleted_at IS NULL;
+
+                  id                  |   name   | legal_name
+--------------------------------------+----------+------------
+c4cf9c29-f6fb-46bd-9ad9-65c576f9b990  | CONNECT  | CONNECT
+
+NOTE: The value under id is your company UUID.
+
+
+# Include Soft-Deleted Companies
+# To see every company:
+
+SELECT
+    id,
+    name,
+    deleted_at
+FROM companies;
+
+Example:
+                  id                  |  name   | deleted_at
+--------------------------------------+---------+-------------------------------
+c4cf9c29-f6fb-46bd-9ad9-65c576f9b990  | CONNECT | 2026-08-02 14:40:30.475622+03
+
+NOTE: If deleted_at has a timestamp, that company has been soft-deleted.
+
+
+# How to see every company Via Your API
+GET /api/v1/companies
+
+The response includes:
+
+{
+  "data": [
+    {
+      "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "name": "CONNECT"
+    }
+  ]
+}
+
+# Important: For testing Branch creation, the company must exist and not be deleted.
+
+You can create company via API
+POST /api/v1/companies
+
+Then copy the new UUID from the response:
+
+{
+    "id": "NEW-COMPANY-UUID"
+}
+
+Use that UUID in your Branch creation request:
+
+{
+  "company_id": "NEW-COMPANY-UUID",
+  ...
+}
+
+# NOTE: This ensures the branch references an active company, which is the correct setup for subsequent modules like Fleet and Vehicle.
+
+

@@ -1,6 +1,6 @@
 package models
 
-// Fleet represents a group of vehicles belonging to a branch.
+// Fleet represents a logical fleet operated by a company branch.
 type Fleet struct {
 	BaseModel
 	SoftDelete
@@ -10,6 +10,8 @@ type Fleet struct {
 	BranchID string `db:"branch_id" json:"branch_id"`
 
 	Name string `db:"name" json:"name"`
+
+	Code string `db:"code" json:"code"`
 
 	Description string `db:"description" json:"description"`
 
