@@ -451,3 +451,199 @@ Use that UUID in your Branch creation request:
 # NOTE: This ensures the branch references an active company, which is the correct setup for subsequent modules like Fleet and Vehicle.
 
 
+
+
+# Functional Testing
+
+1. Create Driver
+POST /api/v1/drivers
+
+Headers:
+Authorization: Bearer <JWT_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "user_id": "YOUR_USER_ID",
+  "company_id": "YOUR_COMPANY_ID",
+  "branch_id": "YOUR_BRANCH_ID",
+  "driver_number": "DRV-0001",
+  "first_name": "John",
+  "last_name": "Doe",
+  "phone": "+358401234567",
+  "email": "john.doe@example.com",
+  "taxi_driver_license_number": "TDL-2026-001",
+  "driving_license_number": "B12345678",
+  "status": "ACTIVE",
+  "is_verified": true,
+  "is_active": true
+}
+
+Expected: 201 Created
+
+
+2. List Drivers
+
+GET /api/v1/drivers
+
+Expected: 200 OK
+
+
+3. Get Driver
+
+GET /api/v1/drivers/{driver_id}
+
+Expected: 200 OK
+
+
+4. Update Driver
+
+PUT /api/v1/drivers/{driver_id}
+
+Example:
+{
+  "phone": "+358401112222",
+  "email": "driver.updated@example.com",
+  "status": "ON_DUTY",
+  "is_verified": true,
+  "is_active": true
+}
+
+Expected: 200 OK
+
+5. Delete Driver
+
+DELETE /api/v1/drivers/{driver_id}
+
+Expected: 200 OK
+
+6. Verify Soft Delete
+
+GET /api/v1/drivers
+
+The deleted driver should no longer appear.
+
+# Database Verification
+Run:
+SELECT
+    id,
+    driver_number,
+    first_name,
+    last_name,
+    status,
+    deleted_at
+FROM drivers;
+
+You should see the deleted_at timestamp populated for the deleted driver.
+
+
+# HOW TO GET IDS
+
+1. Get user_id
+
+GET /api/v1/users
+
+OR
+
+SELECT
+    id,
+    email
+FROM users;
+
+
+2. Get company_id
+
+GET /api/v1/companies
+
+OR
+
+SELECT
+    id,
+    name
+FROM companies
+WHERE deleted_at IS NULL;
+
+
+3. Get branch_id
+
+GET /api/v1/branches
+
+OR
+
+SELECT
+    id,
+    company_id,
+    name
+FROM branches
+WHERE deleted_at IS NULL;
+
+
+
+4. Get fleet_id
+
+GET /api/v1/fleets
+
+OR
+
+SELECT
+    id,
+    name
+FROM fleets
+WHERE deleted_at IS NULL;
+
+
+5. Get vehicle_id
+
+GET /api/v1/vehicles
+
+OR
+
+SELECT
+    id,
+    registration_number
+FROM vehicles
+WHERE deleted_at IS NULL;
+
+6. Get driver_id
+After you create a driver:
+
+GET /api/v1/drivers
+
+OR
+
+SELECT
+    id,
+    driver_number,
+    first_name,
+    last_name
+FROM drivers
+WHERE deleted_at IS NULL;
+
+
+# Quick PostgreSQL Queries
+
+These are the ones you'll use most often during development:
+
+-- Users
+SELECT id, email FROM users;
+
+-- Companies
+SELECT id, name FROM companies WHERE deleted_at IS NULL;
+
+-- Branches
+SELECT id, name FROM branches WHERE deleted_at IS NULL;
+
+-- Fleets
+SELECT id, name FROM fleets WHERE deleted_at IS NULL;
+
+-- Vehicles
+SELECT id, registration_number FROM vehicles WHERE deleted_at IS NULL;
+
+-- Drivers
+SELECT id, driver_number, first_name, last_name
+FROM drivers
+WHERE deleted_at IS NULL;
+
+
+
+

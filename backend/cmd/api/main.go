@@ -15,7 +15,8 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 	"github.com/JCKFinland/connect/backend/internal/repository"
-
+    
+	driverservice "github.com/JCKFinland/connect/backend/internal/services/driver"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 
 	"github.com/JCKFinland/connect/backend/internal/security"
@@ -99,6 +100,7 @@ func main() {
 	branchRepo := postgresrepo.NewBranchRepository(db)
 	fleetRepository := postgresrepo.NewFleetRepository(db)
 	vehicleRepo := postgresrepo.NewVehicleRepository(db)
+	driverRepo := postgresrepo.NewDriverRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -141,6 +143,10 @@ func main() {
 			Config:   cfg,
 			Branches: branchRepo,
 		},
+	)
+
+	driverService := driverservice.NewService(
+		driverRepo,
 	)
 
 	// Tracks driver shifts, live maps, and online/offline status values.
@@ -197,6 +203,7 @@ func main() {
 	driverAssignmentHandler := api.NewDriverAssignmentHandler(assignmentService)
 	fleetHandler := api.NewFleetHandler(fleetService)
 	vehicleHandler := api.NewVehicleHandler(vehicleService)
+	driverHandler := api.NewDriverHandler(driverService,)
 
 	// ----------------------------------------------------------------------
 	// Router
@@ -216,6 +223,7 @@ func main() {
 		companyHandler,
 		fleetHandler,
 		vehicleHandler,
+		driverHandler,
 	)
 	// ----------------------------------------------------------------------
 	// HTTP Server Configuration

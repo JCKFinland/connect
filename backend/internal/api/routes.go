@@ -23,6 +23,7 @@ func RegisterRoutes(
 	companyHandler *CompanyHandler,
 	fleetHandler *FleetHandler,
 	vehicleHandler *VehicleHandler,
+	driverHandler *DriverHandler,
 ) {
 
 	// Establishes a base versioning group to prevent breaking mobile client contracts during API updates.
@@ -127,38 +128,52 @@ func RegisterRoutes(
 			branches.DELETE("/:id", branchHandler.Delete)
 		}
 
-
 		fleets := v1.Group("/fleets")
 
-fleets.Use(authMiddleware.RequireAuth())
+		fleets.Use(authMiddleware.RequireAuth())
 
-{
-    fleets.POST("", fleetHandler.Create)
+		{
+			fleets.POST("", fleetHandler.Create)
 
-    fleets.GET("", fleetHandler.List)
+			fleets.GET("", fleetHandler.List)
 
-    fleets.GET("/:id", fleetHandler.GetByID)
+			fleets.GET("/:id", fleetHandler.GetByID)
 
-    fleets.PUT("/:id", fleetHandler.Update)
+			fleets.PUT("/:id", fleetHandler.Update)
 
-    fleets.DELETE("/:id", fleetHandler.Delete)
-}
+			fleets.DELETE("/:id", fleetHandler.Delete)
+		}
 
+		vehicles := v1.Group("/vehicles")
 
-vehicles := v1.Group("/vehicles")
+		vehicles.Use(authMiddleware.RequireAuth())
 
-vehicles.Use(authMiddleware.RequireAuth())
+		{
+			vehicles.POST("", vehicleHandler.Create)
 
-{
-    vehicles.POST("", vehicleHandler.Create)
+			vehicles.GET("", vehicleHandler.List)
 
-    vehicles.GET("", vehicleHandler.List)
+			vehicles.GET("/:id", vehicleHandler.GetByID)
 
-    vehicles.GET("/:id", vehicleHandler.GetByID)
+			vehicles.PUT("/:id", vehicleHandler.Update)
 
-    vehicles.PUT("/:id", vehicleHandler.Update)
+			vehicles.DELETE("/:id", vehicleHandler.Delete)
+		}
 
-    vehicles.DELETE("/:id", vehicleHandler.Delete)
-}
+		drivers := v1.Group("/drivers")
+
+		drivers.Use(authMiddleware.RequireAuth())
+
+		{
+			drivers.POST("", driverHandler.Create)
+
+			drivers.GET("", driverHandler.List)
+
+			drivers.GET("/:id", driverHandler.GetByID)
+
+			drivers.PUT("/:id", driverHandler.Update)
+
+			drivers.DELETE("/:id", driverHandler.Delete)
+		}
 	}
 }
