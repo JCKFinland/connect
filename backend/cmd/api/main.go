@@ -15,9 +15,9 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 	"github.com/JCKFinland/connect/backend/internal/repository"
-    
-	driverservice "github.com/JCKFinland/connect/backend/internal/services/driver"
+
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	driverservice "github.com/JCKFinland/connect/backend/internal/services/driver"
 
 	"github.com/JCKFinland/connect/backend/internal/security"
 
@@ -31,13 +31,13 @@ import (
 
 	vehicleservice "github.com/JCKFinland/connect/backend/internal/services/vehicle"
 
+	dvassignmentservice "github.com/JCKFinland/connect/backend/internal/services/driver_vehicle_assignment"
+
 	assignment "github.com/JCKFinland/connect/backend/internal/services/assignment"
 
 	presence "github.com/JCKFinland/connect/backend/internal/services/presence"
 
 	rbac "github.com/JCKFinland/connect/backend/internal/services/rbac"
-
-	
 
 	"github.com/JCKFinland/connect/backend/pkg/logger"
 )
@@ -101,6 +101,8 @@ func main() {
 	fleetRepository := postgresrepo.NewFleetRepository(db)
 	vehicleRepo := postgresrepo.NewVehicleRepository(db)
 	driverRepo := postgresrepo.NewDriverRepository(db)
+	driverVehicleAssignmentRepo :=
+		postgresrepo.NewDriverVehicleAssignmentRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -136,7 +138,6 @@ func main() {
 	fleetService := fleetservice.NewService(fleetRepository)
 
 	vehicleService := vehicleservice.NewService(vehicleRepo)
-	
 
 	branchService := branchservice.NewService(
 		branchservice.Dependencies{
@@ -148,6 +149,11 @@ func main() {
 	driverService := driverservice.NewService(
 		driverRepo,
 	)
+
+	driverVehicleAssignmentService :=
+		dvassignmentservice.NewService(
+			driverVehicleAssignmentRepo,
+		)
 
 	// Tracks driver shifts, live maps, and online/offline status values.
 	presenceService := presence.NewService(
@@ -203,7 +209,11 @@ func main() {
 	driverAssignmentHandler := api.NewDriverAssignmentHandler(assignmentService)
 	fleetHandler := api.NewFleetHandler(fleetService)
 	vehicleHandler := api.NewVehicleHandler(vehicleService)
-	driverHandler := api.NewDriverHandler(driverService,)
+	driverHandler := api.NewDriverHandler(driverService)
+	driverVehicleAssignmentHandler :=
+		api.NewDriverVehicleAssignmentHandler(
+			driverVehicleAssignmentService,
+		)
 
 	// ----------------------------------------------------------------------
 	// Router
@@ -224,6 +234,7 @@ func main() {
 		fleetHandler,
 		vehicleHandler,
 		driverHandler,
+		driverVehicleAssignmentHandler,
 	)
 	// ----------------------------------------------------------------------
 	// HTTP Server Configuration

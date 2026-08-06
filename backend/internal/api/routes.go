@@ -24,6 +24,7 @@ func RegisterRoutes(
 	fleetHandler *FleetHandler,
 	vehicleHandler *VehicleHandler,
 	driverHandler *DriverHandler,
+	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 ) {
 
 	// Establishes a base versioning group to prevent breaking mobile client contracts during API updates.
@@ -174,6 +175,22 @@ func RegisterRoutes(
 			drivers.PUT("/:id", driverHandler.Update)
 
 			drivers.DELETE("/:id", driverHandler.Delete)
+		}
+
+		assignments := v1.Group("/driver-vehicle-assignments")
+
+		assignments.Use(authMiddleware.RequireAuth())
+
+		{
+			assignments.POST("", driverVehicleAssignmentHandler.Assign)
+
+			assignments.GET("", driverVehicleAssignmentHandler.List)
+
+			assignments.GET("/:id", driverVehicleAssignmentHandler.GetByID)
+
+			assignments.PATCH("/:id/release", driverVehicleAssignmentHandler.Release)
+
+			assignments.DELETE("/:id", driverVehicleAssignmentHandler.Delete)
 		}
 	}
 }

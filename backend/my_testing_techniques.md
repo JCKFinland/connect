@@ -646,4 +646,91 @@ WHERE deleted_at IS NULL;
 
 
 
+# Functional Testing
+
+1. Create Driver-Vehicle Assignment.
+
+POST /api/v1/driver-vehicle-assignments
+
+Headers:
+Authorization: Bearer <JWT>
+
+Content-Type: application/json
+
+Body:
+
+{
+  "company_id": "<company_id>",
+  "branch_id": "<branch_id>",
+  "fleet_id": "<fleet_id>",
+  "driver_id": "<driver_id>",
+  "vehicle_id": "<vehicle_id>",
+  "assigned_by": "<user_id>",
+  "notes": "Morning shift assignment"
+}
+
+Expected:
+201 Created
+
+# 2. List Assignments
+
+GET /api/v1/driver-vehicle-assignments
+
+Expected:
+200 OK
+
+# 3. Get Assignment
+
+GET /api/v1/driver-vehicle-assignments/{assignment_id}
+
+Expected:
+200 OK
+
+# 4. Release Assignment
+
+PATCH /api/v1/driver-vehicle-assignments/{assignment_id}/release
+
+Expected:
+200 OK
+
+Then verify:
+
+status = RELEASED
+is_active = false
+released_at != null
+
+# 5. Delete Assignment
+
+DELETE /api/v1/driver-vehicle-assignments/{assignment_id}
+
+Expected:
+200 OK
+
+# Database Verification
+
+After testing:
+
+SELECT
+    id,
+    driver_id,
+    vehicle_id,
+    status,
+    is_active,
+    assigned_at,
+    released_at
+FROM driver_vehicle_assignments;
+
+You should observe:
+
+Active assignments have:
+status = ACTIVE
+is_active = true
+released_at = NULL
+Released assignments have:
+status = RELEASED
+is_active = false
+released_at populated
+
+
+
 
