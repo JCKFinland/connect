@@ -9,7 +9,6 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 )
 
-// RegisterRoutes links the unified architecture together, mapping paths to controllers.
 func RegisterRoutes(
 	router *gin.Engine,
 	db *pgxpool.Pool,
@@ -25,6 +24,8 @@ func RegisterRoutes(
 	vehicleHandler *VehicleHandler,
 	driverHandler *DriverHandler,
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
+	tripHandler *TripHandler,
+	rideRequestHandler *RideRequestHandler,
 ) {
 
 	// Establishes a base versioning group to prevent breaking mobile client contracts during API updates.
@@ -191,6 +192,65 @@ func RegisterRoutes(
 			assignments.PATCH("/:id/release", driverVehicleAssignmentHandler.Release)
 
 			assignments.DELETE("/:id", driverVehicleAssignmentHandler.Delete)
+		}
+
+		// ---------------------------------------------------
+		// Trip Management Routes (/api/v1/trips/*)
+		// ---------------------------------------------------
+
+		trips := v1.Group("/trips")
+
+		trips.Use(authMiddleware.RequireAuth())
+
+		{
+			trips.POST("", tripHandler.CreateTrip)
+			trips.GET("", tripHandler.ListTrips)
+			trips.GET("/:id", tripHandler.GetTrip)
+			trips.PUT("/:id", tripHandler.UpdateTrip)
+			trips.DELETE("/:id", tripHandler.DeleteTrip)
+
+			trips.PATCH("/:id/status", tripHandler.UpdateTripStatus)
+			trips.POST("/:id/assign", tripHandler.AssignDriver)
+		}
+
+		// ---------------------------------------------------
+		// Ride Request Routes (/api/v1/ride-requests/*)
+		// ---------------------------------------------------
+
+		rideRequests := v1.Group("/ride-requests")
+
+		rideRequests.Use(authMiddleware.RequireAuth())
+
+		{
+			rideRequests.POST(
+				"",
+				rideRequestHandler.Create,
+			)
+
+			rideRequests.GET(
+				"",
+				rideRequestHandler.List,
+			)
+
+			rideRequests.GET(
+				"/:id",
+				rideRequestHandler.GetByID,
+			)
+
+			rideRequests.PUT(
+				"/:id",
+				rideRequestHandler.Update,
+			)
+
+			rideRequests.DELETE(
+				"/:id",
+				rideRequestHandler.Delete,
+			)
+
+			rideRequests.PATCH(
+				"/:id/status",
+				rideRequestHandler.UpdateStatus,
+			)
 		}
 	}
 }

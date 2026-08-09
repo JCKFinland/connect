@@ -1,0 +1,28 @@
+package models
+
+import "time"
+
+// RideRequest represents a customer's request for a ride.
+type RideRequest struct {
+	BaseModel
+
+	CustomerID string `db:"customer_id" json:"customer_id"`
+
+	PickupAddress   string  `db:"pickup_address" json:"pickup_address"`
+	PickupLatitude  float64 `db:"pickup_latitude" json:"pickup_latitude"`
+	PickupLongitude float64 `db:"pickup_longitude" json:"pickup_longitude"`
+
+	DestinationAddress   string  `db:"destination_address" json:"destination_address"`
+	DestinationLatitude  float64 `db:"destination_latitude" json:"destination_latitude"`
+	DestinationLongitude float64 `db:"destination_longitude" json:"destination_longitude"`
+
+	RequestedVehicleType string `db:"requested_vehicle_type" json:"requested_vehicle_type"`
+
+	PassengerCount int    `db:"passenger_count" json:"passenger_count"`
+	Status         string `db:"status" json:"status"`
+
+	Notes string `db:"notes" json:"notes"`
+
+	RequestedAt time.Time  `db:"requested_at" json:"requested_at"`
+	ExpiresAt   *time.Time `db:"expires_at" json:"expires_at,omitempty"`
+}

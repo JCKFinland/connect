@@ -33,6 +33,10 @@ import (
 
 	dvassignmentservice "github.com/JCKFinland/connect/backend/internal/services/driver_vehicle_assignment"
 
+	tripservice "github.com/JCKFinland/connect/backend/internal/services/trip"
+
+	rideRequestService "github.com/JCKFinland/connect/backend/internal/services/ride_request"
+
 	assignment "github.com/JCKFinland/connect/backend/internal/services/assignment"
 
 	presence "github.com/JCKFinland/connect/backend/internal/services/presence"
@@ -103,6 +107,8 @@ func main() {
 	driverRepo := postgresrepo.NewDriverRepository(db)
 	driverVehicleAssignmentRepo :=
 		postgresrepo.NewDriverVehicleAssignmentRepository(db)
+	tripRepo := postgresrepo.NewTripRepository(db)
+	rideRequestRepo := postgresrepo.NewRideRequestRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -150,10 +156,14 @@ func main() {
 		driverRepo,
 	)
 
-	driverVehicleAssignmentService :=
-		dvassignmentservice.NewService(
-			driverVehicleAssignmentRepo,
-		)
+	driverVehicleAssignmentService := dvassignmentservice.NewService(
+		driverVehicleAssignmentRepo)
+
+	tripService := tripservice.NewService(tripRepo)
+
+	rideRequestService := rideRequestService.NewService(
+		rideRequestRepo,
+	)
 
 	// Tracks driver shifts, live maps, and online/offline status values.
 	presenceService := presence.NewService(
@@ -214,6 +224,11 @@ func main() {
 		api.NewDriverVehicleAssignmentHandler(
 			driverVehicleAssignmentService,
 		)
+	tripHandler := api.NewTripHandler(tripService)
+
+	rideRequestHandler := api.NewRideRequestHandler(
+		rideRequestService,
+	)
 
 	// ----------------------------------------------------------------------
 	// Router
@@ -235,6 +250,8 @@ func main() {
 		vehicleHandler,
 		driverHandler,
 		driverVehicleAssignmentHandler,
+		tripHandler,
+		rideRequestHandler,
 	)
 	// ----------------------------------------------------------------------
 	// HTTP Server Configuration

@@ -28,6 +28,8 @@ func NewRouter(
 	vehicleHandler *VehicleHandler,
 	driverHandler *DriverHandler,
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
+	tripHandler *TripHandler,
+	rideRequestHandler *RideRequestHandler,
 ) *gin.Engine {
 
 	// Instantiates a blank Gin engine instance without default middleware (like default logger/recovery).
@@ -73,6 +75,8 @@ func NewRouter(
 		vehicleHandler,
 		driverHandler,
 		driverVehicleAssignmentHandler,
+		tripHandler,
+		rideRequestHandler,
 	)
 
 	// Returns the ready-to-run HTTP network multiplexer pool back to main.go.
