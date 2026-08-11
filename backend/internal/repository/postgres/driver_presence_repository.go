@@ -310,7 +310,7 @@ func (r *DriverPresenceRepository) ListAvailable(
 	}
 	defer rows.Close()
 
-	var drivers []*models.DriverPresence
+	drivers := make([]*models.DriverPresence, 0)
 
 	for rows.Next() {
 

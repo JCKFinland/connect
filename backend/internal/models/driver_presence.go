@@ -4,8 +4,6 @@ import "time"
 
 // DriverPresence represents the driver's live dispatch state.
 type DriverPresence struct {
-	BaseModel
-
 	DriverID string `db:"driver_id" json:"driver_id"`
 
 	CompanyID string `db:"company_id" json:"company_id"`
@@ -31,4 +29,8 @@ type DriverPresence struct {
 	Accuracy *float64 `db:"accuracy" json:"accuracy,omitempty"`
 
 	LastHeartbeatAt *time.Time `db:"last_heartbeat_at" json:"last_heartbeat_at,omitempty"`
+
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }

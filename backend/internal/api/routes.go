@@ -98,7 +98,9 @@ func RegisterRoutes(
 			driver.POST("/unassign", driverAssignmentHandler.Unassign)
 
 			// Updates operational statuses (e.g., changing from "Available" to "On Break").
+			driver.GET("/available", driverPresenceHandler.ListAvailable)
 			driver.PATCH("/availability", driverPresenceHandler.UpdateAvailability)
+
 		}
 
 		// ---------------------------------------------------

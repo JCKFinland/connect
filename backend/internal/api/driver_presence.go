@@ -194,3 +194,36 @@ func (h *DriverPresenceHandler) UpdateAvailability(
 		nil,
 	)
 }
+
+// ListAvailable returns drivers who are currently online
+// and available within the authenticated driver's company.
+func (h *DriverPresenceHandler) ListAvailable(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(
+			c,
+			"authenticated user not found",
+		)
+		return
+	}
+
+	drivers, err := h.service.ListAvailableForUser(
+		c.Request.Context(),
+		user.ID,
+	)
+	if err != nil {
+		response.BadRequest(
+			c,
+			err.Error(),
+		)
+		return
+	}
+
+	response.OK(
+		c,
+		"Available drivers retrieved successfully",
+		drivers,
+	)
+}
