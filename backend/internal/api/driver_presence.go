@@ -5,6 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	// Maps directly to the core driver state-machine business engine.
+	"github.com/JCKFinland/connect/backend/internal/middleware"
 	"github.com/JCKFinland/connect/backend/internal/services/presence"
 	"github.com/JCKFinland/connect/backend/pkg/response"
 )
@@ -26,36 +27,32 @@ func NewDriverPresenceHandler(
 }
 
 // GoOnline marks a driver active, letting dispatch algorithms calculate ride allocations for them.
-func (h *DriverPresenceHandler) GoOnline(
-	c *gin.Context,
-) {
-
-	var req presence.GoOnlineRequest
-
-	// Captures initial pairing criteria (e.g., driver ID, coordinates, vehicle specs) from body.
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(
-			c,
-			err.Error(),
-		)
+func (h *DriverPresenceHandler) GoOnline(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
 		return
 	}
 
-	// Persists changes through to business validation logic layers.
+	var req presence.GoOnlineRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	// The user identity comes from the authenticated JWT,
+	// never from the client request.
+	req.UserID = user.ID
+
 	if err := h.service.GoOnline(
 		c.Request.Context(),
 		req,
 	); err != nil {
-
-		response.BadRequest(
-			c,
-			err.Error(),
-		)
-
+		response.BadRequest(c, err.Error())
 		return
 	}
 
-	// Confirms the change back to the client app using an HTTP 200 OK wrapper.
 	response.OK(
 		c,
 		"Driver is now online",
@@ -69,6 +66,14 @@ func (h *DriverPresenceHandler) GoOffline(
 ) {
 
 	var req presence.GoOfflineRequest
+
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
+		response.Unauthorized(c, "authenticated user not found")
+		return
+	}
+
+	req.UserID = user.ID
 
 	// Validates the inbound payload request signature.
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -107,6 +112,14 @@ func (h *DriverPresenceHandler) Heartbeat(
 
 	var req presence.HeartbeatRequest
 
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
+		response.Unauthorized(c, "authenticated user not found")
+		return
+	}
+
+	req.UserID = user.ID
+
 	// Unmarshals periodic telemetry inputs (e.g., current location coordinates, battery status).
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(
@@ -143,6 +156,14 @@ func (h *DriverPresenceHandler) UpdateAvailability(
 ) {
 
 	var req presence.UpdateAvailabilityRequest
+
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
+		response.Unauthorized(c, "authenticated user not found")
+		return
+	}
+
+	req.UserID = user.ID
 
 	// Decodes operational state mutations.
 	if err := c.ShouldBindJSON(&req); err != nil {

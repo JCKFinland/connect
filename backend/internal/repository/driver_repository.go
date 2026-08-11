@@ -16,9 +16,16 @@ type DriverRepository interface {
 	) error
 
 	// GetByID returns a single driver by its unique identifier.
+	// GetByID returns a single driver by its unique identifier.
 	GetByID(
 		ctx context.Context,
 		id string,
+	) (*models.Driver, error)
+
+	// GetByUserID returns the driver associated with an authenticated user.
+	GetByUserID(
+		ctx context.Context,
+		userID string,
 	) (*models.Driver, error)
 
 	// List returns all non-deleted drivers.

@@ -9,7 +9,7 @@ func (s *Service) UpdateAvailability(
 
 	return s.presence.UpdateAvailability(
 		ctx,
-		req.DriverID,
+		req.UserID,
 		req.Status,
 		true,
 	)

@@ -9,6 +9,6 @@ func (s *Service) GoOffline(
 
 	return s.presence.SetOffline(
 		ctx,
-		req.DriverID,
+		req.UserID,
 	)
 }

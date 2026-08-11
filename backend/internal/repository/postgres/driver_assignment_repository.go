@@ -2,9 +2,10 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"time"
+	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
@@ -148,7 +149,7 @@ func (r *DriverAssignmentRepository) GetByID(
 		&a.UpdatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, repository.ErrNotFound
 	}
 
@@ -199,7 +200,7 @@ func (r *DriverAssignmentRepository) GetActiveByDriver(
 		&a.UpdatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, repository.ErrNotFound
 	}
 
@@ -249,8 +250,7 @@ func (r *DriverAssignmentRepository) GetActiveByVehicle(
 		&a.CreatedAt,
 		&a.UpdatedAt,
 	)
-
-	if err == sql.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, repository.ErrNotFound
 	}
 

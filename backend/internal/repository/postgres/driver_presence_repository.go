@@ -2,13 +2,13 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type DriverPresenceRepository struct {
@@ -124,7 +124,7 @@ func (r *DriverPresenceRepository) GetByDriverID(
 		&p.UpdatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, repository.ErrNotFound
 	}
 

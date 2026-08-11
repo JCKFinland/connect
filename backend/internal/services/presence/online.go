@@ -18,14 +18,16 @@ func (s *Service) GoOnline(
 
 	assignment, err := s.assignments.GetActiveByDriver(
 		ctx,
-		req.DriverID,
+		req.UserID,
 	)
 
 	if err == repository.ErrNotFound {
+
 		return ErrDriverAssignmentRequired
 	}
 
 	if err != nil {
+
 		return err
 	}
 
@@ -33,13 +35,21 @@ func (s *Service) GoOnline(
 		ctx,
 		assignment,
 	); err != nil {
+
 		return err
 	}
 
-	return s.presence.UpdateAvailability(
+	err = s.presence.UpdateAvailability(
 		ctx,
-		req.DriverID,
+		req.UserID,
 		StatusAvailable,
 		true,
 	)
+
+	if err != nil {
+
+		return err
+	}
+
+	return nil
 }

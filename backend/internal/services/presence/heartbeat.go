@@ -9,7 +9,7 @@ func (s *Service) Heartbeat(
 
 	return s.presence.UpdateHeartbeat(
 		ctx,
-		req.DriverID,
+		req.UserID,
 		req.Latitude,
 		req.Longitude,
 		req.Heading,

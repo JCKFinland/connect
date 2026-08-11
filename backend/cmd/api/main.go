@@ -170,6 +170,7 @@ func main() {
 		presence.Dependencies{
 			Config:      cfg,
 			Users:       userRepo,
+			Drivers:     driverRepo,
 			Presence:    driverPresenceRepo,
 			Assignments: driverAssignmentRepo,
 		},
