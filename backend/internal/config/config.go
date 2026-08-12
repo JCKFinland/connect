@@ -39,7 +39,13 @@ type Config struct {
 	App      AppConfig
 	Database DatabaseConfig
 	JWT      JWTConfig
+	Presence PresenceConfig
 	Log      LogConfig
+}
+
+// PresenceConfig contains real-time driver presence configuration.
+type PresenceConfig struct {
+	HeartbeatTimeout time.Duration
 }
 
 // Load loads the application configuration.
@@ -63,12 +69,19 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	heartbeatTimeout, err := time.ParseDuration(
+		GetEnv("PRESENCE_HEARTBEAT_TIMEOUT", "2m"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 
 		App: AppConfig{
 			Name: GetEnv("APP_NAME", "CONNECT"),
 			Env:  GetEnv("APP_ENV", "development"),
-			Port: GetEnv("APP_PORT", "8080"),
+			Port: GetEnv("APP_PORT", "8000"),
 		},
 
 		Database: DatabaseConfig{
@@ -89,6 +102,10 @@ func Load() (*Config, error) {
 
 		Log: LogConfig{
 			Level: GetEnv("LOG_LEVEL", "info"),
+		},
+
+		Presence: PresenceConfig{
+			HeartbeatTimeout: heartbeatTimeout,
 		},
 	}
 

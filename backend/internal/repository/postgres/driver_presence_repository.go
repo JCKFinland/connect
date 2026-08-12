@@ -203,7 +203,7 @@ func (r *DriverPresenceRepository) UpdateHeartbeat(
 	WHERE driver_id=$1
 	`
 
-	_, err := r.db.Exec(
+	tag, err := r.db.Exec(
 		ctx,
 		query,
 		driverID,
@@ -214,8 +214,15 @@ func (r *DriverPresenceRepository) UpdateHeartbeat(
 		accuracy,
 		time.Now().UTC(),
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if tag.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
 }
 
 func (r *DriverPresenceRepository) UpdateAvailability(

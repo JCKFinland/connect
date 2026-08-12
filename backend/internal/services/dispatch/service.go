@@ -1,12 +1,14 @@
 package dispatch
 
 import (
+	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Dependencies struct {
-	DB *pgxpool.Pool
+	DB     *pgxpool.Pool
+	Config *config.Config
 
 	RideRequests repository.RideRequestRepository
 	Assignments  repository.DriverAssignmentRepository
@@ -15,7 +17,8 @@ type Dependencies struct {
 }
 
 type Service struct {
-	db *pgxpool.Pool
+	db  *pgxpool.Pool
+	cfg *config.Config
 
 	rideRequests repository.RideRequestRepository
 	assignments  repository.DriverAssignmentRepository
@@ -27,11 +30,13 @@ func NewService(
 	deps Dependencies,
 ) *Service {
 	return &Service{
-		db: deps.DB,
+		db:  deps.DB,
+		cfg: deps.Config,
 
 		rideRequests: deps.RideRequests,
 		assignments:  deps.Assignments,
 		presence:     deps.Presence,
 		trips:        deps.Trips,
 	}
+
 }

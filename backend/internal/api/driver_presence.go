@@ -113,14 +113,14 @@ func (h *DriverPresenceHandler) Heartbeat(
 	var req presence.HeartbeatRequest
 
 	user, ok := middleware.CurrentUser(c)
-	if !ok {
-		response.Unauthorized(c, "authenticated user not found")
+	if !ok || user == nil {
+		response.Unauthorized(
+			c,
+			"authenticated user not found",
+		)
 		return
 	}
 
-	req.UserID = user.ID
-
-	// Unmarshals periodic telemetry inputs (e.g., current location coordinates, battery status).
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(
 			c,
@@ -129,7 +129,10 @@ func (h *DriverPresenceHandler) Heartbeat(
 		return
 	}
 
-	// Extends the driver's session lifetime index so they are not flagged as disconnected.
+	// Authentication determines the driver identity.
+	// Never trust the request body for this value.
+	req.UserID = user.ID
+
 	if err := h.service.Heartbeat(
 		c.Request.Context(),
 		req,
@@ -139,7 +142,6 @@ func (h *DriverPresenceHandler) Heartbeat(
 			c,
 			err.Error(),
 		)
-
 		return
 	}
 

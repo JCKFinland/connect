@@ -43,7 +43,10 @@ func (s *Service) DispatchRide(
 				rideRequestID,
 			)
 			if err != nil {
-				return fmt.Errorf("get ride request: %w", err)
+				return fmt.Errorf(
+					"get ride request: %w",
+					err,
+				)
 			}
 
 			if request.Status != "PENDING" {
@@ -52,7 +55,9 @@ func (s *Service) DispatchRide(
 				)
 			}
 
-			availableDrivers, err := presence.ListAllAvailable(ctx)
+			availableDrivers, err := presence.ListAllAvailable(
+				ctx,
+			)
 			if err != nil {
 				return fmt.Errorf(
 					"list available drivers: %w",
@@ -64,25 +69,49 @@ func (s *Service) DispatchRide(
 				return ErrNoAvailableDrivers
 			}
 
-			selected := availableDrivers[0]
+			now := time.Now().UTC()
+
+			var selected *models.DriverPresence
+
+			for _, candidate := range availableDrivers {
+
+				if candidate.LastHeartbeatAt == nil {
+					continue
+				}
+
+				if now.Sub(
+					*candidate.LastHeartbeatAt,
+				) > s.cfg.Presence.HeartbeatTimeout {
+					continue
+				}
+
+				selected = candidate
+				break
+			}
+
+			if selected == nil {
+				return ErrNoAvailableDrivers
+			}
 
 			assignment, err := assignments.GetActiveByDriver(
 				ctx,
 				selected.DriverID,
 			)
-			if errors.Is(err, repository.ErrNotFound) {
+			if errors.Is(
+				err,
+				repository.ErrNotFound,
+			) {
 				return fmt.Errorf(
 					"active assignment not found for selected driver",
 				)
 			}
+
 			if err != nil {
 				return fmt.Errorf(
 					"get selected driver assignment: %w",
 					err,
 				)
 			}
-
-			now := time.Now().UTC()
 
 			pickupAddress := request.PickupAddress
 			pickupLatitude := request.PickupLatitude

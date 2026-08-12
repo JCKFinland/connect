@@ -170,6 +170,7 @@ func main() {
 	dispatchService := dispatchservice.NewService(
 		dispatchservice.Dependencies{
 			DB:           db,
+			Config:       cfg,
 			RideRequests: rideRequestRepo,
 			Assignments:  driverAssignmentRepo,
 			Presence:     driverPresenceRepo,
