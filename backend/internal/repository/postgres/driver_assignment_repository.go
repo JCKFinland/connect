@@ -2,8 +2,8 @@ package postgres
 
 import (
 	"context"
-	"time"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,7 +13,7 @@ import (
 )
 
 type DriverAssignmentRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
 func NewDriverAssignmentRepository(

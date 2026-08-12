@@ -43,6 +43,8 @@ import (
 
 	rbac "github.com/JCKFinland/connect/backend/internal/services/rbac"
 
+	dispatchservice "github.com/JCKFinland/connect/backend/internal/services/dispatch"
+
 	"github.com/JCKFinland/connect/backend/pkg/logger"
 )
 
@@ -165,6 +167,18 @@ func main() {
 		rideRequestRepo,
 	)
 
+	dispatchService := dispatchservice.NewService(
+		dispatchservice.Dependencies{
+			DB:           db,
+			RideRequests: rideRequestRepo,
+			Assignments:  driverAssignmentRepo,
+			Presence:     driverPresenceRepo,
+			Trips:        tripRepo,
+		},
+	)
+
+	_ = dispatchService
+
 	// Tracks driver shifts, live maps, and online/offline status values.
 	presenceService := presence.NewService(
 		presence.Dependencies{
@@ -231,6 +245,10 @@ func main() {
 		rideRequestService,
 	)
 
+	dispatchHandler := api.NewDispatchHandler(
+		dispatchService,
+	)
+
 	// ----------------------------------------------------------------------
 	// Router
 	// ----------------------------------------------------------------------
@@ -253,6 +271,7 @@ func main() {
 		driverVehicleAssignmentHandler,
 		tripHandler,
 		rideRequestHandler,
+		dispatchHandler,
 	)
 	// ----------------------------------------------------------------------
 	// HTTP Server Configuration

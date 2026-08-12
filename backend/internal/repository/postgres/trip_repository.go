@@ -5,7 +5,7 @@ import (
 )
 
 type TripRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
 func NewTripRepository(db *pgxpool.Pool) *TripRepository {

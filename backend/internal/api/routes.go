@@ -26,6 +26,7 @@ func RegisterRoutes(
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 	tripHandler *TripHandler,
 	rideRequestHandler *RideRequestHandler,
+	dispatchHandler *DispatchHandler,
 ) {
 
 	// Establishes a base versioning group to prevent breaking mobile client contracts during API updates.
@@ -252,6 +253,12 @@ func RegisterRoutes(
 			rideRequests.PATCH(
 				"/:id/status",
 				rideRequestHandler.UpdateStatus,
+			)
+
+			rideRequests.POST(
+				"/:id/dispatch",
+				rbacMiddleware.RequirePermission("rides.dispatch"),
+				dispatchHandler.DispatchRide,
 			)
 		}
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 type DriverPresenceRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
 func NewDriverPresenceRepository(
@@ -340,4 +340,78 @@ func (r *DriverPresenceRepository) ListAvailable(
 	}
 
 	return drivers, rows.Err()
+}
+
+func (r *DriverPresenceRepository) ListAllAvailable(
+	ctx context.Context,
+) ([]*models.DriverPresence, error) {
+
+	query := `
+	SELECT
+		driver_id,
+		company_id,
+		branch_id,
+		vehicle_id,
+		assignment_id,
+		is_online,
+		availability_status,
+		latitude,
+		longitude,
+		heading,
+		speed,
+		accuracy,
+		last_heartbeat_at,
+		created_at,
+		updated_at
+	FROM driver_presence
+	WHERE is_online = TRUE
+	  AND availability_status = 'AVAILABLE'
+	ORDER BY updated_at DESC
+	`
+
+	rows, err := r.db.Query(
+		ctx,
+		query,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	drivers := make([]*models.DriverPresence, 0)
+
+	for rows.Next() {
+		var p models.DriverPresence
+
+		if err := rows.Scan(
+			&p.DriverID,
+			&p.CompanyID,
+			&p.BranchID,
+			&p.VehicleID,
+			&p.AssignmentID,
+			&p.IsOnline,
+			&p.AvailabilityStatus,
+			&p.Latitude,
+			&p.Longitude,
+			&p.Heading,
+			&p.Speed,
+			&p.Accuracy,
+			&p.LastHeartbeatAt,
+			&p.CreatedAt,
+			&p.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		drivers = append(
+			drivers,
+			&p,
+		)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return drivers, nil
 }

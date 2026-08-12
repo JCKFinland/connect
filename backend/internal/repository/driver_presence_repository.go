@@ -53,4 +53,8 @@ type DriverPresenceRepository interface {
 		ctx context.Context,
 		companyID string,
 	) ([]*models.DriverPresence, error)
+
+	ListAllAvailable(
+		ctx context.Context,
+	) ([]*models.DriverPresence, error)
 }
