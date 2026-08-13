@@ -175,6 +175,7 @@ func main() {
 			Assignments:  driverAssignmentRepo,
 			Presence:     driverPresenceRepo,
 			Trips:        tripRepo,
+			Vehicles:     vehicleRepo,
 		},
 	)
 

@@ -37,6 +37,11 @@ func (s *Service) DispatchRide(
 			assignments := postgresrepo.NewDriverAssignmentRepositoryWithDB(tx)
 			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
 			trips := postgresrepo.NewTripRepositoryWithDB(tx)
+			vehicles := postgresrepo.NewVehicleRepositoryWithDB(tx)
+
+			// ---------------------------------------------------------
+			// Load and validate ride request
+			// ---------------------------------------------------------
 
 			request, err := rideRequests.GetByID(
 				ctx,
@@ -55,6 +60,10 @@ func (s *Service) DispatchRide(
 				)
 			}
 
+			// ---------------------------------------------------------
+			// Find online and available drivers
+			// ---------------------------------------------------------
+
 			availableDrivers, err := presence.ListAllAvailable(
 				ctx,
 			)
@@ -68,6 +77,10 @@ func (s *Service) DispatchRide(
 			if len(availableDrivers) == 0 {
 				return ErrNoAvailableDrivers
 			}
+
+			// ---------------------------------------------------------
+			// Find first driver with a fresh heartbeat
+			// ---------------------------------------------------------
 
 			now := time.Now().UTC()
 
@@ -93,6 +106,10 @@ func (s *Service) DispatchRide(
 				return ErrNoAvailableDrivers
 			}
 
+			// ---------------------------------------------------------
+			// Load driver's active assignment
+			// ---------------------------------------------------------
+
 			assignment, err := assignments.GetActiveByDriver(
 				ctx,
 				selected.DriverID,
@@ -112,6 +129,47 @@ func (s *Service) DispatchRide(
 					err,
 				)
 			}
+
+			// ---------------------------------------------------------
+			// Load assigned vehicle
+			// ---------------------------------------------------------
+
+			vehicle, err := vehicles.GetByID(
+				ctx,
+				assignment.VehicleID,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"get assigned vehicle: %w",
+					err,
+				)
+			}
+
+			// ---------------------------------------------------------
+			// Vehicle eligibility
+			//
+			// Current first rule:
+			// STANDARD ride requests can be served by SEDAN vehicles.
+			// ---------------------------------------------------------
+
+			switch request.RequestedVehicleType {
+			case "STANDARD":
+				if vehicle.VehicleType != "SEDAN" {
+					return ErrNoAvailableDrivers
+				}
+
+			case "VAN":
+				if vehicle.VehicleType != "VAN" {
+					return ErrNoAvailableDrivers
+				}
+
+			default:
+				return ErrNoAvailableDrivers
+			}
+
+			// ---------------------------------------------------------
+			// Prepare trip data
+			// ---------------------------------------------------------
 
 			pickupAddress := request.PickupAddress
 			pickupLatitude := request.PickupLatitude
@@ -156,6 +214,10 @@ func (s *Service) DispatchRide(
 				IsActive: true,
 			}
 
+			// ---------------------------------------------------------
+			// Create trip
+			// ---------------------------------------------------------
+
 			if err := trips.Create(
 				ctx,
 				trip,
@@ -165,6 +227,10 @@ func (s *Service) DispatchRide(
 					err,
 				)
 			}
+
+			// ---------------------------------------------------------
+			// Mark driver busy
+			// ---------------------------------------------------------
 
 			if err := presence.UpdateAvailability(
 				ctx,
@@ -177,6 +243,10 @@ func (s *Service) DispatchRide(
 					err,
 				)
 			}
+
+			// ---------------------------------------------------------
+			// Accept ride request
+			// ---------------------------------------------------------
 
 			if err := rideRequests.UpdateStatus(
 				ctx,

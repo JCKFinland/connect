@@ -14,6 +14,7 @@ type Dependencies struct {
 	Assignments  repository.DriverAssignmentRepository
 	Presence     repository.DriverPresenceRepository
 	Trips        repository.TripRepository
+	Vehicles     repository.VehicleRepository
 }
 
 type Service struct {
@@ -24,6 +25,7 @@ type Service struct {
 	assignments  repository.DriverAssignmentRepository
 	presence     repository.DriverPresenceRepository
 	trips        repository.TripRepository
+	vehicles     repository.VehicleRepository
 }
 
 func NewService(
@@ -37,6 +39,7 @@ func NewService(
 		assignments:  deps.Assignments,
 		presence:     deps.Presence,
 		trips:        deps.Trips,
+		vehicles:     deps.Vehicles,
 	}
 
 }

@@ -11,7 +11,7 @@ import (
 
 // VehicleRepository implements repository.VehicleRepository.
 type VehicleRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
 // Compile-time interface check.
