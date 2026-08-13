@@ -13,17 +13,46 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-var ErrNoAvailableDrivers = errors.New(
-	"no available drivers found",
+var (
+	ErrNoAvailableDrivers = errors.New("no available drivers found")
 )
 
+const (
+	rideRequestStatusPending  = "PENDING"
+	rideRequestStatusAccepted = "ACCEPTED"
+
+	tripStatusAssigned = "ASSIGNED"
+
+	driverStatusBusy = "BUSY"
+)
+
+// DispatchRide finds the first fully eligible driver for a pending ride request
+// and atomically creates the trip, marks the driver busy, and accepts the request.
 func (s *Service) DispatchRide(
 	ctx context.Context,
 	rideRequestID string,
 ) (*models.Trip, error) {
 
+	if s == nil {
+		return nil, errors.New("dispatch service is required")
+	}
+
+	if s.db == nil {
+		return nil, errors.New("dispatch database is not configured")
+	}
+
+	if s.cfg == nil {
+		return nil, errors.New("dispatch configuration is not configured")
+	}
+
+	if s.cfg.Presence.HeartbeatTimeout <= 0 {
+		return nil, errors.New(
+			"presence heartbeat timeout must be greater than zero",
+		)
+	}
+
 	if rideRequestID == "" {
-		return nil, fmt.Errorf("ride request ID is required")
+		return nil, errors.New("ride request ID is required")
 	}
 
 	var dispatchedTrip *models.Trip
@@ -33,6 +62,7 @@ func (s *Service) DispatchRide(
 		s.db,
 		func(tx pgx.Tx) error {
 
+			// All repositories below use the same PostgreSQL transaction.
 			rideRequests := postgresrepo.NewRideRequestRepositoryWithDB(tx)
 			assignments := postgresrepo.NewDriverAssignmentRepositoryWithDB(tx)
 			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
@@ -40,7 +70,7 @@ func (s *Service) DispatchRide(
 			vehicles := postgresrepo.NewVehicleRepositoryWithDB(tx)
 
 			// ---------------------------------------------------------
-			// Load and validate ride request
+			// 1. Load and validate ride request
 			// ---------------------------------------------------------
 
 			request, err := rideRequests.GetByID(
@@ -54,19 +84,18 @@ func (s *Service) DispatchRide(
 				)
 			}
 
-			if request.Status != "PENDING" {
+			if request.Status != rideRequestStatusPending {
 				return fmt.Errorf(
-					"ride request must be PENDING before dispatch",
+					"ride request must be %s before dispatch",
+					rideRequestStatusPending,
 				)
 			}
 
 			// ---------------------------------------------------------
-			// Find online and available drivers
+			// 2. Get currently online + AVAILABLE candidates
 			// ---------------------------------------------------------
 
-			availableDrivers, err := presence.ListAllAvailable(
-				ctx,
-			)
+			availableDrivers, err := presence.ListAllAvailable(ctx)
 			if err != nil {
 				return fmt.Errorf(
 					"list available drivers: %w",
@@ -79,96 +108,107 @@ func (s *Service) DispatchRide(
 			}
 
 			// ---------------------------------------------------------
-			// Find first driver with a fresh heartbeat
+			// 3. Find first fully eligible candidate
+			//
+			// A candidate must have:
+			// - online + AVAILABLE presence
+			// - a recent heartbeat
+			// - an active driver/vehicle assignment
+			// - an existing assigned vehicle
+			// - a vehicle compatible with the requested ride type
 			// ---------------------------------------------------------
 
 			now := time.Now().UTC()
 
 			var selected *models.DriverPresence
+			var selectedAssignment *models.DriverAssignment
 
 			for _, candidate := range availableDrivers {
+
+				if candidate == nil {
+					continue
+				}
+
+				if candidate.DriverID == "" {
+					continue
+				}
 
 				if candidate.LastHeartbeatAt == nil {
 					continue
 				}
 
-				if now.Sub(
-					*candidate.LastHeartbeatAt,
-				) > s.cfg.Presence.HeartbeatTimeout {
+				heartbeatAge := now.Sub(
+					candidate.LastHeartbeatAt.UTC(),
+				)
+
+				// Ignore stale heartbeats.
+				if heartbeatAge > s.cfg.Presence.HeartbeatTimeout {
+					continue
+				}
+
+				// Ignore obviously invalid future heartbeat timestamps.
+				if heartbeatAge < 0 {
+					continue
+				}
+
+				candidateAssignment, err := assignments.GetActiveByDriver(
+					ctx,
+					candidate.DriverID,
+				)
+				if errors.Is(err, repository.ErrNotFound) {
+					continue
+				}
+
+				if err != nil {
+					return fmt.Errorf(
+						"get candidate driver assignment: %w",
+						err,
+					)
+				}
+
+				if candidateAssignment == nil ||
+					candidateAssignment.VehicleID == "" {
+					continue
+				}
+
+				vehicle, err := vehicles.GetByID(
+					ctx,
+					candidateAssignment.VehicleID,
+				)
+				if errors.Is(err, repository.ErrNotFound) {
+					continue
+				}
+
+				if err != nil {
+					return fmt.Errorf(
+						"get candidate vehicle: %w",
+						err,
+					)
+				}
+
+				if vehicle == nil || !vehicle.IsActive {
+					continue
+				}
+
+				if !isVehicleEligible(
+					request.RequestedVehicleType,
+					vehicle.VehicleType,
+				) {
 					continue
 				}
 
 				selected = candidate
+				selectedAssignment = candidateAssignment
+
 				break
 			}
 
-			if selected == nil {
+			if selected == nil || selectedAssignment == nil {
 				return ErrNoAvailableDrivers
 			}
 
 			// ---------------------------------------------------------
-			// Load driver's active assignment
-			// ---------------------------------------------------------
-
-			assignment, err := assignments.GetActiveByDriver(
-				ctx,
-				selected.DriverID,
-			)
-			if errors.Is(
-				err,
-				repository.ErrNotFound,
-			) {
-				return fmt.Errorf(
-					"active assignment not found for selected driver",
-				)
-			}
-
-			if err != nil {
-				return fmt.Errorf(
-					"get selected driver assignment: %w",
-					err,
-				)
-			}
-
-			// ---------------------------------------------------------
-			// Load assigned vehicle
-			// ---------------------------------------------------------
-
-			vehicle, err := vehicles.GetByID(
-				ctx,
-				assignment.VehicleID,
-			)
-			if err != nil {
-				return fmt.Errorf(
-					"get assigned vehicle: %w",
-					err,
-				)
-			}
-
-			// ---------------------------------------------------------
-			// Vehicle eligibility
-			//
-			// Current first rule:
-			// STANDARD ride requests can be served by SEDAN vehicles.
-			// ---------------------------------------------------------
-
-			switch request.RequestedVehicleType {
-			case "STANDARD":
-				if vehicle.VehicleType != "SEDAN" {
-					return ErrNoAvailableDrivers
-				}
-
-			case "VAN":
-				if vehicle.VehicleType != "VAN" {
-					return ErrNoAvailableDrivers
-				}
-
-			default:
-				return ErrNoAvailableDrivers
-			}
-
-			// ---------------------------------------------------------
-			// Prepare trip data
+			// 4. Build assigned trip
 			// ---------------------------------------------------------
 
 			pickupAddress := request.PickupAddress
@@ -191,14 +231,14 @@ func (s *Service) DispatchRide(
 				RideRequestID: request.ID,
 				CustomerID:    request.CustomerID,
 
-				DriverID:  assignment.DriverID,
-				VehicleID: assignment.VehicleID,
-				FleetID:   assignment.FleetID,
+				DriverID:  selectedAssignment.DriverID,
+				VehicleID: selectedAssignment.VehicleID,
+				FleetID:   selectedAssignment.FleetID,
 
-				CompanyID: assignment.CompanyID,
-				BranchID:  assignment.BranchID,
+				CompanyID: selectedAssignment.CompanyID,
+				BranchID:  selectedAssignment.BranchID,
 
-				Status:     "ASSIGNED",
+				Status:     tripStatusAssigned,
 				AssignedAt: now,
 
 				PickupAddress:   &pickupAddress,
@@ -215,7 +255,7 @@ func (s *Service) DispatchRide(
 			}
 
 			// ---------------------------------------------------------
-			// Create trip
+			// 5. Create trip
 			// ---------------------------------------------------------
 
 			if err := trips.Create(
@@ -229,13 +269,13 @@ func (s *Service) DispatchRide(
 			}
 
 			// ---------------------------------------------------------
-			// Mark driver busy
+			// 6. Mark selected driver BUSY
 			// ---------------------------------------------------------
 
 			if err := presence.UpdateAvailability(
 				ctx,
 				selected.DriverID,
-				"BUSY",
+				driverStatusBusy,
 				true,
 			); err != nil {
 				return fmt.Errorf(
@@ -245,13 +285,13 @@ func (s *Service) DispatchRide(
 			}
 
 			// ---------------------------------------------------------
-			// Accept ride request
+			// 7. Mark ride request ACCEPTED
 			// ---------------------------------------------------------
 
 			if err := rideRequests.UpdateStatus(
 				ctx,
 				request.ID,
-				"ACCEPTED",
+				rideRequestStatusAccepted,
 			); err != nil {
 				return fmt.Errorf(
 					"update ride request status: %w",
@@ -266,6 +306,12 @@ func (s *Service) DispatchRide(
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if dispatchedTrip == nil {
+		return nil, errors.New(
+			"dispatch completed without creating a trip",
+		)
 	}
 
 	return dispatchedTrip, nil
