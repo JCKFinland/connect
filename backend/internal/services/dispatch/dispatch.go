@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
@@ -122,6 +123,7 @@ func (s *Service) DispatchRide(
 
 			var selected *models.DriverPresence
 			var selectedAssignment *models.DriverAssignment
+			nearestDistanceKM := math.MaxFloat64
 
 			for _, candidate := range availableDrivers {
 
@@ -197,10 +199,25 @@ func (s *Service) DispatchRide(
 					continue
 				}
 
+				if candidate.Latitude == nil || candidate.Longitude == nil {
+					continue
+				}
+
+				candidateDistanceKM := distanceKM(
+					*candidate.Latitude,
+					*candidate.Longitude,
+					request.PickupLatitude,
+					request.PickupLongitude,
+				)
+
+				if candidateDistanceKM >= nearestDistanceKM {
+					continue
+				}
+
+				nearestDistanceKM = candidateDistanceKM
 				selected = candidate
 				selectedAssignment = candidateAssignment
 
-				break
 			}
 
 			if selected == nil || selectedAssignment == nil {
