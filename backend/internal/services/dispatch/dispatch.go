@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
+	"sort"
 	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
@@ -26,6 +26,12 @@ const (
 
 	driverStatusBusy = "BUSY"
 )
+
+type rankedCandidate struct {
+	presence   *models.DriverPresence
+	assignment *models.DriverAssignment
+	distanceKM float64
+}
 
 // DispatchRide finds the first fully eligible driver for a pending ride request
 // and atomically creates the trip, marks the driver busy, and accepts the request.
@@ -74,7 +80,7 @@ func (s *Service) DispatchRide(
 			// 1. Load and validate ride request
 			// ---------------------------------------------------------
 
-			request, err := rideRequests.GetByID(
+			request, err := rideRequests.GetByIDForUpdate(
 				ctx,
 				rideRequestID,
 			)
@@ -109,7 +115,7 @@ func (s *Service) DispatchRide(
 			}
 
 			// ---------------------------------------------------------
-			// 3. Find first fully eligible candidate
+			// 3. Evaluate and rank fully eligible candidates
 			//
 			// A candidate must have:
 			// - online + AVAILABLE presence
@@ -121,9 +127,15 @@ func (s *Service) DispatchRide(
 
 			now := time.Now().UTC()
 
-			var selected *models.DriverPresence
-			var selectedAssignment *models.DriverAssignment
-			nearestDistanceKM := math.MaxFloat64
+			candidates := make(
+				[]rankedCandidate,
+				0,
+				len(availableDrivers),
+			)
+
+			// ---------------------------------------------------------
+			// Evaluate all currently discoverable candidates.
+			// ---------------------------------------------------------
 
 			for _, candidate := range availableDrivers {
 
@@ -143,13 +155,15 @@ func (s *Service) DispatchRide(
 					candidate.LastHeartbeatAt.UTC(),
 				)
 
-				// Ignore stale heartbeats.
-				if heartbeatAge > s.cfg.Presence.HeartbeatTimeout {
+				// Ignore stale or invalid future heartbeat timestamps.
+				if heartbeatAge < 0 ||
+					heartbeatAge > s.cfg.Presence.HeartbeatTimeout {
 					continue
 				}
 
-				// Ignore obviously invalid future heartbeat timestamps.
-				if heartbeatAge < 0 {
+				// A dispatch candidate must have valid location data.
+				if candidate.Latitude == nil ||
+					candidate.Longitude == nil {
 					continue
 				}
 
@@ -199,10 +213,6 @@ func (s *Service) DispatchRide(
 					continue
 				}
 
-				if candidate.Latitude == nil || candidate.Longitude == nil {
-					continue
-				}
-
 				candidateDistanceKM := distanceKM(
 					*candidate.Latitude,
 					*candidate.Longitude,
@@ -210,14 +220,128 @@ func (s *Service) DispatchRide(
 					request.PickupLongitude,
 				)
 
-				if candidateDistanceKM >= nearestDistanceKM {
+				candidates = append(
+					candidates,
+					rankedCandidate{
+						presence:   candidate,
+						assignment: candidateAssignment,
+						distanceKM: candidateDistanceKM,
+					},
+				)
+			}
+
+			if len(candidates) == 0 {
+				return ErrNoAvailableDrivers
+			}
+
+			// ---------------------------------------------------------
+			// Rank nearest candidate first.
+			// ---------------------------------------------------------
+
+			sort.SliceStable(
+				candidates,
+				func(i, j int) bool {
+					return candidates[i].distanceKM <
+						candidates[j].distanceKM
+				},
+			)
+
+			// ---------------------------------------------------------
+			// Claim the nearest driver that is still available.
+			//
+			// SKIP LOCKED allows concurrent dispatch transactions to
+			// move on to the next candidate instead of blocking or
+			// double-assigning the same driver.
+			// ---------------------------------------------------------
+
+			var selected *models.DriverPresence
+			var selectedAssignment *models.DriverAssignment
+
+			for _, candidate := range candidates {
+
+				lockedDriver, err := presence.GetAvailableByDriverIDForUpdate(
+					ctx,
+					candidate.presence.DriverID,
+				)
+
+				if errors.Is(err, repository.ErrNotFound) {
+					// Another dispatch may have claimed or locked this driver.
+					// Try the next-nearest eligible candidate.
 					continue
 				}
 
-				nearestDistanceKM = candidateDistanceKM
-				selected = candidate
-				selectedAssignment = candidateAssignment
+				if err != nil {
+					return fmt.Errorf(
+						"lock candidate driver: %w",
+						err,
+					)
+				}
 
+				// Re-check heartbeat freshness after acquiring the lock.
+				if lockedDriver.LastHeartbeatAt == nil {
+					continue
+				}
+
+				lockedHeartbeatAge := now.Sub(
+					lockedDriver.LastHeartbeatAt.UTC(),
+				)
+
+				if lockedHeartbeatAge < 0 ||
+					lockedHeartbeatAge > s.cfg.Presence.HeartbeatTimeout {
+					continue
+				}
+
+				lockedAssignment, err := assignments.GetActiveByDriver(
+					ctx,
+					lockedDriver.DriverID,
+				)
+				if errors.Is(err, repository.ErrNotFound) {
+					continue
+				}
+
+				if err != nil {
+					return fmt.Errorf(
+						"recheck locked driver assignment: %w",
+						err,
+					)
+				}
+
+				if lockedAssignment == nil ||
+					lockedAssignment.VehicleID == "" {
+					continue
+				}
+
+				lockedVehicle, err := vehicles.GetByID(
+					ctx,
+					lockedAssignment.VehicleID,
+				)
+				if errors.Is(err, repository.ErrNotFound) {
+					continue
+				}
+
+				if err != nil {
+					return fmt.Errorf(
+						"recheck locked driver vehicle: %w",
+						err,
+					)
+				}
+
+				if lockedVehicle == nil ||
+					!lockedVehicle.IsActive {
+					continue
+				}
+
+				if !isVehicleEligible(
+					request.RequestedVehicleType,
+					lockedVehicle.VehicleType,
+				) {
+					continue
+				}
+
+				selected = lockedDriver
+				selectedAssignment = lockedAssignment
+
+				break
 			}
 
 			if selected == nil || selectedAssignment == nil {

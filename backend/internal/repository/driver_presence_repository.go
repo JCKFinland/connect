@@ -17,6 +17,16 @@ type DriverPresenceRepository interface {
 		driverID string,
 	) (*models.DriverPresence, error)
 
+	// GetAvailableByDriverIDForUpdate locks and returns one currently
+	// available driver for dispatch.
+	//
+	// Implementations should return repository.ErrNotFound when the driver
+	// is unavailable or already locked by another dispatch transaction.
+	GetAvailableByDriverIDForUpdate(
+		ctx context.Context,
+		driverID string,
+	) (*models.DriverPresence, error)
+
 	Update(
 		ctx context.Context,
 		presence *models.DriverPresence,

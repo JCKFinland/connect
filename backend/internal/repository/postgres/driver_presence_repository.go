@@ -355,26 +355,26 @@ func (r *DriverPresenceRepository) ListAllAvailable(
 
 	query := `
 	SELECT
-		driver_id,
-		company_id,
-		branch_id,
-		vehicle_id,
-		assignment_id,
-		is_online,
-		availability_status,
-		latitude,
-		longitude,
-		heading,
-		speed,
-		accuracy,
-		last_heartbeat_at,
-		created_at,
-		updated_at
-	FROM driver_presence
-	WHERE is_online = TRUE
-	  AND availability_status = 'AVAILABLE'
-	ORDER BY updated_at DESC
-	`
+    driver_id,
+    company_id,
+    branch_id,
+    vehicle_id,
+    assignment_id,
+    is_online,
+    availability_status,
+    latitude,
+    longitude,
+    heading,
+    speed,
+    accuracy,
+    last_heartbeat_at,
+    created_at,
+    updated_at
+FROM driver_presence
+WHERE is_online = TRUE
+  AND availability_status = 'AVAILABLE'
+ORDER BY updated_at DESC
+`
 
 	rows, err := r.db.Query(
 		ctx,
