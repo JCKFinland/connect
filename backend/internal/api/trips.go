@@ -426,3 +426,41 @@ func (h *TripHandler) AssignDriver(c *gin.Context) {
 	})
 
 }
+
+// ListTripEvents handles GET /api/v1/trips/:id/events.
+func (h *TripHandler) ListTripEvents(c *gin.Context) {
+	id := c.Param("id")
+
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Trip ID is required",
+		})
+		return
+	}
+
+	events, err := h.service.ListEvents(
+		c.Request.Context(),
+		id,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "Trip not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    events,
+	})
+}

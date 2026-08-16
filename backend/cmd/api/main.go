@@ -111,6 +111,7 @@ func main() {
 		postgresrepo.NewDriverVehicleAssignmentRepository(db)
 	tripRepo := postgresrepo.NewTripRepository(db)
 	rideRequestRepo := postgresrepo.NewRideRequestRepository(db)
+	tripEventRepo := postgresrepo.NewTripEventRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -167,6 +168,7 @@ func main() {
 			Trips:        tripRepo,
 			RideRequests: rideRequestRepo,
 			Presence:     driverPresenceRepo,
+			TripEvents:   tripEventRepo,
 		},
 	)
 

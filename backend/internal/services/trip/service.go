@@ -54,6 +54,11 @@ type Service interface {
 		driverID string,
 		vehicleID string,
 	) error
+
+	ListEvents(
+		ctx context.Context,
+		tripID string,
+	) ([]*models.TripEvent, error)
 }
 
 // Dependencies contains the resources required by the trip service.
@@ -63,6 +68,7 @@ type Dependencies struct {
 	Trips        repository.TripRepository
 	RideRequests repository.RideRequestRepository
 	Presence     repository.DriverPresenceRepository
+	TripEvents   repository.TripEventRepository
 }
 
 // tripService implements Service.
@@ -72,6 +78,7 @@ type tripService struct {
 	repo         repository.TripRepository
 	rideRequests repository.RideRequestRepository
 	presence     repository.DriverPresenceRepository
+	tripEvents   repository.TripEventRepository
 }
 
 // NewService creates a new Trip service.
@@ -84,6 +91,7 @@ func NewService(
 		repo:         deps.Trips,
 		rideRequests: deps.RideRequests,
 		presence:     deps.Presence,
+		tripEvents:   deps.TripEvents,
 	}
 }
 

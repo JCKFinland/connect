@@ -214,6 +214,7 @@ func RegisterRoutes(
 
 			trips.PATCH("/:id/status", tripHandler.UpdateTripStatus)
 			trips.POST("/:id/assign", tripHandler.AssignDriver)
+			trips.GET("/:id/events", tripHandler.ListTripEvents)
 		}
 
 		// ---------------------------------------------------
