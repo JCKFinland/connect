@@ -5,13 +5,20 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Service defines Trip business operations.
 type Service interface {
-	Create(ctx context.Context, trip *models.Trip) error
+	Create(
+		ctx context.Context,
+		trip *models.Trip,
+	) error
 
-	GetByID(ctx context.Context, id string) (*models.Trip, error)
+	GetByID(
+		ctx context.Context,
+		id string,
+	) (*models.Trip, error)
 
 	List(
 		ctx context.Context,
@@ -24,9 +31,15 @@ type Service interface {
 		offset int,
 	) ([]*models.Trip, error)
 
-	Update(ctx context.Context, trip *models.Trip) error
+	Update(
+		ctx context.Context,
+		trip *models.Trip,
+	) error
 
-	Delete(ctx context.Context, id string) error
+	Delete(
+		ctx context.Context,
+		id string,
+	) error
 
 	UpdateStatus(
 		ctx context.Context,
@@ -42,15 +55,34 @@ type Service interface {
 	) error
 }
 
+// Dependencies contains the resources required by the trip service.
+type Dependencies struct {
+	DB *pgxpool.Pool
+
+	Trips        repository.TripRepository
+	RideRequests repository.RideRequestRepository
+	Presence     repository.DriverPresenceRepository
+}
+
 // tripService implements Service.
 type tripService struct {
-	repo repository.TripRepository
+	db *pgxpool.Pool
+
+	repo         repository.TripRepository
+	rideRequests repository.RideRequestRepository
+	presence     repository.DriverPresenceRepository
 }
 
 // NewService creates a new Trip service.
-func NewService(repo repository.TripRepository) Service {
+func NewService(
+	deps Dependencies,
+) Service {
 	return &tripService{
-		repo: repo,
+		db: deps.DB,
+
+		repo:         deps.Trips,
+		rideRequests: deps.RideRequests,
+		presence:     deps.Presence,
 	}
 }
 

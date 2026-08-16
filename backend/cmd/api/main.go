@@ -161,7 +161,14 @@ func main() {
 	driverVehicleAssignmentService := dvassignmentservice.NewService(
 		driverVehicleAssignmentRepo)
 
-	tripService := tripservice.NewService(tripRepo)
+	tripService := tripservice.NewService(
+		tripservice.Dependencies{
+			DB:           db,
+			Trips:        tripRepo,
+			RideRequests: rideRequestRepo,
+			Presence:     driverPresenceRepo,
+		},
+	)
 
 	rideRequestService := rideRequestService.NewService(
 		rideRequestRepo,
