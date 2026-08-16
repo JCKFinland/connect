@@ -169,6 +169,7 @@ func main() {
 			RideRequests: rideRequestRepo,
 			Presence:     driverPresenceRepo,
 			TripEvents:   tripEventRepo,
+			UserRoles:    userRoleRepo,
 		},
 	)
 

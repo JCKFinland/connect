@@ -58,6 +58,7 @@ type Service interface {
 	ListEvents(
 		ctx context.Context,
 		tripID string,
+		userID string,
 	) ([]*models.TripEvent, error)
 }
 
@@ -69,6 +70,7 @@ type Dependencies struct {
 	RideRequests repository.RideRequestRepository
 	Presence     repository.DriverPresenceRepository
 	TripEvents   repository.TripEventRepository
+	UserRoles    repository.UserRoleRepository
 }
 
 // tripService implements Service.
@@ -79,6 +81,7 @@ type tripService struct {
 	rideRequests repository.RideRequestRepository
 	presence     repository.DriverPresenceRepository
 	tripEvents   repository.TripEventRepository
+	userRoles    repository.UserRoleRepository
 }
 
 // NewService creates a new Trip service.
@@ -92,6 +95,7 @@ func NewService(
 		rideRequests: deps.RideRequests,
 		presence:     deps.Presence,
 		tripEvents:   deps.TripEvents,
+		userRoles:    deps.UserRoles,
 	}
 }
 

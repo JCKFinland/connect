@@ -439,11 +439,30 @@ func (h *TripHandler) ListTripEvents(c *gin.Context) {
 		return
 	}
 
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
 	events, err := h.service.ListEvents(
 		c.Request.Context(),
 		id,
+		user.ID,
 	)
 	if err != nil {
+
+		if errors.Is(err, trip.ErrTripEventAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to view this trip's events",
+			})
+			return
+		}
+
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
