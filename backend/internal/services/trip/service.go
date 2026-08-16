@@ -45,6 +45,7 @@ type Service interface {
 		ctx context.Context,
 		id string,
 		status string,
+		performedByUserID string,
 	) error
 
 	AssignDriver(

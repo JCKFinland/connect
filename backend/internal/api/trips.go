@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/JCKFinland/connect/backend/internal/middleware"
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/services/trip"
 )
@@ -327,6 +328,15 @@ func (h *TripHandler) UpdateTripStatus(c *gin.Context) {
 		return
 	}
 
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
 	var req trip.UpdateTripStatusRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -342,7 +352,9 @@ func (h *TripHandler) UpdateTripStatus(c *gin.Context) {
 		c.Request.Context(),
 		id,
 		req.Status,
+		user.ID,
 	); err != nil {
+
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -362,7 +374,6 @@ func (h *TripHandler) UpdateTripStatus(c *gin.Context) {
 		"success": true,
 		"message": "Trip status updated successfully",
 	})
-
 }
 
 // AssignDriver handles POST /api/v1/trips/:id/assign.

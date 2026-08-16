@@ -2,7 +2,11 @@ package trip
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
+
+	"github.com/JCKFinland/connect/backend/internal/models"
 
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/jackc/pgx/v5"
@@ -30,23 +34,33 @@ const (
 // PostgreSQL transaction:
 //
 //   - COMPLETED:
-//       - mark trip COMPLETED
-//       - maintain completed_at through the repository
-//       - mark trip inactive
-//       - release driver back to AVAILABLE
+//
+//   - mark trip COMPLETED
+//
+//   - maintain completed_at through the repository
+//
+//   - mark trip inactive
+//
+//   - release driver back to AVAILABLE
 //
 //   - CANCELLED:
-//       - mark trip CANCELLED
-//       - maintain cancelled_at through the repository
-//       - mark trip inactive
-//       - mark the source ride request CANCELLED
-//       - release driver back to AVAILABLE
+//
+//   - mark trip CANCELLED
+//
+//   - maintain cancelled_at through the repository
+//
+//   - mark trip inactive
+//
+//   - mark the source ride request CANCELLED
+//
+//   - release driver back to AVAILABLE
 //
 // If any operation fails, the entire transaction is rolled back.
 func (s *tripService) UpdateStatus(
 	ctx context.Context,
 	id string,
 	newStatus string,
+	performedByUserID string,
 ) error {
 
 	if id == "" {
@@ -74,6 +88,7 @@ func (s *tripService) UpdateStatus(
 			trips := postgresrepo.NewTripRepositoryWithDB(tx)
 			rideRequests := postgresrepo.NewRideRequestRepositoryWithDB(tx)
 			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
+			tripEvents := postgresrepo.NewTripEventRepositoryWithDB(tx)
 
 			// ---------------------------------------------------------
 			// Lock trip row
@@ -121,6 +136,42 @@ func (s *tripService) UpdateStatus(
 					"update trip status: %w",
 					err,
 				)
+			}
+			eventType, ok := eventTypeForStatus(newStatus)
+			if ok {
+				metadata, err := json.Marshal(
+					map[string]string{
+						"previous_status": currentTrip.Status,
+						"new_status":      newStatus,
+					},
+				)
+				if err != nil {
+					return fmt.Errorf(
+						"marshal trip event metadata: %w",
+						err,
+					)
+				}
+
+				event := &models.TripEvent{
+					TripID:     currentTrip.ID,
+					EventType:  eventType,
+					Metadata:   metadata,
+					OccurredAt: time.Now().UTC(),
+				}
+
+				if performedByUserID != "" {
+					event.PerformedByUserID = &performedByUserID
+				}
+
+				if err := tripEvents.Create(
+					ctx,
+					event,
+				); err != nil {
+					return fmt.Errorf(
+						"create trip lifecycle event: %w",
+						err,
+					)
+				}
 			}
 
 			// ---------------------------------------------------------
