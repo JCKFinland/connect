@@ -20,8 +20,26 @@ type Service interface {
 		id string,
 	) (*models.Trip, error)
 
+	GetByIDAuthorized(
+		ctx context.Context,
+		tripID string,
+		userID string,
+	) (*models.Trip, error)
+
 	List(
 		ctx context.Context,
+		companyID string,
+		branchID string,
+		status string,
+		driverID string,
+		customerID string,
+		limit int,
+		offset int,
+	) ([]*models.Trip, error)
+
+	ListAuthorized(
+		ctx context.Context,
+		userID string,
 		companyID string,
 		branchID string,
 		status string,

@@ -83,6 +83,7 @@ func (h *TripHandler) CreateTrip(c *gin.Context) {
 }
 
 // GetTrip handles GET /api/v1/trips/:id.
+
 func (h *TripHandler) GetTrip(c *gin.Context) {
 	id := c.Param("id")
 
@@ -94,11 +95,30 @@ func (h *TripHandler) GetTrip(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.GetByID(
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
+	result, err := h.service.GetByIDAuthorized(
 		c.Request.Context(),
 		id,
+		user.ID,
 	)
 	if err != nil {
+
+		if errors.Is(err, trip.ErrTripAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to view this trip",
+			})
+			return
+		}
+
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -123,6 +143,15 @@ func (h *TripHandler) GetTrip(c *gin.Context) {
 
 // ListTrips handles GET /api/v1/trips.
 func (h *TripHandler) ListTrips(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
 	companyID := c.Query("company_id")
 	branchID := c.Query("branch_id")
 	status := c.Query("status")
@@ -158,8 +187,9 @@ func (h *TripHandler) ListTrips(c *gin.Context) {
 		offset = parsed
 	}
 
-	results, err := h.service.List(
+	results, err := h.service.ListAuthorized(
 		c.Request.Context(),
+		user.ID,
 		companyID,
 		branchID,
 		status,
@@ -169,6 +199,14 @@ func (h *TripHandler) ListTrips(c *gin.Context) {
 		offset,
 	)
 	if err != nil {
+		if errors.Is(err, trip.ErrTripAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to list trips",
+			})
+			return
+		}
+
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -185,7 +223,62 @@ func (h *TripHandler) ListTrips(c *gin.Context) {
 			"count":  len(results),
 		},
 	})
+}
 
+// ListTripEvents handles GET /api/v1/trips/:id/events.
+func (h *TripHandler) ListTripEvents(c *gin.Context) {
+	id := c.Param("id")
+
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Trip ID is required",
+		})
+		return
+	}
+
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
+	events, err := h.service.ListEvents(
+		c.Request.Context(),
+		id,
+		user.ID,
+	)
+	if err != nil {
+		if errors.Is(err, trip.ErrTripEventAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to view this trip's events",
+			})
+			return
+		}
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "Trip not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    events,
+	})
 }
 
 // UpdateTrip handles PUT /api/v1/trips/:id.
@@ -425,61 +518,4 @@ func (h *TripHandler) AssignDriver(c *gin.Context) {
 		"message": "Driver and vehicle assigned successfully",
 	})
 
-}
-
-// ListTripEvents handles GET /api/v1/trips/:id/events.
-func (h *TripHandler) ListTripEvents(c *gin.Context) {
-	id := c.Param("id")
-
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "Trip ID is required",
-		})
-		return
-	}
-
-	user, ok := middleware.CurrentUser(c)
-	if !ok || user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "authenticated user not found",
-		})
-		return
-	}
-
-	events, err := h.service.ListEvents(
-		c.Request.Context(),
-		id,
-		user.ID,
-	)
-	if err != nil {
-
-		if errors.Is(err, trip.ErrTripEventAccessDenied) {
-			c.JSON(http.StatusForbidden, gin.H{
-				"success": false,
-				"message": "You are not authorized to view this trip's events",
-			})
-			return
-		}
-
-		if errors.Is(err, pgx.ErrNoRows) {
-			c.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"message": "Trip not found",
-			})
-			return
-		}
-
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    events,
-	})
 }
