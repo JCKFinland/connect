@@ -25,6 +25,15 @@ func NewTripHandler(service trip.Service) *TripHandler {
 
 // CreateTrip handles POST /api/v1/trips.
 func (h *TripHandler) CreateTrip(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
 	var req trip.CreateTripRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -63,10 +72,20 @@ func (h *TripHandler) CreateTrip(c *gin.Context) {
 		EstimatedDurationSeconds: req.EstimatedDurationSeconds,
 	}
 
-	if err := h.service.Create(
+	if err := h.service.CreateAuthorized(
 		c.Request.Context(),
 		newTrip,
+		user.ID,
 	); err != nil {
+
+		if errors.Is(err, trip.ErrTripMutationAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to create trips",
+			})
+			return
+		}
+
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -79,7 +98,6 @@ func (h *TripHandler) CreateTrip(c *gin.Context) {
 		"message": "Trip created successfully",
 		"data":    newTrip,
 	})
-
 }
 
 // GetTrip handles GET /api/v1/trips/:id.
@@ -293,6 +311,15 @@ func (h *TripHandler) UpdateTrip(c *gin.Context) {
 		return
 	}
 
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
 	var req trip.UpdateTripRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -349,10 +376,20 @@ func (h *TripHandler) UpdateTrip(c *gin.Context) {
 	existingTrip.ActualDistanceMeters = req.ActualDistanceMeters
 	existingTrip.ActualDurationSeconds = req.ActualDurationSeconds
 
-	if err := h.service.Update(
+	if err := h.service.UpdateAuthorized(
 		c.Request.Context(),
 		existingTrip,
+		user.ID,
 	); err != nil {
+
+		if errors.Is(err, trip.ErrTripMutationAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to update trips",
+			})
+			return
+		}
+
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -373,7 +410,6 @@ func (h *TripHandler) UpdateTrip(c *gin.Context) {
 		"message": "Trip updated successfully",
 		"data":    existingTrip,
 	})
-
 }
 
 // DeleteTrip handles DELETE /api/v1/trips/:id.
@@ -388,10 +424,29 @@ func (h *TripHandler) DeleteTrip(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.Delete(
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
+	if err := h.service.DeleteAuthorized(
 		c.Request.Context(),
 		id,
+		user.ID,
 	); err != nil {
+
+		if errors.Is(err, trip.ErrTripMutationAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to delete trips",
+			})
+			return
+		}
+
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -407,6 +462,11 @@ func (h *TripHandler) DeleteTrip(c *gin.Context) {
 		})
 		return
 	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Trip deleted successfully",
+	})
 }
 
 // UpdateTripStatus handles PATCH /api/v1/trips/:id/status.
@@ -448,6 +508,14 @@ func (h *TripHandler) UpdateTripStatus(c *gin.Context) {
 		user.ID,
 	); err != nil {
 
+		if errors.Is(err, trip.ErrTripStatusAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to update this trip's status",
+			})
+			return
+		}
+
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -481,6 +549,15 @@ func (h *TripHandler) AssignDriver(c *gin.Context) {
 		return
 	}
 
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
 	var req trip.AssignDriverRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -492,12 +569,22 @@ func (h *TripHandler) AssignDriver(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.AssignDriver(
+	if err := h.service.AssignDriverAuthorized(
 		c.Request.Context(),
 		id,
 		req.DriverID,
 		req.VehicleID,
+		user.ID,
 	); err != nil {
+
+		if errors.Is(err, trip.ErrTripMutationAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to assign drivers to trips",
+			})
+			return
+		}
+
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -517,5 +604,4 @@ func (h *TripHandler) AssignDriver(c *gin.Context) {
 		"success": true,
 		"message": "Driver and vehicle assigned successfully",
 	})
-
 }

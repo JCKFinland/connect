@@ -71,3 +71,24 @@ func (s *tripService) Create(
 
 	return s.repo.Create(ctx, trip)
 }
+
+// CreateAuthorized creates a trip only when the authenticated user
+// has operational trip-management privileges.
+func (s *tripService) CreateAuthorized(
+	ctx context.Context,
+	trip *models.Trip,
+	userID string,
+) error {
+
+	if err := s.authorizeOperationalMutation(
+		ctx,
+		userID,
+	); err != nil {
+		return err
+	}
+
+	return s.Create(
+		ctx,
+		trip,
+	)
+}

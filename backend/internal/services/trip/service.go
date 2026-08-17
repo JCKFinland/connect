@@ -15,6 +15,12 @@ type Service interface {
 		trip *models.Trip,
 	) error
 
+	CreateAuthorized(
+		ctx context.Context,
+		trip *models.Trip,
+		userID string,
+	) error
+
 	GetByID(
 		ctx context.Context,
 		id string,
@@ -59,6 +65,12 @@ type Service interface {
 		id string,
 	) error
 
+	DeleteAuthorized(
+		ctx context.Context,
+		id string,
+		userID string,
+	) error
+
 	UpdateStatus(
 		ctx context.Context,
 		id string,
@@ -73,11 +85,25 @@ type Service interface {
 		vehicleID string,
 	) error
 
+	AssignDriverAuthorized(
+		ctx context.Context,
+		id string,
+		driverID string,
+		vehicleID string,
+		userID string,
+	) error
+
 	ListEvents(
 		ctx context.Context,
 		tripID string,
 		userID string,
 	) ([]*models.TripEvent, error)
+
+	UpdateAuthorized(
+		ctx context.Context,
+		trip *models.Trip,
+		userID string,
+	) error
 }
 
 // Dependencies contains the resources required by the trip service.

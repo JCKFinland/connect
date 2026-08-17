@@ -3,6 +3,7 @@ package trip
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,6 +27,10 @@ const (
 	driverAvailabilityAvailable = "AVAILABLE"
 
 	rideRequestStatusCancelled = "CANCELLED"
+)
+
+var ErrTripStatusAccessDenied = errors.New(
+	"trip status access denied",
 )
 
 // UpdateStatus validates and atomically applies a trip lifecycle transition.
@@ -80,6 +85,21 @@ func (s *tripService) UpdateStatus(
 		)
 	}
 
+	if performedByUserID == "" {
+		return fmt.Errorf("performed by user ID is required")
+	}
+
+	roles, err := s.userRoles.GetUserRoles(
+		ctx,
+		performedByUserID,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"get user roles for trip status update: %w",
+			err,
+		)
+	}
+
 	return postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
@@ -103,6 +123,14 @@ func (s *tripService) UpdateStatus(
 					"get trip for status update: %w",
 					err,
 				)
+			}
+
+			if !canUpdateTripStatus(
+				roles,
+				performedByUserID,
+				currentTrip,
+			) {
+				return ErrTripStatusAccessDenied
 			}
 
 			// ---------------------------------------------------------
@@ -304,4 +332,36 @@ func validateStatusTransition(
 		currentStatus,
 		newStatus,
 	)
+}
+
+func canUpdateTripStatus(
+	roles []string,
+	userID string,
+	currentTrip *models.Trip,
+) bool {
+
+	if currentTrip == nil || userID == "" {
+		return false
+	}
+
+	isDriver := false
+
+	for _, role := range roles {
+		switch role {
+
+		case "SYSTEM_ADMIN",
+			"COMPANY_ADMIN",
+			"DISPATCHER":
+			return true
+
+		case "DRIVER":
+			isDriver = true
+		}
+	}
+
+	if isDriver && currentTrip.DriverID == userID {
+		return true
+	}
+
+	return false
 }
