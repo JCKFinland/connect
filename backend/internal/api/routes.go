@@ -246,11 +246,6 @@ func RegisterRoutes(
 				rideRequestHandler.Update,
 			)
 
-			rideRequests.DELETE(
-				"/:id",
-				rideRequestHandler.Delete,
-			)
-
 			rideRequests.PATCH(
 				"/:id/status",
 				rideRequestHandler.UpdateStatus,

@@ -2,16 +2,24 @@ package ride_request
 
 import "github.com/JCKFinland/connect/backend/internal/repository"
 
-// Service provides ride request business operations.
-type Service struct {
-	repo repository.RideRequestRepository
+// Dependencies contains repositories required by the ride-request service.
+type Dependencies struct {
+	RideRequests repository.RideRequestRepository
+	UserRoles    repository.UserRoleRepository
 }
 
-// NewService creates a new ride request service.
+// Service provides ride-request business operations.
+type Service struct {
+	repo      repository.RideRequestRepository
+	userRoles repository.UserRoleRepository
+}
+
+// NewService creates a new ride-request service.
 func NewService(
-	repo repository.RideRequestRepository,
+	deps Dependencies,
 ) *Service {
 	return &Service{
-		repo: repo,
+		repo:      deps.RideRequests,
+		userRoles: deps.UserRoles,
 	}
 }

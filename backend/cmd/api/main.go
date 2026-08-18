@@ -174,7 +174,10 @@ func main() {
 	)
 
 	rideRequestService := rideRequestService.NewService(
-		rideRequestRepo,
+		rideRequestService.Dependencies{
+			RideRequests: rideRequestRepo,
+			UserRoles:    userRoleRepo,
+		},
 	)
 
 	dispatchService := dispatchservice.NewService(
