@@ -184,6 +184,10 @@ func RegisterRoutes(
 				"/dispatch-offers/:offer_id/accept",
 				dispatchHandler.AcceptOffer,
 			)
+			drivers.POST(
+				"/dispatch-offers/:offer_id/reject",
+				dispatchHandler.RejectOffer,
+			)
 		}
 
 		assignments := v1.Group("/driver-vehicle-assignments")

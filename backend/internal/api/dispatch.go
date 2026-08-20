@@ -9,6 +9,10 @@ import (
 	"github.com/JCKFinland/connect/backend/pkg/response"
 )
 
+type RejectDispatchOfferRequest struct {
+	Reason string `json:"reason"`
+}
+
 // DispatchHandler exposes ride-dispatch operations.
 type DispatchHandler struct {
 	service *dispatch.Service
@@ -155,5 +159,94 @@ func (h *DispatchHandler) AcceptOffer(
 		c,
 		"Dispatch offer accepted successfully",
 		trip,
+	)
+}
+
+// RejectOffer handles rejection of a dispatch offer by the driver
+// who owns the offer.
+func (h *DispatchHandler) RejectOffer(
+	c *gin.Context,
+) {
+	offerID := c.Param("offer_id")
+
+	if offerID == "" {
+		response.BadRequest(
+			c,
+			"dispatch offer ID is required",
+		)
+		return
+	}
+
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(
+			c,
+			"authenticated user not found",
+		)
+		return
+	}
+
+	var req RejectDispatchOfferRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(
+			c,
+			"invalid request body",
+		)
+		return
+	}
+
+	offer, err := h.service.RejectOfferAuthorized(
+		c.Request.Context(),
+		offerID,
+		user.ID,
+		req.Reason,
+	)
+	if err != nil {
+
+		if errors.Is(
+			err,
+			dispatch.ErrDispatchOfferAccessDenied,
+		) {
+			response.Forbidden(
+				c,
+				"You are not authorized to reject this dispatch offer",
+			)
+			return
+		}
+
+		if errors.Is(
+			err,
+			dispatch.ErrDispatchOfferAlreadyResolved,
+		) {
+			response.BadRequest(
+				c,
+				"Dispatch offer is already resolved",
+			)
+			return
+		}
+
+		if errors.Is(
+			err,
+			dispatch.ErrDispatchOfferExpired,
+		) {
+			response.BadRequest(
+				c,
+				"Dispatch offer has expired",
+			)
+			return
+		}
+
+		response.BadRequest(
+			c,
+			err.Error(),
+		)
+		return
+	}
+
+	response.OK(
+		c,
+		"Dispatch offer rejected successfully",
+		offer,
 	)
 }
