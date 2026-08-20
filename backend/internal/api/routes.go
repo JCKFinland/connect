@@ -179,6 +179,11 @@ func RegisterRoutes(
 			drivers.PUT("/:id", driverHandler.Update)
 
 			drivers.DELETE("/:id", driverHandler.Delete)
+
+			drivers.POST(
+				"/dispatch-offers/:offer_id/accept",
+				dispatchHandler.AcceptOffer,
+			)
 		}
 
 		assignments := v1.Group("/driver-vehicle-assignments")

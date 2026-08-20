@@ -35,4 +35,9 @@ type RideRequestRepository interface {
 		id string,
 		status string,
 	) error
+
+	GetByIDForUpdate(
+		ctx context.Context,
+		id string,
+	) (*models.RideRequest, error)
 }

@@ -27,6 +27,8 @@ import (
 
 	companyservice "github.com/JCKFinland/connect/backend/internal/services/company"
 
+	dispatchofferservice "github.com/JCKFinland/connect/backend/internal/services/dispatch_offer"
+
 	fleetservice "github.com/JCKFinland/connect/backend/internal/services/fleet"
 
 	vehicleservice "github.com/JCKFinland/connect/backend/internal/services/vehicle"
@@ -112,6 +114,7 @@ func main() {
 	tripRepo := postgresrepo.NewTripRepository(db)
 	rideRequestRepo := postgresrepo.NewRideRequestRepository(db)
 	tripEventRepo := postgresrepo.NewTripEventRepository(db)
+	dispatchOfferRepo := postgresrepo.NewDispatchOfferRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -180,6 +183,14 @@ func main() {
 		},
 	)
 
+	dispatchOfferService := dispatchofferservice.NewService(
+		dispatchofferservice.Dependencies{
+			DB:     db,
+			Offers: dispatchOfferRepo,
+		},
+	)
+	_ = dispatchOfferService
+
 	dispatchService := dispatchservice.NewService(
 		dispatchservice.Dependencies{
 			DB:           db,
@@ -189,9 +200,10 @@ func main() {
 			Presence:     driverPresenceRepo,
 			Trips:        tripRepo,
 			Vehicles:     vehicleRepo,
+			Drivers:      driverRepo,
+			Offers:       dispatchOfferRepo,
 		},
 	)
-
 	_ = dispatchService
 
 	// Tracks driver shifts, live maps, and online/offline status values.
