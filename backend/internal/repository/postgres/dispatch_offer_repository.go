@@ -402,3 +402,70 @@ func (r *DispatchOfferRepository) ExpireStalePending(
 
 	return rideRequestIDs, nil
 }
+
+// ListDriverIDsByRideRequest returns every operational driver ID that has
+// already received an offer for the specified ride request.
+//
+// The result includes offers in all lifecycle states so a rejected,
+// expired, cancelled, or previously accepted offer is never immediately
+// reissued to the same driver during automatic redispatch.
+func (r *DispatchOfferRepository) ListDriverIDsByRideRequest(
+	ctx context.Context,
+	rideRequestID string,
+) ([]string, error) {
+
+	if rideRequestID == "" {
+		return nil, fmt.Errorf(
+			"ride request ID is required",
+		)
+	}
+
+	const query = `
+		SELECT DISTINCT driver_id
+		FROM dispatch_offers
+		WHERE ride_request_id = $1
+	`
+
+	rows, err := r.db.Query(
+		ctx,
+		query,
+		rideRequestID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"list previously offered drivers: %w",
+			err,
+		)
+	}
+	defer rows.Close()
+
+	driverIDs := make([]string, 0)
+
+	for rows.Next() {
+
+		var driverID string
+
+		if err := rows.Scan(
+			&driverID,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"scan previously offered driver: %w",
+				err,
+			)
+		}
+
+		driverIDs = append(
+			driverIDs,
+			driverID,
+		)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"iterate previously offered drivers: %w",
+			err,
+		)
+	}
+
+	return driverIDs, nil
+}

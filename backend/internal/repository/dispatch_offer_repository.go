@@ -46,4 +46,9 @@ type DispatchOfferRepository interface {
 		ctx context.Context,
 		now time.Time,
 	) ([]string, error)
+
+	ListDriverIDsByRideRequest(
+		ctx context.Context,
+		rideRequestID string,
+	) ([]string, error)
 }
