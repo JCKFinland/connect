@@ -204,7 +204,31 @@ func main() {
 			Offers:       dispatchOfferRepo,
 		},
 	)
-	_ = dispatchService
+
+	// ----------------------------------------------------------------------
+	// Automatic Redispatch Worker
+	// ----------------------------------------------------------------------
+
+	// Worker context is independent from individual HTTP requests and remains
+	// active for the lifetime of the CONNECT backend process.
+	redispatchCtx, cancelRedispatch := context.WithCancel(
+		context.Background(),
+	)
+
+	go dispatchService.StartRedispatchWorker(
+		redispatchCtx,
+		dispatchservice.RedispatchWorkerOptions{
+			Interval:  2 * time.Second,
+			BatchSize: 100,
+			OnError: func(err error) {
+				log.Error(
+					"Automatic redispatch worker error",
+					"error",
+					err,
+				)
+			},
+		},
+	)
 
 	// Tracks driver shifts, live maps, and online/offline status values.
 	presenceService := presence.NewService(
@@ -353,7 +377,9 @@ func main() {
 
 	log.Info("Shutdown signal received")
 
-	// Allocates a safe window of 10 seconds to process remaining active requests.
+	// Stop background dispatch processing before shutting down the HTTP server.
+	cancelRedispatch()
+
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
 		10*time.Second,

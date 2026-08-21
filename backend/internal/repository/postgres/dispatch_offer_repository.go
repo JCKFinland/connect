@@ -469,3 +469,94 @@ func (r *DispatchOfferRepository) ListDriverIDsByRideRequest(
 
 	return driverIDs, nil
 }
+
+// ListRedispatchableRideRequestIDs returns ride requests that:
+//
+//   - are currently PENDING
+//   - have already participated in dispatch at least once
+//   - have no current PENDING dispatch offer
+//   - have no trip
+//
+// These requests are eligible for automatic redispatch.
+//
+// Oldest requests are returned first so requests are retried fairly.
+func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
+	ctx context.Context,
+	limit int,
+) ([]string, error) {
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	const query = `
+		SELECT rr.id
+		FROM ride_requests rr
+		WHERE rr.status = 'PENDING'
+
+		  AND EXISTS (
+			SELECT 1
+			FROM dispatch_offers history
+			WHERE history.ride_request_id = rr.id
+		  )
+
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM dispatch_offers pending_offer
+			WHERE pending_offer.ride_request_id = rr.id
+			  AND pending_offer.status = 'PENDING'
+		  )
+
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM trips t
+			WHERE t.ride_request_id = rr.id
+		  )
+
+		ORDER BY rr.requested_at ASC
+		LIMIT $1
+	`
+
+	rows, err := r.db.Query(
+		ctx,
+		query,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"list redispatchable ride requests: %w",
+			err,
+		)
+	}
+	defer rows.Close()
+
+	rideRequestIDs := make([]string, 0)
+
+	for rows.Next() {
+
+		var rideRequestID string
+
+		if err := rows.Scan(
+			&rideRequestID,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"scan redispatchable ride request: %w",
+				err,
+			)
+		}
+
+		rideRequestIDs = append(
+			rideRequestIDs,
+			rideRequestID,
+		)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"iterate redispatchable ride requests: %w",
+			err,
+		)
+	}
+
+	return rideRequestIDs, nil
+}

@@ -51,4 +51,9 @@ type DispatchOfferRepository interface {
 		ctx context.Context,
 		rideRequestID string,
 	) ([]string, error)
+
+	ListRedispatchableRideRequestIDs(
+		ctx context.Context,
+		limit int,
+	) ([]string, error)
 }
