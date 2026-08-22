@@ -1134,3 +1134,645 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 		)
 	}
 }
+
+func TestDispatchRetryBackoffPersistence(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	rideRequestID := uuid.NewString()
+	now := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Backoff Test Pickup',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'Dispatch retry backoff persistence test',
+				$3,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create retry backoff test ride: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_, cleanupErr := db.Exec(
+			context.Background(),
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		)
+
+		if cleanupErr != nil {
+			t.Logf(
+				"cleanup retry test ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	repo := postgresrepo.NewRideRequestRepository(db)
+
+	expectedDelays := []time.Duration{
+		2 * time.Second,
+		5 * time.Second,
+		10 * time.Second,
+		20 * time.Second,
+		30 * time.Second,
+		30 * time.Second,
+	}
+
+	// PostgreSQL TIMESTAMPTZ uses microsecond precision, while Go
+	// time.Time can contain nanosecond precision. A small tolerance
+	// prevents false test failures caused only by DB precision.
+	const timestampTolerance = time.Millisecond
+
+	for i, expectedDelay := range expectedDelays {
+
+		attemptedAt := now.Add(
+			time.Duration(i) * time.Minute,
+		)
+
+		retryCount, nextAttemptAt, err :=
+			repo.ScheduleDispatchRetry(
+				ctx,
+				rideRequestID,
+				attemptedAt,
+			)
+
+		if err != nil {
+			t.Fatalf(
+				"schedule retry %d: %v",
+				i+1,
+				err,
+			)
+		}
+
+		expectedRetryCount := i + 1
+
+		// ---------------------------------------------------------
+		// Verify returned retry count.
+		// ---------------------------------------------------------
+
+		if retryCount != expectedRetryCount {
+			t.Fatalf(
+				"expected retry count %d, got %d",
+				expectedRetryCount,
+				retryCount,
+			)
+		}
+
+		// ---------------------------------------------------------
+		// Verify calculated backoff delay.
+		// ---------------------------------------------------------
+
+		actualDelay := nextAttemptAt.Sub(
+			attemptedAt,
+		)
+
+		delayDifference :=
+			actualDelay - expectedDelay
+
+		if delayDifference < 0 {
+			delayDifference = -delayDifference
+		}
+
+		if delayDifference > timestampTolerance {
+			t.Fatalf(
+				"retry %d: expected delay about %s, got %s",
+				expectedRetryCount,
+				expectedDelay,
+				actualDelay,
+			)
+		}
+
+		// ---------------------------------------------------------
+		// Load persisted retry state directly from PostgreSQL.
+		// ---------------------------------------------------------
+
+		var (
+			persistedRetryCount    int
+			persistedNextAttemptAt *time.Time
+			persistedLastAttemptAt *time.Time
+		)
+
+		err = db.QueryRow(
+			ctx,
+			`
+				SELECT
+					dispatch_retry_count,
+					next_dispatch_attempt_at,
+					last_dispatch_attempt_at
+				FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		).Scan(
+			&persistedRetryCount,
+			&persistedNextAttemptAt,
+			&persistedLastAttemptAt,
+		)
+
+		if err != nil {
+			t.Fatalf(
+				"read persisted retry state: %v",
+				err,
+			)
+		}
+
+		// ---------------------------------------------------------
+		// Verify persisted retry count.
+		// ---------------------------------------------------------
+
+		if persistedRetryCount != expectedRetryCount {
+			t.Fatalf(
+				"expected persisted retry count %d, got %d",
+				expectedRetryCount,
+				persistedRetryCount,
+			)
+		}
+
+		if persistedNextAttemptAt == nil {
+			t.Fatal(
+				"expected next_dispatch_attempt_at to be populated",
+			)
+		}
+
+		if persistedLastAttemptAt == nil {
+			t.Fatal(
+				"expected last_dispatch_attempt_at to be populated",
+			)
+		}
+
+		// ---------------------------------------------------------
+		// Verify persisted next-attempt timestamp.
+		//
+		// Compare instants using a tolerance rather than requiring
+		// identical timezone representations or nanosecond precision.
+		// ---------------------------------------------------------
+
+		nextAttemptDifference :=
+			persistedNextAttemptAt.Sub(
+				nextAttemptAt,
+			)
+
+		if nextAttemptDifference < 0 {
+			nextAttemptDifference =
+				-nextAttemptDifference
+		}
+
+		if nextAttemptDifference >
+			timestampTolerance {
+
+			t.Fatalf(
+				"expected persisted next attempt about %v, got %v",
+				nextAttemptAt,
+				*persistedNextAttemptAt,
+			)
+		}
+
+		// ---------------------------------------------------------
+		// Verify persisted last-attempt timestamp.
+		//
+		// UTC and EEST representations may differ visually but can
+		// represent the same instant. Precision tolerance handles
+		// PostgreSQL's microsecond storage as well.
+		// ---------------------------------------------------------
+
+		lastAttemptDifference :=
+			persistedLastAttemptAt.Sub(
+				attemptedAt,
+			)
+
+		if lastAttemptDifference < 0 {
+			lastAttemptDifference =
+				-lastAttemptDifference
+		}
+
+		if lastAttemptDifference >
+			timestampTolerance {
+
+			t.Fatalf(
+				"expected persisted last attempt about %v, got %v",
+				attemptedAt,
+				*persistedLastAttemptAt,
+			)
+		}
+	}
+}
+
+func TestCreateOfferResetsDispatchRetryState(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	const (
+		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
+	)
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	if _, err := offerRepo.ExpireStalePending(
+		ctx,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatalf(
+			"expire stale offers before reset test: %v",
+			err,
+		)
+	}
+
+	var existingPendingOfferCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM dispatch_offers
+			WHERE driver_id = $1
+			  AND status = 'PENDING'
+		`,
+		johnDriverID,
+	).Scan(&existingPendingOfferCount); err != nil {
+		t.Fatalf(
+			"check existing pending offer: %v",
+			err,
+		)
+	}
+
+	if existingPendingOfferCount != 0 {
+		t.Skip(
+			"John already has an active PENDING dispatch offer",
+		)
+	}
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					last_heartbeat_at = $4,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalHeartbeat,
+		)
+
+		if restoreErr != nil {
+			t.Logf(
+				"restore driver presence: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = TRUE,
+				availability_status = 'AVAILABLE',
+				latitude = 60.2055,
+				longitude = 24.6559,
+				last_heartbeat_at = NOW(),
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	); err != nil {
+		t.Fatalf(
+			"prepare driver presence: %v",
+			err,
+		)
+	}
+
+	rideRequestID := uuid.NewString()
+	now := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Retry Reset Test Pickup',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'CreateOffer retry reset integration test',
+				$3,
+				4,
+				$4,
+				$5,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		now.Add(20*time.Second),
+		now.Add(-5*time.Second),
+	)
+	if err != nil {
+		t.Fatalf(
+			"create retry reset test ride: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		_, _ = db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		)
+
+		_, _ = db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		)
+	}()
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	driverAssignmentRepo :=
+		postgresrepo.NewDriverAssignmentRepository(db)
+
+	driverPresenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	vehicleRepo :=
+		postgresrepo.NewVehicleRepository(db)
+
+	driverRepo :=
+		postgresrepo.NewDriverRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Assignments:  driverAssignmentRepo,
+			Presence:     driverPresenceRepo,
+			Vehicles:     vehicleRepo,
+			Drivers:      driverRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	offer, err := service.CreateOffer(
+		ctx,
+		rideRequestID,
+		"",
+	)
+	if err != nil {
+		t.Fatalf(
+			"create offer with retry reset: %v",
+			err,
+		)
+	}
+
+	if offer == nil {
+		t.Fatal(
+			"expected created dispatch offer",
+		)
+	}
+
+	var (
+		status                string
+		retryCount            int
+		nextDispatchAttemptAt *time.Time
+		lastDispatchAttemptAt *time.Time
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				status,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&status,
+		&retryCount,
+		&nextDispatchAttemptAt,
+		&lastDispatchAttemptAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read reset retry state: %v",
+			err,
+		)
+	}
+
+	if status != rideRequestStatusMatching {
+		t.Fatalf(
+			"expected ride status %s, got %s",
+			rideRequestStatusMatching,
+			status,
+		)
+	}
+
+	if retryCount != 0 {
+		t.Fatalf(
+			"expected retry count 0, got %d",
+			retryCount,
+		)
+	}
+
+	if nextDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected next_dispatch_attempt_at NULL, got %v",
+			*nextDispatchAttemptAt,
+		)
+	}
+
+	if lastDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected last_dispatch_attempt_at NULL, got %v",
+			*lastDispatchAttemptAt,
+		)
+	}
+}

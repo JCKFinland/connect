@@ -195,6 +195,7 @@ func main() {
 		dispatchservice.Dependencies{
 			DB:           db,
 			Config:       cfg,
+			Logger:       log,
 			RideRequests: rideRequestRepo,
 			Assignments:  driverAssignmentRepo,
 			Presence:     driverPresenceRepo,
@@ -220,13 +221,6 @@ func main() {
 		dispatchservice.RedispatchWorkerOptions{
 			Interval:  2 * time.Second,
 			BatchSize: 100,
-			OnError: func(err error) {
-				log.Error(
-					"Automatic redispatch worker error",
-					"error",
-					err,
-				)
-			},
 		},
 	)
 

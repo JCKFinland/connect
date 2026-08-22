@@ -490,6 +490,11 @@ func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
 		FROM ride_requests rr
 		WHERE rr.status = 'PENDING'
 
+		AND (
+			rr.next_dispatch_attempt_at IS NULL
+			OR rr.next_dispatch_attempt_at <= NOW()
+		)
+
 		  AND EXISTS (
 			SELECT 1
 			FROM dispatch_offers history

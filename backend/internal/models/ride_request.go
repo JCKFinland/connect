@@ -25,4 +25,10 @@ type RideRequest struct {
 
 	RequestedAt time.Time  `db:"requested_at" json:"requested_at"`
 	ExpiresAt   *time.Time `db:"expires_at" json:"expires_at,omitempty"`
+
+	DispatchRetryCount int `db:"dispatch_retry_count" json:"dispatch_retry_count"`
+
+	NextDispatchAttemptAt *time.Time `db:"next_dispatch_attempt_at" json:"next_dispatch_attempt_at,omitempty"`
+
+	LastDispatchAttemptAt *time.Time `db:"last_dispatch_attempt_at" json:"last_dispatch_attempt_at,omitempty"`
 }

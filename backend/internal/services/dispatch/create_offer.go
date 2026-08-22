@@ -617,6 +617,23 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
+			// Reset automatic redispatch backoff.
+			//
+			// Once an offer is successfully created, any previous
+			// no-driver retry state is no longer relevant.
+			// ---------------------------------------------------------
+
+			if err := rideRequests.ResetDispatchRetry(
+				ctx,
+				request.ID,
+			); err != nil {
+				return fmt.Errorf(
+					"reset ride dispatch retry state: %w",
+					err,
+				)
+			}
+
+			// ---------------------------------------------------------
 			// 11. Ride request becomes MATCHING.
 			//
 			// No trip exists yet and the selected driver remains

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 )
@@ -40,4 +41,15 @@ type RideRequestRepository interface {
 		ctx context.Context,
 		id string,
 	) (*models.RideRequest, error)
+
+	ScheduleDispatchRetry(
+		ctx context.Context,
+		rideRequestID string,
+		attemptedAt time.Time,
+	) (int, time.Time, error)
+
+	ResetDispatchRetry(
+		ctx context.Context,
+		rideRequestID string,
+	) error
 }

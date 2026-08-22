@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -50,17 +51,30 @@ func (s *Service) StartRedispatchWorker(
 		batchSize = defaultRedispatchBatchSize
 	}
 
+	s.log.InfoContext(
+		ctx,
+		"redispatch worker started",
+		slog.Duration("interval", interval),
+		slog.Int("batch_size", batchSize),
+	)
+
 	reportError := func(err error) {
 		if err == nil {
 			return
 		}
+
+		s.log.ErrorContext(
+			ctx,
+			"redispatch worker cycle failed",
+			slog.Any("error", err),
+		)
 
 		if options.OnError != nil {
 			options.OnError(err)
 		}
 	}
 
-	// Run once immediately during application startup.
+	// Run one recovery cycle immediately on startup.
 	if err := s.runRedispatchCycle(
 		ctx,
 		batchSize,
@@ -75,6 +89,15 @@ func (s *Service) StartRedispatchWorker(
 		select {
 
 		case <-ctx.Done():
+
+			s.log.Info(
+				"redispatch worker stopped",
+				slog.String(
+					"reason",
+					"context cancelled",
+				),
+			)
+
 			return
 
 		case <-ticker.C:
@@ -103,24 +126,38 @@ func (s *Service) runRedispatchCycle(
 	batchSize int,
 ) error {
 
+	cycleStartedAt := time.Now()
+
+	s.log.DebugContext(
+		ctx,
+		"redispatch worker cycle started",
+		slog.Int("batch_size", batchSize),
+	)
+
 	// ---------------------------------------------------------
 	// 1. Expire stale offers and recover their ride requests.
 	// ---------------------------------------------------------
 
-	if err := s.recoverExpiredDispatchOffers(
+	expiredCount, err := s.recoverExpiredDispatchOffers(
 		ctx,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf(
 			"recover expired dispatch offers: %w",
 			err,
 		)
 	}
 
+	if expiredCount > 0 {
+		s.log.InfoContext(
+			ctx,
+			"stale dispatch offers expired",
+			slog.Int("expired_offer_count", expiredCount),
+		)
+	}
+
 	// ---------------------------------------------------------
 	// 2. Discover rides that need another dispatch attempt.
-	//
-	// Discovery itself does not claim a ride. The authoritative
-	// cross-instance lock is acquired inside CreateOffer().
 	// ---------------------------------------------------------
 
 	rideRequestIDs, err :=
@@ -136,13 +173,34 @@ func (s *Service) runRedispatchCycle(
 		)
 	}
 
+	if len(rideRequestIDs) == 0 {
+
+		s.log.DebugContext(
+			ctx,
+			"redispatch worker cycle completed",
+			slog.Int("expired_offer_count", expiredCount),
+			slog.Int("redispatch_candidate_count", 0),
+			slog.Int("redispatch_success_count", 0),
+			slog.Int("no_driver_count", 0),
+			slog.Duration(
+				"duration",
+				time.Since(cycleStartedAt),
+			),
+		)
+
+		return nil
+	}
+
 	// ---------------------------------------------------------
 	// 3. Attempt redispatch.
 	//
-	// CreateOffer() obtains a PostgreSQL advisory lock scoped to
-	// the ride request, so concurrent workers/admin calls cannot
-	// create competing offers for the same ride.
+	// CreateOffer() acquires the authoritative PostgreSQL
+	// advisory lock for the ride request.
 	// ---------------------------------------------------------
+
+	successCount := 0
+	noDriverCount := 0
+	skippedCount := 0
 
 	for _, rideRequestID := range rideRequestIDs {
 
@@ -150,13 +208,50 @@ func (s *Service) runRedispatchCycle(
 			continue
 		}
 
-		_, err := s.CreateOffer(
+		s.log.DebugContext(
+			ctx,
+			"redispatch attempt started",
+			slog.String(
+				"ride_request_id",
+				rideRequestID,
+			),
+		)
+
+		offer, err := s.CreateOffer(
 			ctx,
 			rideRequestID,
 			"",
 		)
 
 		if err == nil {
+
+			successCount++
+
+			s.log.InfoContext(
+				ctx,
+				"ride redispatched successfully",
+				slog.String(
+					"ride_request_id",
+					rideRequestID,
+				),
+				slog.String(
+					"dispatch_offer_id",
+					offer.ID,
+				),
+				slog.String(
+					"driver_id",
+					offer.DriverID,
+				),
+				slog.String(
+					"vehicle_id",
+					offer.VehicleID,
+				),
+				slog.Time(
+					"expires_at",
+					offer.ExpiresAt,
+				),
+			)
+
 			continue
 		}
 
@@ -164,6 +259,57 @@ func (s *Service) runRedispatchCycle(
 			err,
 			ErrNoAvailableDrivers,
 		) {
+
+			noDriverCount++
+
+			attemptedAt := time.Now().UTC()
+
+			retryCount, nextAttemptAt, retryErr :=
+				s.rideRequests.ScheduleDispatchRetry(
+					ctx,
+					rideRequestID,
+					attemptedAt,
+				)
+
+			if retryErr != nil {
+
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+
+				s.log.ErrorContext(
+					ctx,
+					"failed to schedule dispatch retry",
+					slog.String(
+						"ride_request_id",
+						rideRequestID,
+					),
+					slog.Any(
+						"error",
+						retryErr,
+					),
+				)
+
+				continue
+			}
+
+			s.log.InfoContext(
+				ctx,
+				"redispatch deferred: no eligible driver",
+				slog.String(
+					"ride_request_id",
+					rideRequestID,
+				),
+				slog.Int(
+					"retry_count",
+					retryCount,
+				),
+				slog.Time(
+					"next_dispatch_attempt_at",
+					nextAttemptAt,
+				),
+			)
+
 			continue
 		}
 
@@ -171,12 +317,53 @@ func (s *Service) runRedispatchCycle(
 			return ctx.Err()
 		}
 
-		// Another CONNECT instance or an administrator may have
-		// dispatched the ride after discovery. CreateOffer()
-		// validates the ride state after acquiring its database
-		// lock, so this is safe.
-		continue
+		// Concurrent API/worker activity may have already handled the
+		// ride after it was discovered. CreateOffer() safely validates
+		// state after acquiring the ride-level advisory lock.
+		skippedCount++
+
+		s.log.DebugContext(
+			ctx,
+			"redispatch skipped",
+			slog.String(
+				"ride_request_id",
+				rideRequestID,
+			),
+			slog.Any(
+				"reason",
+				err,
+			),
+		)
 	}
+
+	s.log.DebugContext(
+		ctx,
+		"redispatch worker cycle completed",
+		slog.Int(
+			"expired_offer_count",
+			expiredCount,
+		),
+		slog.Int(
+			"redispatch_candidate_count",
+			len(rideRequestIDs),
+		),
+		slog.Int(
+			"redispatch_success_count",
+			successCount,
+		),
+		slog.Int(
+			"no_driver_count",
+			noDriverCount,
+		),
+		slog.Int(
+			"skipped_count",
+			skippedCount,
+		),
+		slog.Duration(
+			"duration",
+			time.Since(cycleStartedAt),
+		),
+	)
 
 	return nil
 }
@@ -185,13 +372,17 @@ func (s *Service) runRedispatchCycle(
 //
 //   - marks stale PENDING offers EXPIRED
 //   - resets their MATCHING ride requests to PENDING
+//
+// The returned integer is the number of offers expired during this cycle.
 func (s *Service) recoverExpiredDispatchOffers(
 	ctx context.Context,
-) error {
+) (int, error) {
 
 	now := time.Now().UTC()
 
-	return postgresrepo.RunInTransaction(
+	expiredCount := 0
+
+	err := postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
 		func(tx pgx.Tx) error {
@@ -218,6 +409,10 @@ func (s *Service) recoverExpiredDispatchOffers(
 					err,
 				)
 			}
+
+			expiredCount = len(
+				expiredRideRequestIDs,
+			)
 
 			for _, rideRequestID := range expiredRideRequestIDs {
 
@@ -256,9 +451,31 @@ func (s *Service) recoverExpiredDispatchOffers(
 						err,
 					)
 				}
+
+				s.log.DebugContext(
+					ctx,
+					"ride request recovered after offer expiry",
+					slog.String(
+						"ride_request_id",
+						request.ID,
+					),
+					slog.String(
+						"previous_status",
+						rideRequestStatusMatching,
+					),
+					slog.String(
+						"new_status",
+						rideRequestStatusPending,
+					),
+				)
 			}
 
 			return nil
 		},
 	)
+	if err != nil {
+		return 0, err
+	}
+
+	return expiredCount, nil
 }

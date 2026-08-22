@@ -1,6 +1,8 @@
 package dispatch
 
 import (
+	"log/slog"
+
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -9,6 +11,7 @@ import (
 type Dependencies struct {
 	DB     *pgxpool.Pool
 	Config *config.Config
+	Logger *slog.Logger
 
 	RideRequests repository.RideRequestRepository
 	Assignments  repository.DriverAssignmentRepository
@@ -22,6 +25,7 @@ type Dependencies struct {
 type Service struct {
 	db  *pgxpool.Pool
 	cfg *config.Config
+	log *slog.Logger
 
 	rideRequests repository.RideRequestRepository
 	assignments  repository.DriverAssignmentRepository
@@ -35,9 +39,16 @@ type Service struct {
 func NewService(
 	deps Dependencies,
 ) *Service {
+
+	log := deps.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+
 	return &Service{
 		db:  deps.DB,
 		cfg: deps.Config,
+		log: log,
 
 		rideRequests: deps.RideRequests,
 		assignments:  deps.Assignments,
