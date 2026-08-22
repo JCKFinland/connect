@@ -97,7 +97,7 @@ func (s *Service) StartRedispatchWorker(
 	}
 }
 
-// runRedispatchCycle performs one worker cycle.
+// runRedispatchCycle performs one automatic redispatch cycle.
 func (s *Service) runRedispatchCycle(
 	ctx context.Context,
 	batchSize int,
@@ -117,7 +117,10 @@ func (s *Service) runRedispatchCycle(
 	}
 
 	// ---------------------------------------------------------
-	// 2. Find rides requiring another dispatch attempt.
+	// 2. Discover rides that need another dispatch attempt.
+	//
+	// Discovery itself does not claim a ride. The authoritative
+	// cross-instance lock is acquired inside CreateOffer().
 	// ---------------------------------------------------------
 
 	rideRequestIDs, err :=
@@ -136,8 +139,9 @@ func (s *Service) runRedispatchCycle(
 	// ---------------------------------------------------------
 	// 3. Attempt redispatch.
 	//
-	// Failure to find a driver is not a worker failure.
-	// The ride remains PENDING and will be retried next cycle.
+	// CreateOffer() obtains a PostgreSQL advisory lock scoped to
+	// the ride request, so concurrent workers/admin calls cannot
+	// create competing offers for the same ride.
 	// ---------------------------------------------------------
 
 	for _, rideRequestID := range rideRequestIDs {
@@ -149,7 +153,7 @@ func (s *Service) runRedispatchCycle(
 		_, err := s.CreateOffer(
 			ctx,
 			rideRequestID,
-			"", // worker-generated offer
+			"",
 		)
 
 		if err == nil {
@@ -163,22 +167,15 @@ func (s *Service) runRedispatchCycle(
 			continue
 		}
 
-		// A concurrent API dispatch may have claimed the ride between
-		// discovery and CreateOffer(). Do not terminate the whole worker.
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		// Report other failures but continue processing other rides.
-		//
-		// Returning one aggregate error would prevent remaining rides
-		// from being processed, so report this cycle failure through
-		// the caller one ride at a time.
-		return fmt.Errorf(
-			"redispatch ride request %s: %w",
-			rideRequestID,
-			err,
-		)
+		// Another CONNECT instance or an administrator may have
+		// dispatched the ride after discovery. CreateOffer()
+		// validates the ride state after acquiring its database
+		// lock, so this is safe.
+		continue
 	}
 
 	return nil

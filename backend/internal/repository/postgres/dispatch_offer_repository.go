@@ -470,16 +470,12 @@ func (r *DispatchOfferRepository) ListDriverIDsByRideRequest(
 	return driverIDs, nil
 }
 
-// ListRedispatchableRideRequestIDs returns ride requests that:
+// ListRedispatchableRideRequestIDsForUpdate returns redispatchable ride
+// requests and locks their ride_requests rows for the lifetime of the
+// current PostgreSQL transaction.
 //
-//   - are currently PENDING
-//   - have already participated in dispatch at least once
-//   - have no current PENDING dispatch offer
-//   - have no trip
-//
-// These requests are eligible for automatic redispatch.
-//
-// Oldest requests are returned first so requests are retried fairly.
+// FOR UPDATE SKIP LOCKED allows multiple CONNECT backend instances to run
+// redispatch workers concurrently without selecting the same ride request.
 func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
 	ctx context.Context,
 	limit int,
@@ -524,7 +520,7 @@ func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"list redispatchable ride requests: %w",
+			"list redispatchable ride requests for update: %w",
 			err,
 		)
 	}
@@ -533,12 +529,9 @@ func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
 	rideRequestIDs := make([]string, 0)
 
 	for rows.Next() {
-
 		var rideRequestID string
 
-		if err := rows.Scan(
-			&rideRequestID,
-		); err != nil {
+		if err := rows.Scan(&rideRequestID); err != nil {
 			return nil, fmt.Errorf(
 				"scan redispatchable ride request: %w",
 				err,

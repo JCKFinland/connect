@@ -28,6 +28,11 @@ const (
 //
 // A driver who has already received an offer for the same ride request is
 // excluded from subsequent dispatch attempts.
+//
+// Dispatch creation is protected by a PostgreSQL transaction-scoped advisory
+// lock keyed by ride request ID. This prevents multiple CONNECT backend
+// instances, workers, or API requests from dispatching the same ride
+// concurrently.
 func (s *Service) CreateOffer(
 	ctx context.Context,
 	rideRequestID string,
@@ -71,17 +76,50 @@ func (s *Service) CreateOffer(
 		s.db,
 		func(tx pgx.Tx) error {
 
-			rideRequests := postgresrepo.NewRideRequestRepositoryWithDB(tx)
-			assignments := postgresrepo.NewDriverAssignmentRepositoryWithDB(tx)
-			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
-			vehicles := postgresrepo.NewVehicleRepositoryWithDB(tx)
-			drivers := postgresrepo.NewDriverRepositoryWithDB(tx)
-			offers := postgresrepo.NewDispatchOfferRepositoryWithDB(tx)
+			// ---------------------------------------------------------
+			// 1. Acquire cross-instance dispatch lock for this ride.
+			//
+			// This prevents multiple CONNECT backend instances,
+			// workers, or administrator requests from dispatching
+			// the same ride concurrently.
+			//
+			// PostgreSQL automatically releases this advisory lock
+			// when the transaction commits or rolls back.
+			// ---------------------------------------------------------
+
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"ride-dispatch:"+rideRequestID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock ride request dispatch: %w",
+					err,
+				)
+			}
+
+			rideRequests :=
+				postgresrepo.NewRideRequestRepositoryWithDB(tx)
+
+			assignments :=
+				postgresrepo.NewDriverAssignmentRepositoryWithDB(tx)
+
+			presence :=
+				postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
+
+			vehicles :=
+				postgresrepo.NewVehicleRepositoryWithDB(tx)
+
+			drivers :=
+				postgresrepo.NewDriverRepositoryWithDB(tx)
+
+			offers :=
+				postgresrepo.NewDispatchOfferRepositoryWithDB(tx)
 
 			now := time.Now().UTC()
 
 			// ---------------------------------------------------------
-			// 1. Expire stale PENDING dispatch offers.
+			// 2. Expire stale PENDING dispatch offers.
 			// ---------------------------------------------------------
 
 			expiredRideRequestIDs, err := offers.ExpireStalePending(
@@ -96,9 +134,11 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
-			// 2. Recover ride requests belonging to stale offers.
+			// 3. Recover ride requests belonging to stale offers.
 			//
 			// Only MATCHING requests are moved back to PENDING.
+			// ACCEPTED, CANCELLED, EXPIRED, or other lifecycle
+			// states are deliberately left untouched.
 			// ---------------------------------------------------------
 
 			for _, expiredRideRequestID := range expiredRideRequestIDs {
@@ -107,10 +147,11 @@ func (s *Service) CreateOffer(
 					continue
 				}
 
-				expiredRequest, err := rideRequests.GetByIDForUpdate(
-					ctx,
-					expiredRideRequestID,
-				)
+				expiredRequest, err :=
+					rideRequests.GetByIDForUpdate(
+						ctx,
+						expiredRideRequestID,
+					)
 				if err != nil {
 					return fmt.Errorf(
 						"get ride request after stale offer expiry: %w",
@@ -135,7 +176,7 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
-			// 3. Load drivers who already received this ride.
+			// 4. Load drivers who already received this ride.
 			//
 			// dispatch_offers stores drivers.id.
 			// driver_presence stores users.id.
@@ -168,7 +209,10 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
-			// 4. Lock and validate requested ride request.
+			// 5. Lock and validate requested ride request.
+			//
+			// The advisory lock protects the logical dispatch operation,
+			// while FOR UPDATE protects the actual ride_requests row.
 			// ---------------------------------------------------------
 
 			request, err := rideRequests.GetByIDForUpdate(
@@ -190,10 +234,11 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
-			// 5. Discover AVAILABLE drivers.
+			// 6. Discover AVAILABLE drivers.
 			// ---------------------------------------------------------
 
-			availableDrivers, err := presence.ListAllAvailable(ctx)
+			availableDrivers, err :=
+				presence.ListAllAvailable(ctx)
 			if err != nil {
 				return fmt.Errorf(
 					"list available drivers: %w",
@@ -212,7 +257,7 @@ func (s *Service) CreateOffer(
 			)
 
 			// ---------------------------------------------------------
-			// 6. Filter and rank eligible drivers.
+			// 7. Filter and rank eligible drivers.
 			// ---------------------------------------------------------
 
 			for _, candidate := range availableDrivers {
@@ -234,15 +279,12 @@ func (s *Service) CreateOffer(
 					continue
 				}
 
-				// -------------------------------------------------
-				// Resolve users.id -> drivers.id and exclude any
-				// driver already offered this same ride.
-				// -------------------------------------------------
-
-				operationalDriver, err := drivers.GetByUserID(
-					ctx,
-					candidate.DriverID,
-				)
+				// Resolve users.id -> drivers.id.
+				operationalDriver, err :=
+					drivers.GetByUserID(
+						ctx,
+						candidate.DriverID,
+					)
 
 				if errors.Is(
 					err,
@@ -264,15 +306,19 @@ func (s *Service) CreateOffer(
 					continue
 				}
 
-				_, alreadyOffered := previouslyOfferedDrivers[operationalDriver.ID]
+				// Never offer the same ride to the same driver again.
+				_, alreadyOffered :=
+					previouslyOfferedDrivers[operationalDriver.ID]
+
 				if alreadyOffered {
 					continue
 				}
 
-				assignment, err := assignments.GetActiveByDriver(
-					ctx,
-					candidate.DriverID,
-				)
+				assignment, err :=
+					assignments.GetActiveByDriver(
+						ctx,
+						candidate.DriverID,
+					)
 
 				if errors.Is(
 					err,
@@ -354,7 +400,7 @@ func (s *Service) CreateOffer(
 			)
 
 			// ---------------------------------------------------------
-			// 7. Lock nearest still-available eligible candidate.
+			// 8. Lock nearest still-available eligible candidate.
 			// ---------------------------------------------------------
 
 			var selected *models.DriverPresence
@@ -392,22 +438,18 @@ func (s *Service) CreateOffer(
 				)
 
 				if lockedHeartbeatAge < 0 ||
-					lockedHeartbeatAge > s.cfg.Presence.HeartbeatTimeout {
+					lockedHeartbeatAge >
+						s.cfg.Presence.HeartbeatTimeout {
 					continue
 				}
 
-				// -------------------------------------------------
-				// Re-resolve the operational driver after locking.
-				//
-				// This mirrors the other post-lock validation and
-				// guarantees a previously offered driver cannot
-				// pass through because of stale candidate state.
-				// -------------------------------------------------
-
-				lockedOperationalDriver, err := drivers.GetByUserID(
-					ctx,
-					lockedDriver.DriverID,
-				)
+				// Re-resolve the operational driver after acquiring
+				// the presence lock.
+				lockedOperationalDriver, err :=
+					drivers.GetByUserID(
+						ctx,
+						lockedDriver.DriverID,
+					)
 
 				if errors.Is(
 					err,
@@ -428,15 +470,18 @@ func (s *Service) CreateOffer(
 					!lockedOperationalDriver.IsActive {
 					continue
 				}
+
 				_, alreadyOffered := previouslyOfferedDrivers[lockedOperationalDriver.ID]
+
 				if alreadyOffered {
 					continue
 				}
 
-				lockedAssignment, err := assignments.GetActiveByDriver(
-					ctx,
-					lockedDriver.DriverID,
-				)
+				lockedAssignment, err :=
+					assignments.GetActiveByDriver(
+						ctx,
+						lockedDriver.DriverID,
+					)
 
 				if errors.Is(
 					err,
@@ -500,7 +545,7 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
-			// 8. Resolve final users.id -> drivers.id.
+			// 9. Resolve final users.id -> drivers.id.
 			// ---------------------------------------------------------
 
 			driver, err := drivers.GetByUserID(
@@ -522,14 +567,16 @@ func (s *Service) CreateOffer(
 				)
 			}
 
-			// Defensive final exclusion check.
-			_, wasAlreadyOffered := previouslyOfferedDrivers[driver.ID]
+			// Final defensive previously-offered check.
+			_, wasAlreadyOffered :=
+				previouslyOfferedDrivers[driver.ID]
+
 			if wasAlreadyOffered {
 				return ErrNoAvailableDrivers
 			}
 
 			// ---------------------------------------------------------
-			// 9. Create PENDING dispatch offer.
+			// 10. Create PENDING dispatch offer.
 			// ---------------------------------------------------------
 
 			offer := &models.DispatchOffer{
@@ -570,10 +617,10 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
-			// 10. Ride request becomes MATCHING.
+			// 11. Ride request becomes MATCHING.
 			//
 			// No trip exists yet and the selected driver remains
-			// AVAILABLE until the offer is actually accepted.
+			// AVAILABLE until the offer is accepted.
 			// ---------------------------------------------------------
 
 			if err := rideRequests.UpdateStatus(
