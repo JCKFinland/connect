@@ -39,7 +39,7 @@ const (
 // PostgreSQL transaction:
 //
 //   - lock dispatch offer
-//   - validate PENDING and not expired
+//   - validate offer and ride-request expiration
 //   - resolve drivers.id -> users.id
 //   - lock driver presence and verify AVAILABLE
 //   - lock ride request and verify MATCHING
@@ -70,7 +70,10 @@ func (s *Service) AcceptOffer(
 		)
 	}
 
-	var acceptedTrip *models.Trip
+	var (
+		acceptedTrip       *models.Trip
+		rideRequestExpired bool
+	)
 
 	err := postgresrepo.RunInTransaction(
 		ctx,
@@ -180,6 +183,67 @@ func (s *Service) AcceptOffer(
 					"get ride request for offer acceptance: %w",
 					err,
 				)
+			}
+
+			if request.ExpiresAt != nil &&
+				!now.Before(request.ExpiresAt.UTC()) {
+
+				// ---------------------------------------------------------
+				// The ride request itself has reached its hard expiry.
+				//
+				// Acceptance must terminate here:
+				//   - no trip is created
+				//   - driver remains AVAILABLE
+				//   - ride becomes EXPIRED
+				//   - retry state is cleared
+				//   - pending offer becomes EXPIRED
+				//
+				// Do not return ErrRideRequestExpired from inside the
+				// transaction after making these updates, because that would
+				// roll them back. Commit first, then return the sentinel.
+				// ---------------------------------------------------------
+
+				if request.Status == rideRequestStatusMatching ||
+					request.Status == rideRequestStatusPending {
+
+					if err := rideRequests.UpdateStatus(
+						ctx,
+						request.ID,
+						rideRequestStatusExpired,
+					); err != nil {
+						return fmt.Errorf(
+							"expire ride request during offer acceptance: %w",
+							err,
+						)
+					}
+
+					if err := rideRequests.ResetDispatchRetry(
+						ctx,
+						request.ID,
+					); err != nil {
+						return fmt.Errorf(
+							"reset expired ride dispatch retry state: %w",
+							err,
+						)
+					}
+				}
+
+				if err := offers.UpdateStatus(
+					ctx,
+					offer.ID,
+					dispatchOfferStatusExpired,
+					&now,
+					nil,
+				); err != nil {
+					return fmt.Errorf(
+						"expire dispatch offer for expired ride request: %w",
+						err,
+					)
+				}
+
+				rideRequestExpired = true
+
+				return nil
 			}
 
 			if request.Status != rideRequestStatusMatching {
@@ -309,6 +373,12 @@ func (s *Service) AcceptOffer(
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	// The transaction has committed the terminal lifecycle state.
+	// Return the domain error only after the EXPIRED changes are durable.
+	if rideRequestExpired {
+		return nil, ErrRideRequestExpired
 	}
 
 	if acceptedTrip == nil {

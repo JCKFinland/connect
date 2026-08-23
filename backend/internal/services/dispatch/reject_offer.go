@@ -25,9 +25,10 @@ const (
 //   - validate PENDING
 //   - if already expired, mark EXPIRED
 //   - otherwise mark REJECTED
-//   - reset associated ride request MATCHING -> PENDING
+//   - return a still-valid MATCHING ride request to PENDING
+//   - terminate an already hard-expired ride request as EXPIRED
 //
-// The ride request can then be offered to another eligible driver.
+// A still-valid ride can then be offered to another eligible driver.
 func (s *Service) RejectOffer(
 	ctx context.Context,
 	offerID string,
@@ -167,15 +168,42 @@ func (s *Service) RejectOffer(
 
 			if request.Status == rideRequestStatusMatching {
 
-				if err := rideRequests.UpdateStatus(
-					ctx,
-					request.ID,
-					rideRequestStatusPending,
-				); err != nil {
-					return fmt.Errorf(
-						"reset ride request after dispatch offer resolution: %w",
-						err,
-					)
+				if request.ExpiresAt != nil &&
+					!now.Before(request.ExpiresAt.UTC()) {
+
+					if err := rideRequests.UpdateStatus(
+						ctx,
+						request.ID,
+						rideRequestStatusExpired,
+					); err != nil {
+						return fmt.Errorf(
+							"expire ride request after dispatch offer resolution: %w",
+							err,
+						)
+					}
+
+					if err := rideRequests.ResetDispatchRetry(
+						ctx,
+						request.ID,
+					); err != nil {
+						return fmt.Errorf(
+							"reset expired ride dispatch retry state: %w",
+							err,
+						)
+					}
+
+				} else {
+
+					if err := rideRequests.UpdateStatus(
+						ctx,
+						request.ID,
+						rideRequestStatusPending,
+					); err != nil {
+						return fmt.Errorf(
+							"reset ride request after dispatch offer resolution: %w",
+							err,
+						)
+					}
 				}
 			}
 

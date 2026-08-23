@@ -13,6 +13,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
 func TestCreateOfferConcurrentSameRide(t *testing.T) {
@@ -61,6 +62,31 @@ func TestCreateOfferConcurrentSameRide(t *testing.T) {
 		)
 	}
 	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
 
 	// ---------------------------------------------------------
 	// 3. Test fixture IDs.
@@ -559,6 +585,31 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 		)
 	}
 	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
 
 	// ---------------------------------------------------------
 	// 3. Existing controlled test fixture.
@@ -1461,9 +1512,37 @@ func TestCreateOfferResetsDispatchRetryState(t *testing.T) {
 
 	db, err := database.Connect(cfg)
 	if err != nil {
-		t.Fatalf("connect database: %v", err)
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
 	}
 	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
 
 	const (
 		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
@@ -1773,6 +1852,1984 @@ func TestCreateOfferResetsDispatchRetryState(t *testing.T) {
 		t.Fatalf(
 			"expected last_dispatch_attempt_at NULL, got %v",
 			*lastDispatchAttemptAt,
+		)
+	}
+}
+
+func TestCreateOfferRejectsExpiredRideAndPersistsExpiredState(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	rideRequestID := uuid.NewString()
+
+	now := time.Now().UTC()
+	expiredAt := now.Add(-1 * time.Minute)
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Expired Ride Test Pickup',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'Expired ride CreateOffer lifecycle test',
+				$3,
+				$4,
+				4,
+				$5,
+				$6,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		expiredAt,
+		now.Add(20*time.Second),
+		now.Add(-5*time.Second),
+	)
+	if err != nil {
+		t.Fatalf(
+			"create expired ride request: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup expired ride offers: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup expired ride request: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	driverAssignmentRepo :=
+		postgresrepo.NewDriverAssignmentRepository(db)
+
+	driverPresenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	vehicleRepo :=
+		postgresrepo.NewVehicleRepository(db)
+
+	driverRepo :=
+		postgresrepo.NewDriverRepository(db)
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Assignments:  driverAssignmentRepo,
+			Presence:     driverPresenceRepo,
+			Vehicles:     vehicleRepo,
+			Drivers:      driverRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	offer, err := service.CreateOffer(
+		ctx,
+		rideRequestID,
+		"",
+	)
+
+	if !errors.Is(
+		err,
+		ErrRideRequestExpired,
+	) {
+		t.Fatalf(
+			"expected ErrRideRequestExpired, got offer=%v err=%v",
+			offer,
+			err,
+		)
+	}
+
+	if offer != nil {
+		t.Fatalf(
+			"expected no dispatch offer for expired ride, got %+v",
+			offer,
+		)
+	}
+
+	var (
+		status                string
+		retryCount            int
+		nextDispatchAttemptAt *time.Time
+		lastDispatchAttemptAt *time.Time
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				status,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&status,
+		&retryCount,
+		&nextDispatchAttemptAt,
+		&lastDispatchAttemptAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read expired ride lifecycle state: %v",
+			err,
+		)
+	}
+
+	if status != rideRequestStatusExpired {
+		t.Fatalf(
+			"expected ride status %s, got %s",
+			rideRequestStatusExpired,
+			status,
+		)
+	}
+
+	if retryCount != 0 {
+		t.Fatalf(
+			"expected retry count 0, got %d",
+			retryCount,
+		)
+	}
+
+	if nextDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected next_dispatch_attempt_at NULL, got %v",
+			*nextDispatchAttemptAt,
+		)
+	}
+
+	if lastDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected last_dispatch_attempt_at NULL, got %v",
+			*lastDispatchAttemptAt,
+		)
+	}
+
+	var offerCount int
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM dispatch_offers
+			WHERE ride_request_id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&offerCount,
+	)
+	if err != nil {
+		t.Fatalf(
+			"count expired ride dispatch offers: %v",
+			err,
+		)
+	}
+
+	if offerCount != 0 {
+		t.Fatalf(
+			"expected zero dispatch offers for expired ride, got %d",
+			offerCount,
+		)
+	}
+}
+
+func TestCreateOfferCapsOfferExpiryAtRideExpiry(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	// This test temporarily uses John's dispatch fixture.
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const (
+		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
+	)
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	// Expire only genuinely stale offers before checking whether
+	// the controlled fixture is free.
+	if _, err := offerRepo.ExpireStalePending(
+		ctx,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatalf(
+			"expire stale offers before expiry-cap test: %v",
+			err,
+		)
+	}
+
+	var existingPendingOfferCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM dispatch_offers
+			WHERE driver_id = $1
+			  AND status = 'PENDING'
+		`,
+		johnDriverID,
+	).Scan(
+		&existingPendingOfferCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing pending driver offer: %v",
+			err,
+		)
+	}
+
+	if existingPendingOfferCount != 0 {
+		t.Skip(
+			"John already has an active PENDING dispatch offer",
+		)
+	}
+
+	// Preserve the existing presence state.
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					last_heartbeat_at = $4,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalHeartbeat,
+		)
+
+		if restoreErr != nil {
+			t.Logf(
+				"restore driver presence: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// Make John eligible for the controlled dispatch.
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = TRUE,
+				availability_status = 'AVAILABLE',
+				latitude = 60.2055,
+				longitude = 24.6559,
+				last_heartbeat_at = NOW(),
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	); err != nil {
+		t.Fatalf(
+			"prepare driver presence: %v",
+			err,
+		)
+	}
+
+	rideRequestID := uuid.NewString()
+
+	now := time.Now().UTC()
+
+	// Deliberately shorter than the normal 30-second dispatch
+	// offer timeout.
+	rideExpiresAt := now.Add(
+		10 * time.Second,
+	)
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Offer Expiry Cap Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'Dispatch offer hard-expiry cap integration test',
+				$3,
+				$4,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		rideExpiresAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create offer-expiry-cap ride: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup expiry-cap offer: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup expiry-cap ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	driverAssignmentRepo :=
+		postgresrepo.NewDriverAssignmentRepository(db)
+
+	driverPresenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	vehicleRepo :=
+		postgresrepo.NewVehicleRepository(db)
+
+	driverRepo :=
+		postgresrepo.NewDriverRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Assignments:  driverAssignmentRepo,
+			Presence:     driverPresenceRepo,
+			Vehicles:     vehicleRepo,
+			Drivers:      driverRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	offer, err := service.CreateOffer(
+		ctx,
+		rideRequestID,
+		"",
+	)
+	if err != nil {
+		t.Fatalf(
+			"create expiry-capped dispatch offer: %v",
+			err,
+		)
+	}
+
+	if offer == nil {
+		t.Fatal(
+			"expected created dispatch offer",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// The offer may not extend beyond the ride's hard expiry.
+	// ---------------------------------------------------------
+
+	if offer.ExpiresAt.After(rideExpiresAt) {
+		t.Fatalf(
+			"offer expiry %v exceeds ride expiry %v",
+			offer.ExpiresAt,
+			rideExpiresAt,
+		)
+	}
+
+	// PostgreSQL may round TIMESTAMPTZ to microsecond precision.
+	const timestampTolerance = time.Millisecond
+
+	expiryDifference :=
+		offer.ExpiresAt.Sub(rideExpiresAt)
+
+	if expiryDifference < 0 {
+		expiryDifference = -expiryDifference
+	}
+
+	if expiryDifference > timestampTolerance {
+		t.Fatalf(
+			"expected offer expiry about %v, got %v",
+			rideExpiresAt,
+			offer.ExpiresAt,
+		)
+	}
+
+	// Verify the persisted database value too.
+	var persistedOfferExpiresAt time.Time
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT expires_at
+			FROM dispatch_offers
+			WHERE id = $1
+		`,
+		offer.ID,
+	).Scan(
+		&persistedOfferExpiresAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read persisted offer expiry: %v",
+			err,
+		)
+	}
+
+	if persistedOfferExpiresAt.After(
+		rideExpiresAt.Add(timestampTolerance),
+	) {
+		t.Fatalf(
+			"persisted offer expiry %v exceeds ride expiry %v",
+			persistedOfferExpiresAt,
+			rideExpiresAt,
+		)
+	}
+
+	persistedDifference :=
+		persistedOfferExpiresAt.Sub(
+			rideExpiresAt,
+		)
+
+	if persistedDifference < 0 {
+		persistedDifference = -persistedDifference
+	}
+
+	if persistedDifference > timestampTolerance {
+		t.Fatalf(
+			"expected persisted offer expiry about %v, got %v",
+			rideExpiresAt,
+			persistedOfferExpiresAt,
+		)
+	}
+}
+
+func TestRejectOfferDoesNotResurrectExpiredRide(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	// This test uses John's operational driver fixture because
+	// dispatch_offers.driver_id has a foreign-key relationship
+	// to drivers.id.
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const (
+		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
+
+		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
+
+		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
+
+		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
+
+		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
+	)
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	// Remove only genuinely stale offers before checking whether
+	// the shared fixture is currently available.
+	if _, err := offerRepo.ExpireStalePending(
+		ctx,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatalf(
+			"expire stale offers before rejection lifecycle test: %v",
+			err,
+		)
+	}
+
+	var existingPendingOfferCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM dispatch_offers
+			WHERE driver_id = $1
+			  AND status = 'PENDING'
+		`,
+		johnDriverID,
+	).Scan(
+		&existingPendingOfferCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing pending driver offer: %v",
+			err,
+		)
+	}
+
+	if existingPendingOfferCount != 0 {
+		t.Skip(
+			"John already has an active PENDING dispatch offer",
+		)
+	}
+
+	rideRequestID := uuid.NewString()
+	offerID := uuid.NewString()
+
+	now := time.Now().UTC()
+
+	// The ride itself has already expired.
+	rideExpiresAt := now.Add(
+		-1 * time.Minute,
+	)
+
+	// The dispatch offer is deliberately still valid.
+	//
+	// This proves that ride-request hard expiry independently
+	// terminates the ride lifecycle even when the driver rejects
+	// a still-valid offer.
+	offerExpiresAt := now.Add(
+		5 * time.Minute,
+	)
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Expired Rejection Test Pickup',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'MATCHING',
+				'RejectOffer hard-expiry lifecycle test',
+				$3,
+				$4,
+				4,
+				$5,
+				$6,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		rideExpiresAt,
+		now.Add(20*time.Second),
+		now.Add(-5*time.Second),
+	)
+	if err != nil {
+		t.Fatalf(
+			"create expired MATCHING ride: %v",
+			err,
+		)
+	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO dispatch_offers
+			(
+				id,
+				ride_request_id,
+				driver_id,
+				vehicle_id,
+				company_id,
+				branch_id,
+				fleet_id,
+				status,
+				offered_at,
+				expires_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				$3,
+				$4,
+				$5,
+				$6,
+				$7,
+				'PENDING',
+				$8,
+				$9,
+				$8,
+				$8
+			)
+		`,
+		offerID,
+		rideRequestID,
+		johnDriverID,
+		johnVehicleID,
+		companyID,
+		branchID,
+		fleetID,
+		now,
+		offerExpiresAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create rejection lifecycle dispatch offer: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE id = $1
+			`,
+			offerID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rejection lifecycle offer: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rejection lifecycle ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	resolvedOffer, err := service.RejectOffer(
+		ctx,
+		offerID,
+		"Driver declined expired ride",
+	)
+	if err != nil {
+		t.Fatalf(
+			"reject expired ride dispatch offer: %v",
+			err,
+		)
+	}
+
+	if resolvedOffer == nil {
+		t.Fatal(
+			"expected resolved dispatch offer",
+		)
+	}
+
+	if resolvedOffer.Status !=
+		dispatchOfferStatusRejected {
+
+		t.Fatalf(
+			"expected offer status %s, got %s",
+			dispatchOfferStatusRejected,
+			resolvedOffer.Status,
+		)
+	}
+
+	var (
+		rideStatus            string
+		retryCount            int
+		nextDispatchAttemptAt *time.Time
+		lastDispatchAttemptAt *time.Time
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				status,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&rideStatus,
+		&retryCount,
+		&nextDispatchAttemptAt,
+		&lastDispatchAttemptAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read rejected expired ride state: %v",
+			err,
+		)
+	}
+
+	if rideStatus != rideRequestStatusExpired {
+		t.Fatalf(
+			"expected ride status %s, got %s",
+			rideRequestStatusExpired,
+			rideStatus,
+		)
+	}
+
+	if retryCount != 0 {
+		t.Fatalf(
+			"expected retry count 0, got %d",
+			retryCount,
+		)
+	}
+
+	if nextDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected next_dispatch_attempt_at NULL, got %v",
+			*nextDispatchAttemptAt,
+		)
+	}
+
+	if lastDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected last_dispatch_attempt_at NULL, got %v",
+			*lastDispatchAttemptAt,
+		)
+	}
+}
+
+func TestAcceptOfferExpiredRidePersistsTerminalState(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	// ---------------------------------------------------------
+	// Serialize access to John's shared integration fixture.
+	// ---------------------------------------------------------
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const (
+		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
+
+		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
+
+		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
+
+		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
+
+		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
+	)
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	// ---------------------------------------------------------
+	// Remove only genuinely stale offers before checking whether
+	// the fixture is free.
+	// ---------------------------------------------------------
+
+	if _, err := offerRepo.ExpireStalePending(
+		ctx,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatalf(
+			"expire stale offers before expired-acceptance test: %v",
+			err,
+		)
+	}
+
+	var existingPendingOfferCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM dispatch_offers
+			WHERE driver_id = $1
+			  AND status = 'PENDING'
+		`,
+		johnDriverID,
+	).Scan(
+		&existingPendingOfferCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing pending driver offer: %v",
+			err,
+		)
+	}
+
+	if existingPendingOfferCount != 0 {
+		t.Skip(
+			"John already has an active PENDING dispatch offer",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Ensure the fixture is not already involved in an active trip.
+	// ---------------------------------------------------------
+
+	var activeTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE driver_id = $1
+			  AND is_active = TRUE
+			  AND deleted_at IS NULL
+			  AND status NOT IN (
+				  'COMPLETED',
+				  'CANCELLED',
+				  'NO_DRIVER_AVAILABLE',
+				  'EXPIRED'
+			  )
+		`,
+		johnUserID,
+	).Scan(
+		&activeTripCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing active trip: %v",
+			err,
+		)
+	}
+
+	if activeTripCount != 0 {
+		t.Skip(
+			"John already has an active trip",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Preserve John's presence state.
+	// ---------------------------------------------------------
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					last_heartbeat_at = $4,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalHeartbeat,
+		)
+
+		if restoreErr != nil {
+			t.Logf(
+				"restore driver presence: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Make John AVAILABLE before the acceptance attempt.
+	// ---------------------------------------------------------
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = TRUE,
+				availability_status = 'AVAILABLE',
+				last_heartbeat_at = NOW(),
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	); err != nil {
+		t.Fatalf(
+			"prepare driver presence: %v",
+			err,
+		)
+	}
+
+	rideRequestID := uuid.NewString()
+	offerID := uuid.NewString()
+
+	now := time.Now().UTC()
+
+	rideExpiresAt := now.Add(
+		-1 * time.Minute,
+	)
+
+	// Deliberately keep the offer itself valid.
+	//
+	// This proves the ride-request hard expiry independently
+	// terminates acceptance even when the offer has not yet timed out.
+	offerExpiresAt := now.Add(
+		5 * time.Minute,
+	)
+
+	// ---------------------------------------------------------
+	// Create expired MATCHING ride with existing retry state.
+	// ---------------------------------------------------------
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Expired Acceptance Test Pickup',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'MATCHING',
+				'AcceptOffer hard-expiry lifecycle test',
+				$3,
+				$4,
+				4,
+				$5,
+				$6,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		rideExpiresAt,
+		now.Add(20*time.Second),
+		now.Add(-5*time.Second),
+	)
+	if err != nil {
+		t.Fatalf(
+			"create expired acceptance test ride: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Create still-valid PENDING offer.
+	// ---------------------------------------------------------
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO dispatch_offers
+			(
+				id,
+				ride_request_id,
+				driver_id,
+				vehicle_id,
+				company_id,
+				branch_id,
+				fleet_id,
+				status,
+				offered_at,
+				expires_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				$3,
+				$4,
+				$5,
+				$6,
+				$7,
+				'PENDING',
+				$8,
+				$9,
+				$8,
+				$8
+			)
+		`,
+		offerID,
+		rideRequestID,
+		johnDriverID,
+		johnVehicleID,
+		companyID,
+		branchID,
+		fleetID,
+		now,
+		offerExpiresAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create expired acceptance test offer: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM trips
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup expired acceptance trip: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE id = $1
+			`,
+			offerID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup expired acceptance offer: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup expired acceptance ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	driverPresenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	tripRepo :=
+		postgresrepo.NewTripRepository(db)
+
+	driverRepo :=
+		postgresrepo.NewDriverRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Presence:     driverPresenceRepo,
+			Trips:        tripRepo,
+			Drivers:      driverRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// Attempt acceptance.
+	// ---------------------------------------------------------
+
+	trip, err := service.AcceptOffer(
+		ctx,
+		offerID,
+	)
+
+	if !errors.Is(
+		err,
+		ErrRideRequestExpired,
+	) {
+		t.Fatalf(
+			"expected ErrRideRequestExpired, got trip=%v err=%v",
+			trip,
+			err,
+		)
+	}
+
+	if trip != nil {
+		t.Fatalf(
+			"expected no trip for expired ride, got %+v",
+			trip,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Verify ride terminal state and retry cleanup.
+	// ---------------------------------------------------------
+
+	var (
+		rideStatus            string
+		retryCount            int
+		nextDispatchAttemptAt *time.Time
+		lastDispatchAttemptAt *time.Time
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				status,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&rideStatus,
+		&retryCount,
+		&nextDispatchAttemptAt,
+		&lastDispatchAttemptAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read expired acceptance ride state: %v",
+			err,
+		)
+	}
+
+	if rideStatus != rideRequestStatusExpired {
+		t.Fatalf(
+			"expected ride status %s, got %s",
+			rideRequestStatusExpired,
+			rideStatus,
+		)
+	}
+
+	if retryCount != 0 {
+		t.Fatalf(
+			"expected retry count 0, got %d",
+			retryCount,
+		)
+	}
+
+	if nextDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected next_dispatch_attempt_at NULL, got %v",
+			*nextDispatchAttemptAt,
+		)
+	}
+
+	if lastDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected last_dispatch_attempt_at NULL, got %v",
+			*lastDispatchAttemptAt,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Verify dispatch offer was terminally expired.
+	// ---------------------------------------------------------
+
+	var offerStatus string
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT status
+			FROM dispatch_offers
+			WHERE id = $1
+		`,
+		offerID,
+	).Scan(
+		&offerStatus,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read expired acceptance offer status: %v",
+			err,
+		)
+	}
+
+	if offerStatus != dispatchOfferStatusExpired {
+		t.Fatalf(
+			"expected offer status %s, got %s",
+			dispatchOfferStatusExpired,
+			offerStatus,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Verify no trip was created.
+	// ---------------------------------------------------------
+
+	var tripCount int
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE ride_request_id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&tripCount,
+	)
+	if err != nil {
+		t.Fatalf(
+			"count expired acceptance trips: %v",
+			err,
+		)
+	}
+
+	if tripCount != 0 {
+		t.Fatalf(
+			"expected zero trips for expired ride, got %d",
+			tripCount,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Driver must remain AVAILABLE.
+	// ---------------------------------------------------------
+
+	var availabilityStatus string
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT availability_status
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&availabilityStatus,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read driver availability after expired acceptance: %v",
+			err,
+		)
+	}
+
+	if availabilityStatus != "AVAILABLE" {
+		t.Fatalf(
+			"expected driver to remain AVAILABLE, got %s",
+			availabilityStatus,
+		)
+	}
+}
+
+func TestRedispatchWorkerExpiresRideWaitingInBackoff(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	rideRequestID := uuid.NewString()
+
+	now := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Worker Hard Expiry Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'Redispatch worker hard-expiry lifecycle test',
+				$3,
+				$4,
+				5,
+				$5,
+				$6,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		now.Add(-1*time.Minute),
+		now.Add(30*time.Second),
+		now.Add(-10*time.Second),
+	)
+	if err != nil {
+		t.Fatalf(
+			"create expired backoff ride: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup worker expiry offers: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup worker expiry ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	if err := service.runRedispatchCycle(
+		ctx,
+		100,
+	); err != nil {
+		t.Fatalf(
+			"run redispatch worker cycle: %v",
+			err,
+		)
+	}
+
+	var (
+		status                string
+		retryCount            int
+		nextDispatchAttemptAt *time.Time
+		lastDispatchAttemptAt *time.Time
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				status,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&status,
+		&retryCount,
+		&nextDispatchAttemptAt,
+		&lastDispatchAttemptAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read worker-expired ride state: %v",
+			err,
+		)
+	}
+
+	if status != rideRequestStatusExpired {
+		t.Fatalf(
+			"expected ride status %s, got %s",
+			rideRequestStatusExpired,
+			status,
+		)
+	}
+
+	if retryCount != 0 {
+		t.Fatalf(
+			"expected retry count 0, got %d",
+			retryCount,
+		)
+	}
+
+	if nextDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected next_dispatch_attempt_at NULL, got %v",
+			*nextDispatchAttemptAt,
+		)
+	}
+
+	if lastDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected last_dispatch_attempt_at NULL, got %v",
+			*lastDispatchAttemptAt,
+		)
+	}
+
+	var offerCount int
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM dispatch_offers
+			WHERE ride_request_id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&offerCount,
+	)
+	if err != nil {
+		t.Fatalf(
+			"count worker-expired ride offers: %v",
+			err,
+		)
+	}
+
+	if offerCount != 0 {
+		t.Fatalf(
+			"expected zero dispatch offers after hard expiry, got %d",
+			offerCount,
 		)
 	}
 }

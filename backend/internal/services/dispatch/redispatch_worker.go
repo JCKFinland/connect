@@ -121,6 +121,7 @@ func (s *Service) StartRedispatchWorker(
 }
 
 // runRedispatchCycle performs one automatic redispatch cycle.
+
 func (s *Service) runRedispatchCycle(
 	ctx context.Context,
 	batchSize int,
@@ -145,6 +146,30 @@ func (s *Service) runRedispatchCycle(
 		return fmt.Errorf(
 			"recover expired dispatch offers: %w",
 			err,
+		)
+	}
+
+	expiredRideRequestIDs, err :=
+		s.rideRequests.ExpireDispatchableRideRequests(
+			ctx,
+			time.Now().UTC(),
+		)
+
+	if err != nil {
+		return fmt.Errorf(
+			"expire ride requests: %w",
+			err,
+		)
+	}
+
+	if len(expiredRideRequestIDs) > 0 {
+		s.log.InfoContext(
+			ctx,
+			"ride requests expired",
+			slog.Int(
+				"expired_ride_request_count",
+				len(expiredRideRequestIDs),
+			),
 		)
 	}
 
@@ -374,6 +399,7 @@ func (s *Service) runRedispatchCycle(
 //   - resets their MATCHING ride requests to PENDING
 //
 // The returned integer is the number of offers expired during this cycle.
+
 func (s *Service) recoverExpiredDispatchOffers(
 	ctx context.Context,
 ) (int, error) {
@@ -433,19 +459,59 @@ func (s *Service) recoverExpiredDispatchOffers(
 					)
 				}
 
-				if request.Status !=
-					rideRequestStatusMatching {
+				if request.Status != rideRequestStatusMatching {
+					continue
+				}
+
+				// ---------------------------------------------------------
+				// The dispatch offer expired. Decide whether the ride itself
+				// may continue matching.
+				//
+				// If the ride's own hard expiry has been reached, terminate
+				// the ride lifecycle instead of returning it to PENDING.
+				// ---------------------------------------------------------
+
+				if request.ExpiresAt != nil &&
+					!now.Before(request.ExpiresAt.UTC()) {
+
+					if err := rideRequests.UpdateStatus(
+						ctx,
+						request.ID,
+						rideRequestStatusExpired,
+					); err != nil {
+						return fmt.Errorf(
+							"expire ride request after dispatch offer expiry: %w",
+							err,
+						)
+					}
+
+					if err := rideRequests.ResetDispatchRetry(
+						ctx,
+						request.ID,
+					); err != nil {
+						return fmt.Errorf(
+							"reset expired ride dispatch retry state: %w",
+							err,
+						)
+					}
+
+					s.log.InfoContext(
+						ctx,
+						"ride request expired during dispatch recovery",
+						slog.String(
+							"ride_request_id",
+							request.ID,
+						),
+					)
 
 					continue
 				}
 
-				if err :=
-					rideRequests.UpdateStatus(
-						ctx,
-						request.ID,
-						rideRequestStatusPending,
-					); err != nil {
-
+				if err := rideRequests.UpdateStatus(
+					ctx,
+					request.ID,
+					rideRequestStatusPending,
+				); err != nil {
 					return fmt.Errorf(
 						"reset expired offer ride request: %w",
 						err,

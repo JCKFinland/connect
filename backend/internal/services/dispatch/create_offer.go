@@ -17,10 +17,15 @@ import (
 
 const (
 	rideRequestStatusMatching = "MATCHING"
+	rideRequestStatusExpired  = "EXPIRED"
 
 	dispatchOfferStatusPending = "PENDING"
 
 	defaultDispatchOfferTimeout = 30 * time.Second
+)
+
+var ErrRideRequestExpired = errors.New(
+	"ride request has expired",
 )
 
 // CreateOffer selects the nearest eligible available driver and creates
@@ -69,7 +74,10 @@ func (s *Service) CreateOffer(
 		)
 	}
 
-	var createdOffer *models.DispatchOffer
+	var (
+		createdOffer       *models.DispatchOffer
+		rideRequestExpired bool
+	)
 
 	err := postgresrepo.RunInTransaction(
 		ctx,
@@ -122,10 +130,11 @@ func (s *Service) CreateOffer(
 			// 2. Expire stale PENDING dispatch offers.
 			// ---------------------------------------------------------
 
-			expiredRideRequestIDs, err := offers.ExpireStalePending(
-				ctx,
-				now,
-			)
+			expiredRideRequestIDs, err :=
+				offers.ExpireStalePending(
+					ctx,
+					now,
+				)
 			if err != nil {
 				return fmt.Errorf(
 					"expire stale dispatch offers: %w",
@@ -136,8 +145,11 @@ func (s *Service) CreateOffer(
 			// ---------------------------------------------------------
 			// 3. Recover ride requests belonging to stale offers.
 			//
-			// Only MATCHING requests are moved back to PENDING.
-			// ACCEPTED, CANCELLED, EXPIRED, or other lifecycle
+			// A still-valid MATCHING request returns to PENDING.
+			// A ride whose own expires_at has been reached becomes
+			// terminal EXPIRED instead.
+			//
+			// ACCEPTED, CANCELLED, EXPIRED, and other lifecycle
 			// states are deliberately left untouched.
 			// ---------------------------------------------------------
 
@@ -159,7 +171,38 @@ func (s *Service) CreateOffer(
 					)
 				}
 
-				if expiredRequest.Status != rideRequestStatusMatching {
+				if expiredRequest.Status !=
+					rideRequestStatusMatching {
+
+					continue
+				}
+
+				if expiredRequest.ExpiresAt != nil &&
+					!now.Before(
+						expiredRequest.ExpiresAt.UTC(),
+					) {
+
+					if err := rideRequests.UpdateStatus(
+						ctx,
+						expiredRequest.ID,
+						rideRequestStatusExpired,
+					); err != nil {
+						return fmt.Errorf(
+							"expire ride request after stale offer expiry: %w",
+							err,
+						)
+					}
+
+					if err := rideRequests.ResetDispatchRetry(
+						ctx,
+						expiredRequest.ID,
+					); err != nil {
+						return fmt.Errorf(
+							"reset expired ride dispatch retry state: %w",
+							err,
+						)
+					}
+
 					continue
 				}
 
@@ -205,25 +248,79 @@ func (s *Service) CreateOffer(
 					continue
 				}
 
-				previouslyOfferedDrivers[driverID] = struct{}{}
+				previouslyOfferedDrivers[driverID] =
+					struct{}{}
 			}
 
 			// ---------------------------------------------------------
 			// 5. Lock and validate requested ride request.
 			//
-			// The advisory lock protects the logical dispatch operation,
-			// while FOR UPDATE protects the actual ride_requests row.
+			// The advisory lock protects the logical dispatch
+			// operation, while FOR UPDATE protects the actual
+			// ride_requests row.
 			// ---------------------------------------------------------
 
-			request, err := rideRequests.GetByIDForUpdate(
-				ctx,
-				rideRequestID,
-			)
+			request, err :=
+				rideRequests.GetByIDForUpdate(
+					ctx,
+					rideRequestID,
+				)
 			if err != nil {
 				return fmt.Errorf(
 					"get ride request: %w",
 					err,
 				)
+			}
+
+			// ---------------------------------------------------------
+			// Enforce ride-request hard expiration.
+			//
+			// expires_at is the authoritative end of the matching
+			// lifecycle. Once reached, the ride may no longer receive
+			// another dispatch offer.
+			//
+			// NULL expires_at means no configured hard expiration.
+			//
+			// Important:
+			// Do not return ErrRideRequestExpired from inside this
+			// transaction after changing state. Doing so would roll
+			// back the EXPIRED update. Instead, commit the state first
+			// and return the sentinel after RunInTransaction finishes.
+			// ---------------------------------------------------------
+
+			if request.ExpiresAt != nil &&
+				!now.Before(request.ExpiresAt.UTC()) {
+
+				if request.Status ==
+					rideRequestStatusPending ||
+					request.Status ==
+						rideRequestStatusMatching {
+
+					if err := rideRequests.UpdateStatus(
+						ctx,
+						request.ID,
+						rideRequestStatusExpired,
+					); err != nil {
+						return fmt.Errorf(
+							"expire ride request before dispatch: %w",
+							err,
+						)
+					}
+
+					if err := rideRequests.ResetDispatchRetry(
+						ctx,
+						request.ID,
+					); err != nil {
+						return fmt.Errorf(
+							"reset expired ride dispatch retry state: %w",
+							err,
+						)
+					}
+				}
+
+				rideRequestExpired = true
+
+				return nil
 			}
 
 			if request.Status != rideRequestStatusPending {
@@ -267,6 +364,7 @@ func (s *Service) CreateOffer(
 					candidate.LastHeartbeatAt == nil ||
 					candidate.Latitude == nil ||
 					candidate.Longitude == nil {
+
 					continue
 				}
 
@@ -275,7 +373,9 @@ func (s *Service) CreateOffer(
 				)
 
 				if heartbeatAge < 0 ||
-					heartbeatAge > s.cfg.Presence.HeartbeatTimeout {
+					heartbeatAge >
+						s.cfg.Presence.HeartbeatTimeout {
+
 					continue
 				}
 
@@ -303,12 +403,12 @@ func (s *Service) CreateOffer(
 				if operationalDriver == nil ||
 					operationalDriver.ID == "" ||
 					!operationalDriver.IsActive {
+
 					continue
 				}
 
 				// Never offer the same ride to the same driver again.
-				_, alreadyOffered :=
-					previouslyOfferedDrivers[operationalDriver.ID]
+				_, alreadyOffered := previouslyOfferedDrivers[operationalDriver.ID]
 
 				if alreadyOffered {
 					continue
@@ -336,13 +436,15 @@ func (s *Service) CreateOffer(
 
 				if assignment == nil ||
 					assignment.VehicleID == "" {
+
 					continue
 				}
 
-				vehicle, err := vehicles.GetByID(
-					ctx,
-					assignment.VehicleID,
-				)
+				vehicle, err :=
+					vehicles.GetByID(
+						ctx,
+						assignment.VehicleID,
+					)
 
 				if errors.Is(
 					err,
@@ -360,6 +462,7 @@ func (s *Service) CreateOffer(
 
 				if vehicle == nil ||
 					!vehicle.IsActive {
+
 					continue
 				}
 
@@ -404,6 +507,7 @@ func (s *Service) CreateOffer(
 			// ---------------------------------------------------------
 
 			var selected *models.DriverPresence
+
 			var selectedAssignment *models.DriverAssignment
 
 			for _, candidate := range candidates {
@@ -430,6 +534,7 @@ func (s *Service) CreateOffer(
 
 				if lockedDriver == nil ||
 					lockedDriver.LastHeartbeatAt == nil {
+
 					continue
 				}
 
@@ -440,6 +545,7 @@ func (s *Service) CreateOffer(
 				if lockedHeartbeatAge < 0 ||
 					lockedHeartbeatAge >
 						s.cfg.Presence.HeartbeatTimeout {
+
 					continue
 				}
 
@@ -468,6 +574,7 @@ func (s *Service) CreateOffer(
 				if lockedOperationalDriver == nil ||
 					lockedOperationalDriver.ID == "" ||
 					!lockedOperationalDriver.IsActive {
+
 					continue
 				}
 
@@ -499,13 +606,15 @@ func (s *Service) CreateOffer(
 
 				if lockedAssignment == nil ||
 					lockedAssignment.VehicleID == "" {
+
 					continue
 				}
 
-				lockedVehicle, err := vehicles.GetByID(
-					ctx,
-					lockedAssignment.VehicleID,
-				)
+				lockedVehicle, err :=
+					vehicles.GetByID(
+						ctx,
+						lockedAssignment.VehicleID,
+					)
 
 				if errors.Is(
 					err,
@@ -523,6 +632,7 @@ func (s *Service) CreateOffer(
 
 				if lockedVehicle == nil ||
 					!lockedVehicle.IsActive {
+
 					continue
 				}
 
@@ -541,6 +651,7 @@ func (s *Service) CreateOffer(
 
 			if selected == nil ||
 				selectedAssignment == nil {
+
 				return ErrNoAvailableDrivers
 			}
 
@@ -562,6 +673,7 @@ func (s *Service) CreateOffer(
 			if driver == nil ||
 				driver.ID == "" ||
 				!driver.IsActive {
+
 				return fmt.Errorf(
 					"selected driver has no active driver record",
 				)
@@ -576,7 +688,27 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
-			// 10. Create PENDING dispatch offer.
+			// 10. Calculate offer expiration.
+			//
+			// The dispatch offer may never remain valid beyond the
+			// ride request's own hard expiration.
+			// ---------------------------------------------------------
+
+			offerExpiresAt := now.Add(
+				defaultDispatchOfferTimeout,
+			)
+
+			if request.ExpiresAt != nil &&
+				request.ExpiresAt.UTC().Before(
+					offerExpiresAt,
+				) {
+
+				offerExpiresAt =
+					request.ExpiresAt.UTC()
+			}
+
+			// ---------------------------------------------------------
+			// 11. Create PENDING dispatch offer.
 			// ---------------------------------------------------------
 
 			offer := &models.DispatchOffer{
@@ -594,9 +726,7 @@ func (s *Service) CreateOffer(
 				Status: dispatchOfferStatusPending,
 
 				OfferedAt: now,
-				ExpiresAt: now.Add(
-					defaultDispatchOfferTimeout,
-				),
+				ExpiresAt: offerExpiresAt,
 
 				CreatedAt: now,
 				UpdatedAt: now,
@@ -617,7 +747,7 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
-			// Reset automatic redispatch backoff.
+			// 12. Reset automatic redispatch backoff.
 			//
 			// Once an offer is successfully created, any previous
 			// no-driver retry state is no longer relevant.
@@ -634,7 +764,7 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
-			// 11. Ride request becomes MATCHING.
+			// 13. Ride request becomes MATCHING.
 			//
 			// No trip exists yet and the selected driver remains
 			// AVAILABLE until the offer is accepted.
@@ -658,6 +788,12 @@ func (s *Service) CreateOffer(
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	// The transaction has committed the terminal EXPIRED state,
+	// so the caller can now safely receive the lifecycle error.
+	if rideRequestExpired {
+		return nil, ErrRideRequestExpired
 	}
 
 	if createdOffer == nil {

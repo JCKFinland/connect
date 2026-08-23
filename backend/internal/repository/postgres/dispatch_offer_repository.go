@@ -470,12 +470,13 @@ func (r *DispatchOfferRepository) ListDriverIDsByRideRequest(
 	return driverIDs, nil
 }
 
-// ListRedispatchableRideRequestIDsForUpdate returns redispatchable ride
-// requests and locks their ride_requests rows for the lifetime of the
-// current PostgreSQL transaction.
+// ListRedispatchableRideRequestIDs returns ride requests that are eligible
+// for another automatic dispatch attempt.
 //
-// FOR UPDATE SKIP LOCKED allows multiple CONNECT backend instances to run
-// redispatch workers concurrently without selecting the same ride request.
+// Discovery does not claim or lock a ride request. CreateOffer() acquires
+// the authoritative PostgreSQL advisory lock for the ride before performing
+// dispatch state changes.
+
 func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
 	ctx context.Context,
 	limit int,
@@ -493,6 +494,11 @@ func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
 		AND (
 			rr.next_dispatch_attempt_at IS NULL
 			OR rr.next_dispatch_attempt_at <= NOW()
+		)
+
+		AND (
+			rr.expires_at IS NULL
+			OR rr.expires_at > NOW()
 		)
 
 		  AND EXISTS (

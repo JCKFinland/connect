@@ -52,4 +52,9 @@ type RideRequestRepository interface {
 		ctx context.Context,
 		rideRequestID string,
 	) error
+
+	ExpireDispatchableRideRequests(
+		ctx context.Context,
+		now time.Time,
+	) ([]string, error)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
 func TestDispatchOfferAccept(t *testing.T) {
@@ -64,6 +65,31 @@ func TestDispatchOfferAccept(t *testing.T) {
 		)
 	}
 	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
 
 	repo := postgresrepo.NewDispatchOfferRepository(db)
 
@@ -237,6 +263,31 @@ func TestDispatchOfferReject(t *testing.T) {
 		t.Fatalf("connect database: %v", err)
 	}
 	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
 
 	repo := postgresrepo.NewDispatchOfferRepository(db)
 
@@ -480,6 +531,31 @@ func TestDispatchOfferExpire(t *testing.T) {
 		t.Fatalf("connect database: %v", err)
 	}
 	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
 
 	repo := postgresrepo.NewDispatchOfferRepository(db)
 
