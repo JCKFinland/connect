@@ -531,7 +531,7 @@ func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"list redispatchable ride requests for update: %w",
+			"list redispatchable ride requests: %w",
 			err,
 		)
 	}

@@ -3833,3 +3833,483 @@ func TestRedispatchWorkerExpiresRideWaitingInBackoff(t *testing.T) {
 		)
 	}
 }
+
+func TestRedispatchDiscoveryCannotDispatchRideExpiredAfterDiscovery(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	// Historical dispatch activity uses John's real driver/vehicle
+	// fixture. Serialize access with the rest of the dispatch tests.
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const (
+		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
+
+		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
+
+		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
+
+		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
+
+		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
+	)
+
+	rideRequestID := uuid.NewString()
+	historicalOfferID := uuid.NewString()
+
+	now := time.Now().UTC()
+
+	// Initially valid long enough to be discovered.
+	initialRideExpiry := now.Add(
+		5 * time.Minute,
+	)
+
+	// ---------------------------------------------------------
+	// Create redispatchable PENDING ride.
+	// ---------------------------------------------------------
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Redispatch Discovery Race Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'Ride expires after redispatch discovery',
+				$3,
+				$4,
+				3,
+				NULL,
+				$5,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		initialRideExpiry,
+		now.Add(-30*time.Second),
+	)
+	if err != nil {
+		t.Fatalf(
+			"create redispatch discovery race ride: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Create historical REJECTED offer.
+	//
+	// This makes the ride eligible for redispatch discovery while
+	// leaving no active PENDING offer.
+	// ---------------------------------------------------------
+
+	historicalOfferedAt := now.Add(
+		-2 * time.Minute,
+	)
+
+	historicalExpiresAt := historicalOfferedAt.Add(
+		30 * time.Second,
+	)
+
+	historicalRespondedAt := historicalOfferedAt.Add(
+		10 * time.Second,
+	)
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO dispatch_offers
+			(
+				id,
+				ride_request_id,
+				driver_id,
+				vehicle_id,
+				company_id,
+				branch_id,
+				fleet_id,
+				status,
+				offered_at,
+				expires_at,
+				responded_at,
+				rejection_reason,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				$3,
+				$4,
+				$5,
+				$6,
+				$7,
+				'REJECTED',
+				$8,
+				$9,
+				$10,
+				'Historical redispatch race fixture',
+				$8,
+				$10
+			)
+		`,
+		historicalOfferID,
+		rideRequestID,
+		johnDriverID,
+		johnVehicleID,
+		companyID,
+		branchID,
+		fleetID,
+		historicalOfferedAt,
+		historicalExpiresAt,
+		historicalRespondedAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create historical dispatch offer: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup redispatch race offers: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup redispatch race ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	// ---------------------------------------------------------
+	// Phase 1: worker discovery sees the ride as redispatchable.
+	// ---------------------------------------------------------
+
+	redispatchableIDs, err :=
+		offerRepo.ListRedispatchableRideRequestIDs(
+			ctx,
+			100,
+		)
+	if err != nil {
+		t.Fatalf(
+			"discover redispatchable rides: %v",
+			err,
+		)
+	}
+
+	discovered := false
+
+	for _, id := range redispatchableIDs {
+		if id == rideRequestID {
+			discovered = true
+			break
+		}
+	}
+
+	if !discovered {
+		t.Fatalf(
+			"expected ride %s to be discovered for redispatch",
+			rideRequestID,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Phase 2: the ride reaches its hard expiry after discovery.
+	//
+	// This simulates the race between discovery and CreateOffer().
+	// ---------------------------------------------------------
+
+	expiredAt := time.Now().UTC().Add(
+		-1 * time.Second,
+	)
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE ride_requests
+			SET
+				expires_at = $2,
+				updated_at = NOW()
+			WHERE id = $1
+		`,
+		rideRequestID,
+		expiredAt,
+	); err != nil {
+		t.Fatalf(
+			"expire ride after redispatch discovery: %v",
+			err,
+		)
+	}
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// Phase 3: stale discovery result attempts dispatch.
+	//
+	// CreateOffer() must re-check the authoritative ride state
+	// after acquiring its database locks.
+	// ---------------------------------------------------------
+
+	offer, err := service.CreateOffer(
+		ctx,
+		rideRequestID,
+		"",
+	)
+
+	if !errors.Is(
+		err,
+		ErrRideRequestExpired,
+	) {
+		t.Fatalf(
+			"expected ErrRideRequestExpired after stale discovery, got offer=%v err=%v",
+			offer,
+			err,
+		)
+	}
+
+	if offer != nil {
+		t.Fatalf(
+			"expected no new offer for expired ride, got %+v",
+			offer,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Verify terminal lifecycle state.
+	// ---------------------------------------------------------
+
+	var (
+		status                string
+		retryCount            int
+		nextDispatchAttemptAt *time.Time
+		lastDispatchAttemptAt *time.Time
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				status,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&status,
+		&retryCount,
+		&nextDispatchAttemptAt,
+		&lastDispatchAttemptAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read redispatch race ride state: %v",
+			err,
+		)
+	}
+
+	if status != rideRequestStatusExpired {
+		t.Fatalf(
+			"expected ride status %s, got %s",
+			rideRequestStatusExpired,
+			status,
+		)
+	}
+
+	if retryCount != 0 {
+		t.Fatalf(
+			"expected retry count 0, got %d",
+			retryCount,
+		)
+	}
+
+	if nextDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected next_dispatch_attempt_at NULL, got %v",
+			*nextDispatchAttemptAt,
+		)
+	}
+
+	if lastDispatchAttemptAt != nil {
+		t.Fatalf(
+			"expected last_dispatch_attempt_at NULL, got %v",
+			*lastDispatchAttemptAt,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Historical offer must remain the only offer for this ride.
+	// ---------------------------------------------------------
+
+	var (
+		totalOfferCount   int
+		pendingOfferCount int
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				COUNT(*),
+				COUNT(*) FILTER (
+					WHERE status = 'PENDING'
+				)
+			FROM dispatch_offers
+			WHERE ride_request_id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&totalOfferCount,
+		&pendingOfferCount,
+	)
+	if err != nil {
+		t.Fatalf(
+			"count redispatch race offers: %v",
+			err,
+		)
+	}
+
+	if totalOfferCount != 1 {
+		t.Fatalf(
+			"expected only historical offer to remain, got %d offers",
+			totalOfferCount,
+		)
+	}
+
+	if pendingOfferCount != 0 {
+		t.Fatalf(
+			"expected zero PENDING offers after hard expiry, got %d",
+			pendingOfferCount,
+		)
+	}
+}
