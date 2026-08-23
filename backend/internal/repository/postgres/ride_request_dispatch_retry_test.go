@@ -484,3 +484,205 @@ func TestScheduleDispatchRetryRejectsAlreadyExpiredRide(t *testing.T) {
 		)
 	}
 }
+
+func TestScheduleDispatchRetryDoesNotTerminateOnHighRetryCount(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	rideRequestID := uuid.NewString()
+
+	now := time.Now().UTC()
+	attemptedAt := now.Add(1 * time.Minute)
+	expiresAt := attemptedAt.Add(5 * time.Minute)
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				dispatch_retry_count,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'High Retry Count Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'Retry count must not terminate matching',
+				$3,
+				$4,
+				100,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		expiresAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create high-retry ride: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, cleanupErr := db.Exec(
+			context.Background(),
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup high-retry ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	repo := NewRideRequestRepository(db)
+
+	retryCount, nextAttemptAt, err :=
+		repo.ScheduleDispatchRetry(
+			ctx,
+			rideRequestID,
+			attemptedAt,
+		)
+	if err != nil {
+		t.Fatalf(
+			"schedule high-count retry: %v",
+			err,
+		)
+	}
+
+	if retryCount != 101 {
+		t.Fatalf(
+			"expected retry count 101, got %d",
+			retryCount,
+		)
+	}
+
+	expectedNextAttempt :=
+		attemptedAt.Add(30 * time.Second)
+
+	const timestampTolerance = time.Millisecond
+
+	difference :=
+		nextAttemptAt.Sub(expectedNextAttempt)
+
+	if difference < 0 {
+		difference = -difference
+	}
+
+	if difference > timestampTolerance {
+		t.Fatalf(
+			"expected next attempt about %v, got %v",
+			expectedNextAttempt,
+			nextAttemptAt,
+		)
+	}
+
+	var (
+		status              string
+		persistedRetryCount int
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				status,
+				dispatch_retry_count
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&status,
+		&persistedRetryCount,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read high-retry ride state: %v",
+			err,
+		)
+	}
+
+	if status != "PENDING" {
+		t.Fatalf(
+			"expected ride to remain PENDING, got %s",
+			status,
+		)
+	}
+
+	if persistedRetryCount != 101 {
+		t.Fatalf(
+			"expected persisted retry count 101, got %d",
+			persistedRetryCount,
+		)
+	}
+}

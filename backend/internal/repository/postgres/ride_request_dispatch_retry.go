@@ -13,6 +13,10 @@ import (
 // ScheduleDispatchRetry records a failed automatic dispatch attempt and
 // calculates the next eligible retry time.
 //
+// Retry count is used for backoff progression and operational telemetry.
+// It does not terminate matching. The ride request's expires_at value is
+// the authoritative dispatch termination boundary.
+//
 // Backoff policy:
 //
 //	1st failure -> 2 seconds

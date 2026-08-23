@@ -6,6 +6,13 @@ import "time"
 type RideRequest struct {
 	BaseModel
 
+	// DispatchRetryCount records consecutive automatic dispatch attempts that
+	// failed because no eligible driver was available.
+	//
+	// It is operational telemetry and backoff state only. It does not terminate
+	// the ride request; expires_at is the authoritative matching deadline.
+	DispatchRetryCount int `db:"dispatch_retry_count" json:"dispatch_retry_count"`
+
 	CustomerID string `db:"customer_id" json:"customer_id"`
 
 	PickupAddress   string  `db:"pickup_address" json:"pickup_address"`
@@ -25,8 +32,6 @@ type RideRequest struct {
 
 	RequestedAt time.Time  `db:"requested_at" json:"requested_at"`
 	ExpiresAt   *time.Time `db:"expires_at" json:"expires_at,omitempty"`
-
-	DispatchRetryCount int `db:"dispatch_retry_count" json:"dispatch_retry_count"`
 
 	NextDispatchAttemptAt *time.Time `db:"next_dispatch_attempt_at" json:"next_dispatch_attempt_at,omitempty"`
 
