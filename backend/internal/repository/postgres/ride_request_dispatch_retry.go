@@ -36,40 +36,59 @@ func (r *RideRequestRepository) ScheduleDispatchRetry(
 	}
 
 	const query = `
-		WITH params AS (
-			SELECT
-				$1::uuid AS ride_request_id,
-				$2::timestamptz AS attempted_at
-		)
-		UPDATE ride_requests AS rr
-		SET
-			dispatch_retry_count =
-				rr.dispatch_retry_count + 1,
+	WITH params AS (
+		SELECT
+			$1::uuid AS ride_request_id,
+			$2::timestamptz AS attempted_at
+	)
+	UPDATE ride_requests AS rr
+	SET
+		dispatch_retry_count =
+			rr.dispatch_retry_count + 1,
 
-			last_dispatch_attempt_at =
-				params.attempted_at,
+		last_dispatch_attempt_at =
+			params.attempted_at,
 
-			next_dispatch_attempt_at =
-				params.attempted_at +
-				CASE rr.dispatch_retry_count
-					WHEN 0 THEN INTERVAL '2 seconds'
-					WHEN 1 THEN INTERVAL '5 seconds'
-					WHEN 2 THEN INTERVAL '10 seconds'
-					WHEN 3 THEN INTERVAL '20 seconds'
-					ELSE INTERVAL '30 seconds'
-				END,
+		next_dispatch_attempt_at =
+			CASE
+				WHEN rr.expires_at IS NULL THEN
+					params.attempted_at +
+					CASE rr.dispatch_retry_count
+						WHEN 0 THEN INTERVAL '2 seconds'
+						WHEN 1 THEN INTERVAL '5 seconds'
+						WHEN 2 THEN INTERVAL '10 seconds'
+						WHEN 3 THEN INTERVAL '20 seconds'
+						ELSE INTERVAL '30 seconds'
+					END
 
-			updated_at = NOW()
+				ELSE LEAST(
+					rr.expires_at,
+					params.attempted_at +
+					CASE rr.dispatch_retry_count
+						WHEN 0 THEN INTERVAL '2 seconds'
+						WHEN 1 THEN INTERVAL '5 seconds'
+						WHEN 2 THEN INTERVAL '10 seconds'
+						WHEN 3 THEN INTERVAL '20 seconds'
+						ELSE INTERVAL '30 seconds'
+					END
+				)
+			END,
 
-		FROM params
+		updated_at = NOW()
 
-		WHERE rr.id = params.ride_request_id
-		  AND rr.status = 'PENDING'
+	FROM params
 
-		RETURNING
-			rr.dispatch_retry_count,
-			rr.next_dispatch_attempt_at
-	`
+	WHERE rr.id = params.ride_request_id
+  AND rr.status = 'PENDING'
+  AND (
+        rr.expires_at IS NULL
+        OR rr.expires_at > params.attempted_at
+  )
+
+	RETURNING
+		rr.dispatch_retry_count,
+		rr.next_dispatch_attempt_at
+`
 
 	var (
 		retryCount    int
