@@ -52,5 +52,11 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("LOG_LEVEL is required")
 	}
 
+	if cfg.RideRequest.DefaultMatchingLifetime <= 0 {
+		return fmt.Errorf(
+			"ride request default matching lifetime must be greater than zero",
+		)
+	}
+
 	return nil
 }

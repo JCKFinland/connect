@@ -36,11 +36,12 @@ type LogConfig struct {
 
 // Config represents the application's configuration.
 type Config struct {
-	App      AppConfig
-	Database DatabaseConfig
-	JWT      JWTConfig
-	Presence PresenceConfig
-	Log      LogConfig
+	App         AppConfig
+	Database    DatabaseConfig
+	JWT         JWTConfig
+	Presence    PresenceConfig
+	RideRequest RideRequestConfig
+	Log         LogConfig
 }
 
 // PresenceConfig contains real-time driver presence configuration.
@@ -48,6 +49,12 @@ type PresenceConfig struct {
 	HeartbeatTimeout time.Duration
 }
 
+// RideRequestConfig contains ride-request lifecycle configuration.
+type RideRequestConfig struct {
+	DefaultMatchingLifetime time.Duration
+}
+
+// Load loads the application configuration.
 // Load loads the application configuration.
 func Load() (*Config, error) {
 
@@ -71,6 +78,16 @@ func Load() (*Config, error) {
 
 	heartbeatTimeout, err := time.ParseDuration(
 		GetEnv("PRESENCE_HEARTBEAT_TIMEOUT", "2m"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	defaultMatchingLifetime, err := time.ParseDuration(
+		GetEnv(
+			"RIDE_REQUEST_DEFAULT_MATCHING_LIFETIME",
+			"10m",
+		),
 	)
 	if err != nil {
 		return nil, err
@@ -100,12 +117,16 @@ func Load() (*Config, error) {
 			RefreshTokenDuration: refreshDuration,
 		},
 
-		Log: LogConfig{
-			Level: GetEnv("LOG_LEVEL", "info"),
-		},
-
 		Presence: PresenceConfig{
 			HeartbeatTimeout: heartbeatTimeout,
+		},
+
+		RideRequest: RideRequestConfig{
+			DefaultMatchingLifetime: defaultMatchingLifetime,
+		},
+
+		Log: LogConfig{
+			Level: GetEnv("LOG_LEVEL", "info"),
 		},
 	}
 

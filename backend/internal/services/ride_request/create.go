@@ -2,6 +2,8 @@ package ride_request
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -9,12 +11,66 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 )
 
+var ErrInvalidRideRequestExpiry = errors.New(
+	"invalid ride request expiry",
+)
+
 // Create creates a new ride request.
+//
+// If expires_at is omitted, CONNECT applies the configured default matching
+// lifetime. An explicitly supplied expires_at must be strictly in the future.
 func (s *Service) Create(
 	ctx context.Context,
 	req CreateRideRequestRequest,
 ) (*models.RideRequest, error) {
+
+	if s == nil {
+		return nil, errors.New(
+			"ride request service is required",
+		)
+	}
+
+	if s.repo == nil {
+		return nil, errors.New(
+			"ride request repository is not configured",
+		)
+	}
+
+	if s.cfg == nil {
+		return nil, errors.New(
+			"ride request configuration is not configured",
+		)
+	}
+
+	if s.cfg.RideRequest.DefaultMatchingLifetime <= 0 {
+		return nil, errors.New(
+			"ride request default matching lifetime must be greater than zero",
+		)
+	}
+
 	now := time.Now().UTC()
+
+	var expiresAt time.Time
+
+	if req.ExpiresAt != nil {
+
+		requestedExpiry := req.ExpiresAt.UTC()
+
+		if !requestedExpiry.After(now) {
+			return nil, fmt.Errorf(
+				"%w: expires_at must be in the future",
+				ErrInvalidRideRequestExpiry,
+			)
+		}
+
+		expiresAt = requestedExpiry
+
+	} else {
+
+		expiresAt = now.Add(
+			s.cfg.RideRequest.DefaultMatchingLifetime,
+		)
+	}
 
 	request := &models.RideRequest{
 		BaseModel: models.BaseModel{
@@ -36,12 +92,12 @@ func (s *Service) Create(
 		RequestedVehicleType: req.RequestedVehicleType,
 		PassengerCount:       req.PassengerCount,
 
-		Status: "PENDING",
+		Status: StatusPending,
 
 		Notes: req.Notes,
 
 		RequestedAt: now,
-		ExpiresAt:   req.ExpiresAt,
+		ExpiresAt:   &expiresAt,
 	}
 
 	if request.RequestedVehicleType == "" {
