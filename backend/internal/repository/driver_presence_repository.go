@@ -49,6 +49,18 @@ type DriverPresenceRepository interface {
 		isOnline bool,
 	) error
 
+	// UpdateAvailabilityIfIdle updates a driver's manually controlled
+	// availability only when the driver is not committed to an active trip.
+	//
+	// It returns false without modifying presence when the driver is BUSY
+	// or has an active non-terminal trip.
+	UpdateAvailabilityIfIdle(
+		ctx context.Context,
+		driverID string,
+		status string,
+		isOnline bool,
+	) (bool, error)
+
 	SetOffline(
 		ctx context.Context,
 		driverID string,

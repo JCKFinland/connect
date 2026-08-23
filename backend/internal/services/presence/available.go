@@ -1,16 +1,34 @@
 package presence
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var ErrDriverAvailabilityLocked = errors.New(
+	"driver availability cannot be changed while committed to an active trip",
+)
 
 func (s *Service) UpdateAvailability(
 	ctx context.Context,
 	req UpdateAvailabilityRequest,
 ) error {
 
-	return s.presence.UpdateAvailability(
-		ctx,
-		req.UserID,
-		req.Status,
-		true,
-	)
+	updated, err :=
+		s.presence.UpdateAvailabilityIfIdle(
+			ctx,
+			req.UserID,
+			req.Status,
+			true,
+		)
+
+	if err != nil {
+		return err
+	}
+
+	if !updated {
+		return ErrDriverAvailabilityLocked
+	}
+
+	return nil
 }
