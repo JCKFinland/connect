@@ -95,4 +95,13 @@ type DriverPresenceRepository interface {
 		ctx context.Context,
 		driverID string,
 	) (bool, error)
+
+	AttachAssignmentIfIdle(
+		ctx context.Context,
+		driverID string,
+		companyID string,
+		branchID string,
+		vehicleID string,
+		assignmentID string,
+	) (bool, error)
 }
