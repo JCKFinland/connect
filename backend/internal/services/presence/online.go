@@ -69,7 +69,7 @@ func (s *Service) GoOnline(
 				err,
 				repository.ErrNotFound,
 			) {
-				return ErrDriverAssignmentRequired
+				return ErrDriverNotFound
 			}
 
 			if err != nil {

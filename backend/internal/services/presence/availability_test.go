@@ -2281,3 +2281,419 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 		)
 	}
 }
+
+func TestGoOnlineRejectsMissingPresenceRow(t *testing.T) {
+	ctx := context.Background()
+
+	// ---------------------------------------------------------
+	// 1. Run from backend root so config.Load() finds .env.
+	// ---------------------------------------------------------
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	// ---------------------------------------------------------
+	// 2. Load CONNECT configuration and database.
+	// ---------------------------------------------------------
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	// ---------------------------------------------------------
+	// 3. Serialize access to John's shared fixture.
+	// ---------------------------------------------------------
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+	// ---------------------------------------------------------
+	// 4. Confirm John still has an active assignment.
+	//
+	// This proves the failure is specifically caused by missing
+	// presence, not by missing assignment.
+	// ---------------------------------------------------------
+
+	assignmentRepo :=
+		postgresrepo.NewDriverAssignmentRepository(db)
+
+	activeAssignment, err :=
+		assignmentRepo.GetActiveByDriver(
+			ctx,
+			johnUserID,
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"load John's active assignment: %v",
+			err,
+		)
+	}
+
+	if activeAssignment == nil ||
+		activeAssignment.ID == "" {
+
+		t.Fatal(
+			"John fixture requires an active assignment",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 5. Avoid interfering with a legitimate active trip.
+	// ---------------------------------------------------------
+
+	var existingActiveTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE driver_id = $1
+			  AND is_active = TRUE
+			  AND deleted_at IS NULL
+			  AND status NOT IN (
+				'COMPLETED',
+				'CANCELLED',
+				'NO_DRIVER_AVAILABLE',
+				'EXPIRED'
+			  )
+		`,
+		johnUserID,
+	).Scan(
+		&existingActiveTripCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing active trip: %v",
+			err,
+		)
+	}
+
+	if existingActiveTripCount != 0 {
+		t.Skip(
+			"John already has an active trip",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 6. Preserve the COMPLETE driver_presence row.
+	//
+	// We save every column because this test temporarily deletes
+	// the shared fixture row and must restore it exactly.
+	// ---------------------------------------------------------
+
+	var (
+		originalDriverID           string
+		originalCompanyID          string
+		originalBranchID           *string
+		originalVehicleID          *string
+		originalAssignmentID       *string
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalLatitude           *float64
+		originalLongitude          *float64
+		originalHeading            *float64
+		originalSpeed              *float64
+		originalAccuracy           *float64
+		originalHeartbeat          *time.Time
+		originalCreatedAt          time.Time
+		originalUpdatedAt          time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				driver_id,
+				company_id,
+				branch_id,
+				vehicle_id,
+				assignment_id,
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				heading,
+				speed,
+				accuracy,
+				last_heartbeat_at,
+				created_at,
+				updated_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalDriverID,
+		&originalCompanyID,
+		&originalBranchID,
+		&originalVehicleID,
+		&originalAssignmentID,
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalLatitude,
+		&originalLongitude,
+		&originalHeading,
+		&originalSpeed,
+		&originalAccuracy,
+		&originalHeartbeat,
+		&originalCreatedAt,
+		&originalUpdatedAt,
+	); err != nil {
+		t.Fatalf(
+			"load original driver presence row: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 7. Always restore the deleted presence row.
+	// ---------------------------------------------------------
+
+	defer func() {
+		restoreCtx := context.Background()
+
+		if _, restoreErr := db.Exec(
+			restoreCtx,
+			`
+				INSERT INTO driver_presence
+				(
+					driver_id,
+					company_id,
+					branch_id,
+					vehicle_id,
+					assignment_id,
+					is_online,
+					availability_status,
+					latitude,
+					longitude,
+					heading,
+					speed,
+					accuracy,
+					last_heartbeat_at,
+					created_at,
+					updated_at
+				)
+				VALUES
+				(
+					$1,$2,$3,$4,$5,
+					$6,$7,$8,$9,$10,
+					$11,$12,$13,$14,$15
+				)
+				ON CONFLICT (driver_id)
+				DO UPDATE SET
+					company_id = EXCLUDED.company_id,
+					branch_id = EXCLUDED.branch_id,
+					vehicle_id = EXCLUDED.vehicle_id,
+					assignment_id = EXCLUDED.assignment_id,
+					is_online = EXCLUDED.is_online,
+					availability_status = EXCLUDED.availability_status,
+					latitude = EXCLUDED.latitude,
+					longitude = EXCLUDED.longitude,
+					heading = EXCLUDED.heading,
+					speed = EXCLUDED.speed,
+					accuracy = EXCLUDED.accuracy,
+					last_heartbeat_at = EXCLUDED.last_heartbeat_at,
+					created_at = EXCLUDED.created_at,
+					updated_at = EXCLUDED.updated_at
+			`,
+			originalDriverID,
+			originalCompanyID,
+			originalBranchID,
+			originalVehicleID,
+			originalAssignmentID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalLatitude,
+			originalLongitude,
+			originalHeading,
+			originalSpeed,
+			originalAccuracy,
+			originalHeartbeat,
+			originalCreatedAt,
+			originalUpdatedAt,
+		); restoreErr != nil {
+			t.Logf(
+				"restore deleted driver presence row: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// 8. Temporarily delete John's presence row.
+	// ---------------------------------------------------------
+
+	result, err := db.Exec(
+		ctx,
+		`
+			DELETE FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"delete driver presence for missing-row test: %v",
+			err,
+		)
+	}
+
+	if result.RowsAffected() != 1 {
+		t.Fatalf(
+			"expected one driver presence row to be deleted, got %d",
+			result.RowsAffected(),
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 9. Construct real transactional presence service.
+	// ---------------------------------------------------------
+
+	presenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:          db,
+			Config:      cfg,
+			Presence:    presenceRepo,
+			Assignments: assignmentRepo,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// 10. GoOnline must report missing driver presence.
+	// ---------------------------------------------------------
+
+	err = service.GoOnline(
+		ctx,
+		GoOnlineRequest{
+			UserID: johnUserID,
+		},
+	)
+
+	if !errors.Is(
+		err,
+		ErrDriverNotFound,
+	) {
+		t.Fatalf(
+			"expected ErrDriverNotFound, got %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 11. GoOnline must not recreate presence implicitly.
+	// ---------------------------------------------------------
+
+	var presenceCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&presenceCount,
+	); err != nil {
+		t.Fatalf(
+			"count presence after rejected GoOnline: %v",
+			err,
+		)
+	}
+
+	if presenceCount != 0 {
+		t.Fatalf(
+			"expected presence row to remain absent during test, got %d",
+			presenceCount,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 12. Active assignment must remain untouched.
+	// ---------------------------------------------------------
+
+	var persistedUnassignedAt *time.Time
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT unassigned_at
+			FROM driver_assignments
+			WHERE id = $1
+		`,
+		activeAssignment.ID,
+	).Scan(
+		&persistedUnassignedAt,
+	); err != nil {
+		t.Fatalf(
+			"read assignment after missing-presence GoOnline: %v",
+			err,
+		)
+	}
+
+	if persistedUnassignedAt != nil {
+		t.Fatalf(
+			"expected assignment to remain active, got unassigned_at=%v",
+			*persistedUnassignedAt,
+		)
+	}
+}
