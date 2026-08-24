@@ -2697,3 +2697,613 @@ func TestGoOnlineRejectsMissingPresenceRow(t *testing.T) {
 		)
 	}
 }
+
+func TestHeartbeatSucceedsForBusyOnlineDriver(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf("acquire John dispatch fixture lock: %v", err)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+	// ---------------------------------------------------------
+	// Preserve original heartbeat/location state.
+	// ---------------------------------------------------------
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalLatitude           *float64
+		originalLongitude          *float64
+		originalHeading            *float64
+		originalSpeed              *float64
+		originalAccuracy           *float64
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				heading,
+				speed,
+				accuracy,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalLatitude,
+		&originalLongitude,
+		&originalHeading,
+		&originalSpeed,
+		&originalAccuracy,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original heartbeat state: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					latitude = $4,
+					longitude = $5,
+					heading = $6,
+					speed = $7,
+					accuracy = $8,
+					last_heartbeat_at = $9,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalLatitude,
+			originalLongitude,
+			originalHeading,
+			originalSpeed,
+			originalAccuracy,
+			originalHeartbeat,
+		); restoreErr != nil {
+			t.Logf(
+				"restore heartbeat state: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Put driver online and BUSY.
+	// ---------------------------------------------------------
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = TRUE,
+				availability_status = 'BUSY',
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	); err != nil {
+		t.Fatalf(
+			"prepare BUSY heartbeat state: %v",
+			err,
+		)
+	}
+
+	presenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	service := NewService(
+		Dependencies{
+			Config:   cfg,
+			Presence: presenceRepo,
+		},
+	)
+
+	const (
+		latitude  = 60.1699
+		longitude = 24.9384
+		heading   = 180.0
+		speed     = 12.5
+		accuracy  = 4.0
+	)
+
+	beforeHeartbeat := time.Now().UTC()
+
+	err = service.Heartbeat(
+		ctx,
+		HeartbeatRequest{
+			UserID:    johnUserID,
+			Latitude:  latitude,
+			Longitude: longitude,
+			Heading:   heading,
+			Speed:     speed,
+			Accuracy:  accuracy,
+		},
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"heartbeat BUSY online driver: %v",
+			err,
+		)
+	}
+
+	var (
+		persistedLatitude  *float64
+		persistedLongitude *float64
+		persistedHeading   *float64
+		persistedSpeed     *float64
+		persistedAccuracy  *float64
+		persistedHeartbeat *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				latitude,
+				longitude,
+				heading,
+				speed,
+				accuracy,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&persistedLatitude,
+		&persistedLongitude,
+		&persistedHeading,
+		&persistedSpeed,
+		&persistedAccuracy,
+		&persistedHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"read heartbeat state: %v",
+			err,
+		)
+	}
+
+	if persistedLatitude == nil ||
+		*persistedLatitude != latitude {
+		t.Fatalf(
+			"expected latitude %v, got %v",
+			latitude,
+			persistedLatitude,
+		)
+	}
+
+	if persistedLongitude == nil ||
+		*persistedLongitude != longitude {
+		t.Fatalf(
+			"expected longitude %v, got %v",
+			longitude,
+			persistedLongitude,
+		)
+	}
+
+	if persistedHeading == nil ||
+		*persistedHeading != heading {
+		t.Fatalf(
+			"expected heading %v, got %v",
+			heading,
+			persistedHeading,
+		)
+	}
+
+	if persistedSpeed == nil ||
+		*persistedSpeed != speed {
+		t.Fatalf(
+			"expected speed %v, got %v",
+			speed,
+			persistedSpeed,
+		)
+	}
+
+	if persistedAccuracy == nil ||
+		*persistedAccuracy != accuracy {
+		t.Fatalf(
+			"expected accuracy %v, got %v",
+			accuracy,
+			persistedAccuracy,
+		)
+	}
+
+	if persistedHeartbeat == nil {
+		t.Fatal(
+			"expected last_heartbeat_at to be populated",
+		)
+	}
+
+	if persistedHeartbeat.Before(
+		beforeHeartbeat.Add(-time.Second),
+	) {
+		t.Fatalf(
+			"expected heartbeat to be refreshed, got %v",
+			*persistedHeartbeat,
+		)
+	}
+}
+
+func TestHeartbeatRejectsOfflineDriverAndPreservesLocation(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf("acquire John dispatch fixture lock: %v", err)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+	// ---------------------------------------------------------
+	// Preserve original state.
+	// ---------------------------------------------------------
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalLatitude           *float64
+		originalLongitude          *float64
+		originalHeading            *float64
+		originalSpeed              *float64
+		originalAccuracy           *float64
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				heading,
+				speed,
+				accuracy,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalLatitude,
+		&originalLongitude,
+		&originalHeading,
+		&originalSpeed,
+		&originalAccuracy,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original offline-heartbeat state: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					latitude = $4,
+					longitude = $5,
+					heading = $6,
+					speed = $7,
+					accuracy = $8,
+					last_heartbeat_at = $9,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalLatitude,
+			originalLongitude,
+			originalHeading,
+			originalSpeed,
+			originalAccuracy,
+			originalHeartbeat,
+		); restoreErr != nil {
+			t.Logf(
+				"restore offline heartbeat state: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Establish deterministic OFFLINE location/heartbeat state.
+	// ---------------------------------------------------------
+
+	const (
+		initialLatitude  = 60.1700
+		initialLongitude = 24.9400
+		initialHeading   = 90.0
+		initialSpeed     = 0.0
+		initialAccuracy  = 5.0
+	)
+
+	initialHeartbeat :=
+		time.Now().UTC().Add(-5 * time.Minute)
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = FALSE,
+				availability_status = 'OFFLINE',
+				latitude = $2,
+				longitude = $3,
+				heading = $4,
+				speed = $5,
+				accuracy = $6,
+				last_heartbeat_at = $7,
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+		initialLatitude,
+		initialLongitude,
+		initialHeading,
+		initialSpeed,
+		initialAccuracy,
+		initialHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"prepare OFFLINE heartbeat state: %v",
+			err,
+		)
+	}
+
+	presenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	service := NewService(
+		Dependencies{
+			Config:   cfg,
+			Presence: presenceRepo,
+		},
+	)
+
+	err = service.Heartbeat(
+		ctx,
+		HeartbeatRequest{
+			UserID:    johnUserID,
+			Latitude:  61.0,
+			Longitude: 25.0,
+			Heading:   200.0,
+			Speed:     30.0,
+			Accuracy:  2.0,
+		},
+	)
+
+	if !errors.Is(
+		err,
+		ErrDriverHeartbeatUnavailable,
+	) {
+		t.Fatalf(
+			"expected ErrDriverHeartbeatUnavailable, got %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Verify rejected heartbeat changed nothing.
+	// ---------------------------------------------------------
+
+	var (
+		persistedLatitude  *float64
+		persistedLongitude *float64
+		persistedHeading   *float64
+		persistedSpeed     *float64
+		persistedAccuracy  *float64
+		persistedHeartbeat *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				latitude,
+				longitude,
+				heading,
+				speed,
+				accuracy,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&persistedLatitude,
+		&persistedLongitude,
+		&persistedHeading,
+		&persistedSpeed,
+		&persistedAccuracy,
+		&persistedHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"read rejected heartbeat state: %v",
+			err,
+		)
+	}
+
+	if persistedLatitude == nil ||
+		*persistedLatitude != initialLatitude {
+		t.Fatalf(
+			"expected latitude %v to remain unchanged, got %v",
+			initialLatitude,
+			persistedLatitude,
+		)
+	}
+
+	if persistedLongitude == nil ||
+		*persistedLongitude != initialLongitude {
+		t.Fatalf(
+			"expected longitude %v to remain unchanged, got %v",
+			initialLongitude,
+			persistedLongitude,
+		)
+	}
+
+	if persistedHeading == nil ||
+		*persistedHeading != initialHeading {
+		t.Fatalf(
+			"expected heading %v to remain unchanged, got %v",
+			initialHeading,
+			persistedHeading,
+		)
+	}
+
+	if persistedSpeed == nil ||
+		*persistedSpeed != initialSpeed {
+		t.Fatalf(
+			"expected speed %v to remain unchanged, got %v",
+			initialSpeed,
+			persistedSpeed,
+		)
+	}
+
+	if persistedAccuracy == nil ||
+		*persistedAccuracy != initialAccuracy {
+		t.Fatalf(
+			"expected accuracy %v to remain unchanged, got %v",
+			initialAccuracy,
+			persistedAccuracy,
+		)
+	}
+
+	if persistedHeartbeat == nil {
+		t.Fatal(
+			"expected original heartbeat timestamp to remain present",
+		)
+	}
+
+	const timestampTolerance = time.Millisecond
+
+	heartbeatDifference :=
+		persistedHeartbeat.Sub(initialHeartbeat)
+
+	if heartbeatDifference < 0 {
+		heartbeatDifference = -heartbeatDifference
+	}
+
+	if heartbeatDifference > timestampTolerance {
+		t.Fatalf(
+			"expected heartbeat timestamp %v to remain unchanged, got %v",
+			initialHeartbeat,
+			*persistedHeartbeat,
+		)
+	}
+}

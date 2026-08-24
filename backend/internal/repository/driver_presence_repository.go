@@ -42,6 +42,21 @@ type DriverPresenceRepository interface {
 		accuracy float64,
 	) error
 
+	// UpdateHeartbeatIfOnline updates live driver location only when the
+	// driver currently has an online operational presence.
+	//
+	// It returns false without modifying the row when the driver exists
+	// but is offline or otherwise not in an online operational state.
+	UpdateHeartbeatIfOnline(
+		ctx context.Context,
+		driverID string,
+		latitude float64,
+		longitude float64,
+		heading float64,
+		speed float64,
+		accuracy float64,
+	) (bool, error)
+
 	UpdateAvailability(
 		ctx context.Context,
 		driverID string,
