@@ -79,4 +79,20 @@ type DriverPresenceRepository interface {
 	ListAllAvailable(
 		ctx context.Context,
 	) ([]*models.DriverPresence, error)
+
+	// GetByDriverIDForUpdate retrieves and locks a driver's presence row
+	// for the lifetime of the current PostgreSQL transaction.
+	GetByDriverIDForUpdate(
+		ctx context.Context,
+		driverID string,
+	) (*models.DriverPresence, error)
+
+	// DetachAssignmentIfIdle removes the driver's vehicle/assignment presence
+	// state only when there is no active trip and the driver is not BUSY.
+	//
+	// It returns false without modifying presence when detachment is unsafe.
+	DetachAssignmentIfIdle(
+		ctx context.Context,
+		driverID string,
+	) (bool, error)
 }

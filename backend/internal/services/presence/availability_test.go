@@ -15,7 +15,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
-func TestUpdateAvailabilityRejectsDriverWithActiveTrip(t *testing.T) {
+func TestGoOfflineRejectsDriverWithActiveTrip(t *testing.T) {
 	ctx := context.Background()
 
 	originalDir, err := os.Getwd()
@@ -366,14 +366,14 @@ func TestUpdateAvailabilityRejectsDriverWithActiveTrip(t *testing.T) {
 	)
 
 	// ---------------------------------------------------------
-	// Manual AVAILABLE transition must be rejected.
+	// Going OFFLINE must also be rejected while the driver is
+	// committed to an active trip.
 	// ---------------------------------------------------------
 
-	err = service.UpdateAvailability(
+	err = service.GoOffline(
 		ctx,
-		UpdateAvailabilityRequest{
+		GoOfflineRequest{
 			UserID: johnUserID,
-			Status: StatusAvailable,
 		},
 	)
 

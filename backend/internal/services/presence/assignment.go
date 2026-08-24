@@ -77,32 +77,30 @@ func (s *Service) AttachAssignment(
 	)
 }
 
-// DetachAssignment removes the assignment from
-// the driver's presence.
+// DetachAssignment removes assignment-related presence state only when the
+// driver is not committed to an active trip.
+//
+// This method is suitable for transaction-backed presence repositories.
+// Assignment lifecycle callers must treat ErrDriverAvailabilityLocked as
+// a failed unassignment and roll back their surrounding transaction.
 func (s *Service) DetachAssignment(
 	ctx context.Context,
 	driverID string,
 ) error {
 
-	p, err := s.presence.GetByDriverID(
-		ctx,
-		driverID,
-	)
+	updated, err :=
+		s.presence.DetachAssignmentIfIdle(
+			ctx,
+			driverID,
+		)
 
 	if err != nil {
 		return err
 	}
 
-	p.AssignmentID = nil
+	if !updated {
+		return ErrDriverAvailabilityLocked
+	}
 
-	p.VehicleID = nil
-
-	p.IsOnline = false
-
-	p.AvailabilityStatus = StatusOffline
-
-	return s.presence.Update(
-		ctx,
-		p,
-	)
+	return nil
 }

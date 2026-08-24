@@ -239,8 +239,9 @@ func main() {
 	// Matches trip orders to close by active drivers using presence data.
 	assignmentService := assignment.NewService(
 		assignment.Dependencies{
+			DB:          db,
 			Assignments: driverAssignmentRepo,
-			Presence:    presenceService, // Cross-service dependency interaction.
+			Presence:    presenceService,
 		},
 	)
 	// ----------------------------------------------------------------------

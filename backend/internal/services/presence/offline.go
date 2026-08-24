@@ -7,8 +7,21 @@ func (s *Service) GoOffline(
 	req GoOfflineRequest,
 ) error {
 
-	return s.presence.SetOffline(
-		ctx,
-		req.UserID,
-	)
+	updated, err :=
+		s.presence.UpdateAvailabilityIfIdle(
+			ctx,
+			req.UserID,
+			StatusOffline,
+			false,
+		)
+
+	if err != nil {
+		return err
+	}
+
+	if !updated {
+		return ErrDriverAvailabilityLocked
+	}
+
+	return nil
 }
