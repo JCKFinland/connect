@@ -1848,3 +1848,436 @@ func TestGoOfflineRejectsDriverWithActiveTrip(t *testing.T) {
 		)
 	}
 }
+
+func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
+	ctx := context.Background()
+
+	// ---------------------------------------------------------
+	// 1. Run from backend root so config.Load() finds .env.
+	// ---------------------------------------------------------
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	// ---------------------------------------------------------
+	// 2. Load CONNECT configuration and database.
+	// ---------------------------------------------------------
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	// ---------------------------------------------------------
+	// 3. Serialize access to John's shared fixture.
+	// ---------------------------------------------------------
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+	// ---------------------------------------------------------
+	// 4. Load John's current active assignment.
+	// ---------------------------------------------------------
+
+	assignmentRepo :=
+		postgresrepo.NewDriverAssignmentRepository(db)
+
+	activeAssignment, err :=
+		assignmentRepo.GetActiveByDriver(
+			ctx,
+			johnUserID,
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"load John's active assignment: %v",
+			err,
+		)
+	}
+
+	if activeAssignment == nil ||
+		activeAssignment.ID == "" {
+
+		t.Fatal(
+			"John fixture requires an active assignment",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 5. Do not interfere with an existing active trip.
+	// ---------------------------------------------------------
+
+	var existingActiveTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE driver_id = $1
+			  AND is_active = TRUE
+			  AND deleted_at IS NULL
+			  AND status NOT IN (
+				'COMPLETED',
+				'CANCELLED',
+				'NO_DRIVER_AVAILABLE',
+				'EXPIRED'
+			  )
+		`,
+		johnUserID,
+	).Scan(
+		&existingActiveTripCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing active trip: %v",
+			err,
+		)
+	}
+
+	if existingActiveTripCount != 0 {
+		t.Skip(
+			"John already has an active trip",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 6. Preserve John's presence state.
+	// ---------------------------------------------------------
+
+	var (
+		originalAssignmentID       *string
+		originalVehicleID          *string
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				assignment_id,
+				vehicle_id,
+				is_online,
+				availability_status,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalAssignmentID,
+		&originalVehicleID,
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original driver presence: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 7. Restore assignment + presence after the test.
+	// ---------------------------------------------------------
+
+	defer func() {
+		restoreCtx := context.Background()
+
+		if _, restoreErr := db.Exec(
+			restoreCtx,
+			`
+				UPDATE driver_assignments
+				SET
+					unassigned_at = NULL,
+					updated_at = NOW()
+				WHERE id = $1
+			`,
+			activeAssignment.ID,
+		); restoreErr != nil {
+			t.Logf(
+				"restore active assignment: %v",
+				restoreErr,
+			)
+		}
+
+		if _, restoreErr := db.Exec(
+			restoreCtx,
+			`
+				UPDATE driver_presence
+				SET
+					assignment_id = $2,
+					vehicle_id = $3,
+					is_online = $4,
+					availability_status = $5,
+					last_heartbeat_at = $6,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalAssignmentID,
+			originalVehicleID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalHeartbeat,
+		); restoreErr != nil {
+			t.Logf(
+				"restore driver presence: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// 8. Close John's assignment.
+	//
+	// Presence deliberately remains unchanged so we prove that
+	// a stale presence assignment cannot authorize GoOnline().
+	// ---------------------------------------------------------
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_assignments
+			SET
+				unassigned_at = NOW(),
+				updated_at = NOW()
+			WHERE id = $1
+		`,
+		activeAssignment.ID,
+	); err != nil {
+		t.Fatalf(
+			"close assignment for GoOnline test: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 9. Force presence OFFLINE while leaving stale assignment
+	//    and vehicle references intact.
+	// ---------------------------------------------------------
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = FALSE,
+				availability_status = 'OFFLINE',
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	); err != nil {
+		t.Fatalf(
+			"prepare OFFLINE presence: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 10. Construct real transactional presence service.
+	// ---------------------------------------------------------
+
+	presenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:          db,
+			Config:      cfg,
+			Presence:    presenceRepo,
+			Assignments: assignmentRepo,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// 11. GoOnline must reject the closed assignment.
+	// ---------------------------------------------------------
+
+	err = service.GoOnline(
+		ctx,
+		GoOnlineRequest{
+			UserID: johnUserID,
+		},
+	)
+
+	if !errors.Is(
+		err,
+		ErrDriverAssignmentRequired,
+	) {
+		t.Fatalf(
+			"expected ErrDriverAssignmentRequired, got %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 12. Presence must remain OFFLINE and unchanged.
+	// ---------------------------------------------------------
+
+	var (
+		persistedAssignmentID       *string
+		persistedVehicleID          *string
+		persistedIsOnline           bool
+		persistedAvailabilityStatus string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				assignment_id,
+				vehicle_id,
+				is_online,
+				availability_status
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&persistedAssignmentID,
+		&persistedVehicleID,
+		&persistedIsOnline,
+		&persistedAvailabilityStatus,
+	); err != nil {
+		t.Fatalf(
+			"read presence after rejected GoOnline: %v",
+			err,
+		)
+	}
+
+	if persistedIsOnline {
+		t.Fatal(
+			"expected driver to remain offline",
+		)
+	}
+
+	if persistedAvailabilityStatus != StatusOffline {
+		t.Fatalf(
+			"expected driver status %s, got %s",
+			StatusOffline,
+			persistedAvailabilityStatus,
+		)
+	}
+
+	if originalAssignmentID == nil {
+		if persistedAssignmentID != nil {
+			t.Fatalf(
+				"expected assignment_id to remain nil, got %v",
+				persistedAssignmentID,
+			)
+		}
+	} else {
+		if persistedAssignmentID == nil ||
+			*persistedAssignmentID != *originalAssignmentID {
+
+			t.Fatalf(
+				"expected stale assignment_id %s to remain unchanged, got %v",
+				*originalAssignmentID,
+				persistedAssignmentID,
+			)
+		}
+	}
+
+	if originalVehicleID == nil {
+		if persistedVehicleID != nil {
+			t.Fatalf(
+				"expected vehicle_id to remain nil, got %v",
+				persistedVehicleID,
+			)
+		}
+	} else {
+		if persistedVehicleID == nil ||
+			*persistedVehicleID != *originalVehicleID {
+
+			t.Fatalf(
+				"expected vehicle_id %s to remain unchanged, got %v",
+				*originalVehicleID,
+				persistedVehicleID,
+			)
+		}
+	}
+
+	// ---------------------------------------------------------
+	// 13. Confirm assignment remains closed during the test.
+	// ---------------------------------------------------------
+
+	var persistedUnassignedAt *time.Time
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT unassigned_at
+			FROM driver_assignments
+			WHERE id = $1
+		`,
+		activeAssignment.ID,
+	).Scan(
+		&persistedUnassignedAt,
+	); err != nil {
+		t.Fatalf(
+			"read closed assignment after rejected GoOnline: %v",
+			err,
+		)
+	}
+
+	if persistedUnassignedAt == nil {
+		t.Fatal(
+			"expected assignment to remain closed",
+		)
+	}
+}
