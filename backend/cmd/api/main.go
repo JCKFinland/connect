@@ -228,6 +228,7 @@ func main() {
 	// Tracks driver shifts, live maps, and online/offline status values.
 	presenceService := presence.NewService(
 		presence.Dependencies{
+			DB:          db,
 			Config:      cfg,
 			Users:       userRepo,
 			Drivers:     driverRepo,
