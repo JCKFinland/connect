@@ -52,6 +52,10 @@ func handlePresenceError(
 		errors.Is(
 			err,
 			presence.ErrInvalidAccuracy,
+		),
+		errors.Is(
+			err,
+			presence.ErrInvalidAvailabilityStatus,
 		):
 
 		response.BadRequest(

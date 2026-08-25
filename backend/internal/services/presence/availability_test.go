@@ -3706,3 +3706,304 @@ func TestHeartbeatRejectsInvalidTelemetryAndPreservesState(t *testing.T) {
 		)
 	}
 }
+func TestUpdateAvailabilityValidatesManualStatuses(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+	); err != nil {
+		t.Fatalf(
+			"load original availability state: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+		); restoreErr != nil {
+			t.Logf(
+				"restore availability state: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// Ensure the shared fixture is idle so valid manual transitions
+	// are allowed during this test.
+	var existingActiveTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE driver_id = $1
+			  AND is_active = TRUE
+			  AND deleted_at IS NULL
+			  AND status NOT IN (
+				'COMPLETED',
+				'CANCELLED',
+				'NO_DRIVER_AVAILABLE',
+				'EXPIRED'
+			  )
+		`,
+		johnUserID,
+	).Scan(
+		&existingActiveTripCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing active trip: %v",
+			err,
+		)
+	}
+
+	if existingActiveTripCount != 0 {
+		t.Skip(
+			"John already has an active trip",
+		)
+	}
+
+	presenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	service := NewService(
+		Dependencies{
+			Config:   cfg,
+			Presence: presenceRepo,
+		},
+	)
+
+	validStatuses := []string{
+		StatusAvailable,
+		StatusBreak,
+		StatusOffDuty,
+	}
+
+	for _, status := range validStatuses {
+		t.Run(
+			"valid_"+status,
+			func(t *testing.T) {
+
+				if _, err := db.Exec(
+					ctx,
+					`
+						UPDATE driver_presence
+						SET
+							is_online = TRUE,
+							availability_status = 'AVAILABLE',
+							updated_at = NOW()
+						WHERE driver_id = $1
+					`,
+					johnUserID,
+				); err != nil {
+					t.Fatalf(
+						"prepare valid availability state: %v",
+						err,
+					)
+				}
+
+				err := service.UpdateAvailability(
+					ctx,
+					UpdateAvailabilityRequest{
+						UserID: johnUserID,
+						Status: status,
+					},
+				)
+
+				if err != nil {
+					t.Fatalf(
+						"expected status %s to succeed, got %v",
+						status,
+						err,
+					)
+				}
+
+				var persistedStatus string
+
+				if err := db.QueryRow(
+					ctx,
+					`
+						SELECT availability_status
+						FROM driver_presence
+						WHERE driver_id = $1
+					`,
+					johnUserID,
+				).Scan(
+					&persistedStatus,
+				); err != nil {
+					t.Fatalf(
+						"read persisted availability status: %v",
+						err,
+					)
+				}
+
+				if persistedStatus != status {
+					t.Fatalf(
+						"expected status %s, got %s",
+						status,
+						persistedStatus,
+					)
+				}
+			},
+		)
+	}
+
+	invalidStatuses := []string{
+		StatusBusy,
+		StatusOffline,
+		StatusSuspended,
+		"INVALID_STATUS",
+		"",
+	}
+
+	for _, status := range invalidStatuses {
+		t.Run(
+			"invalid_"+status,
+			func(t *testing.T) {
+
+				if _, err := db.Exec(
+					ctx,
+					`
+						UPDATE driver_presence
+						SET
+							is_online = TRUE,
+							availability_status = 'AVAILABLE',
+							updated_at = NOW()
+						WHERE driver_id = $1
+					`,
+					johnUserID,
+				); err != nil {
+					t.Fatalf(
+						"prepare invalid availability state: %v",
+						err,
+					)
+				}
+
+				err := service.UpdateAvailability(
+					ctx,
+					UpdateAvailabilityRequest{
+						UserID: johnUserID,
+						Status: status,
+					},
+				)
+
+				if !errors.Is(
+					err,
+					ErrInvalidAvailabilityStatus,
+				) {
+					t.Fatalf(
+						"expected ErrInvalidAvailabilityStatus for %q, got %v",
+						status,
+						err,
+					)
+				}
+
+				var persistedStatus string
+
+				if err := db.QueryRow(
+					ctx,
+					`
+						SELECT availability_status
+						FROM driver_presence
+						WHERE driver_id = $1
+					`,
+					johnUserID,
+				).Scan(
+					&persistedStatus,
+				); err != nil {
+					t.Fatalf(
+						"read availability after rejected status: %v",
+						err,
+					)
+				}
+
+				if persistedStatus != StatusAvailable {
+					t.Fatalf(
+						"expected rejected status %q to leave AVAILABLE unchanged, got %s",
+						status,
+						persistedStatus,
+					)
+				}
+			},
+		)
+	}
+}

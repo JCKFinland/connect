@@ -13,6 +13,8 @@ const (
 	StatusAvailable = "AVAILABLE"
 	StatusBusy      = "BUSY"
 	StatusBreak     = "BREAK"
+	StatusOffDuty   = "OFF_DUTY"
+	StatusSuspended = "SUSPENDED"
 )
 
 // AttachAssignment creates or updates the driver's

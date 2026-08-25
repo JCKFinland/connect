@@ -52,6 +52,12 @@ func TestHandlePresenceError(t *testing.T) {
 			expectedMessage: presence.ErrInvalidAccuracy.Error(),
 		},
 		{
+			name:            "invalid availability status returns bad request",
+			err:             presence.ErrInvalidAvailabilityStatus,
+			expectedStatus:  http.StatusBadRequest,
+			expectedMessage: presence.ErrInvalidAvailabilityStatus.Error(),
+		},
+		{
 			name:            "missing driver returns not found",
 			err:             presence.ErrDriverNotFound,
 			expectedStatus:  http.StatusNotFound,
