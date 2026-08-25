@@ -2,6 +2,8 @@ package api
 
 import (
 	// Injects Gin to read client JSON requests and structure consistent endpoint actions.
+	"errors"
+
 	"github.com/gin-gonic/gin"
 
 	// Maps directly to the core driver state-machine business engine.
@@ -23,6 +25,70 @@ func NewDriverPresenceHandler(
 
 	return &DriverPresenceHandler{
 		service: service,
+	}
+}
+
+func handlePresenceError(
+	c *gin.Context,
+	err error,
+) {
+	switch {
+	case errors.Is(
+		err,
+		presence.ErrInvalidLatitude,
+	),
+		errors.Is(
+			err,
+			presence.ErrInvalidLongitude,
+		),
+		errors.Is(
+			err,
+			presence.ErrInvalidHeading,
+		),
+		errors.Is(
+			err,
+			presence.ErrInvalidSpeed,
+		),
+		errors.Is(
+			err,
+			presence.ErrInvalidAccuracy,
+		):
+
+		response.BadRequest(
+			c,
+			err.Error(),
+		)
+
+	case errors.Is(
+		err,
+		presence.ErrDriverNotFound,
+	):
+
+		response.NotFound(
+			c,
+			err.Error(),
+		)
+
+	case errors.Is(
+		err,
+		presence.ErrDriverAssignmentRequired,
+	),
+		errors.Is(
+			err,
+			presence.ErrDriverAvailabilityLocked,
+		),
+		errors.Is(
+			err,
+			presence.ErrDriverHeartbeatUnavailable,
+		):
+
+		response.Conflict(
+			c,
+			err.Error(),
+		)
+
+	default:
+		response.InternalServerError(c)
 	}
 }
 
@@ -49,7 +115,10 @@ func (h *DriverPresenceHandler) GoOnline(c *gin.Context) {
 		c.Request.Context(),
 		req,
 	); err != nil {
-		response.BadRequest(c, err.Error())
+		handlePresenceError(
+			c,
+			err,
+		)
 		return
 	}
 
