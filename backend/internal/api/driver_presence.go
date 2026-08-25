@@ -285,10 +285,18 @@ func (h *DriverPresenceHandler) ListAvailable(
 		user.ID,
 	)
 	if err != nil {
-		response.BadRequest(
-			c,
-			err.Error(),
-		)
+		if errors.Is(
+			err,
+			presence.ErrDriverNotFound,
+		) {
+			response.NotFound(
+				c,
+				err.Error(),
+			)
+			return
+		}
+
+		response.InternalServerError(c)
 		return
 	}
 

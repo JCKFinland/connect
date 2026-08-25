@@ -201,3 +201,64 @@ type errUnexpectedPresenceFailure struct{}
 func (errUnexpectedPresenceFailure) Error() string {
 	return "unexpected database failure"
 }
+
+func TestListAvailableDriverNotFoundMapsToNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	c.Set(
+		"request_id",
+		"presence-list-available-not-found",
+	)
+
+	handlePresenceError(
+		c,
+		presence.ErrDriverNotFound,
+	)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf(
+			"expected HTTP status %d, got %d",
+			http.StatusNotFound,
+			recorder.Code,
+		)
+	}
+
+	var body response.ErrorResponse
+
+	if err := json.Unmarshal(
+		recorder.Body.Bytes(),
+		&body,
+	); err != nil {
+		t.Fatalf(
+			"decode list-available not-found response: %v",
+			err,
+		)
+	}
+
+	if body.Success {
+		t.Fatal(
+			"expected success=false",
+		)
+	}
+
+	if body.Message != presence.ErrDriverNotFound.Error() {
+		t.Fatalf(
+			"expected message %q, got %q",
+			presence.ErrDriverNotFound.Error(),
+			body.Message,
+		)
+	}
+
+	if body.Meta.RequestID !=
+		"presence-list-available-not-found" {
+
+		t.Fatalf(
+			"expected request_id %q, got %q",
+			"presence-list-available-not-found",
+			body.Meta.RequestID,
+		)
+	}
+}
