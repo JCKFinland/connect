@@ -12,6 +12,28 @@ var ErrDriverHeartbeatUnavailable = errors.New(
 	"driver heartbeat is unavailable while driver is offline",
 )
 
+var (
+	ErrInvalidLatitude = errors.New(
+		"latitude must be between -90 and 90",
+	)
+
+	ErrInvalidLongitude = errors.New(
+		"longitude must be between -180 and 180",
+	)
+
+	ErrInvalidHeading = errors.New(
+		"heading must be between 0 and 360",
+	)
+
+	ErrInvalidSpeed = errors.New(
+		"speed must be zero or greater",
+	)
+
+	ErrInvalidAccuracy = errors.New(
+		"accuracy must be zero or greater",
+	)
+)
+
 func (s *Service) Heartbeat(
 	ctx context.Context,
 	req HeartbeatRequest,
@@ -33,6 +55,40 @@ func (s *Service) Heartbeat(
 		return errors.New(
 			"user ID is required",
 		)
+	}
+
+	// ---------------------------------------------------------
+	// Validate telemetry before touching persistence.
+	//
+	// PostgreSQL CHECK constraints remain the final integrity
+	// backstop, but malformed GPS data should be rejected at
+	// the service boundary.
+	// ---------------------------------------------------------
+
+	if req.Latitude < -90 ||
+		req.Latitude > 90 {
+
+		return ErrInvalidLatitude
+	}
+
+	if req.Longitude < -180 ||
+		req.Longitude > 180 {
+
+		return ErrInvalidLongitude
+	}
+
+	if req.Heading < 0 ||
+		req.Heading > 360 {
+
+		return ErrInvalidHeading
+	}
+
+	if req.Speed < 0 {
+		return ErrInvalidSpeed
+	}
+
+	if req.Accuracy < 0 {
+		return ErrInvalidAccuracy
 	}
 
 	// ---------------------------------------------------------

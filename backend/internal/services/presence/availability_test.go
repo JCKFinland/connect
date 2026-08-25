@@ -3307,3 +3307,402 @@ func TestHeartbeatRejectsOfflineDriverAndPreservesLocation(t *testing.T) {
 		)
 	}
 }
+
+func TestHeartbeatRejectsInvalidTelemetryAndPreservesState(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+	// ---------------------------------------------------------
+	// Preserve original state.
+	// ---------------------------------------------------------
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalLatitude           *float64
+		originalLongitude          *float64
+		originalHeading            *float64
+		originalSpeed              *float64
+		originalAccuracy           *float64
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				heading,
+				speed,
+				accuracy,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalLatitude,
+		&originalLongitude,
+		&originalHeading,
+		&originalSpeed,
+		&originalAccuracy,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original invalid-telemetry state: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					latitude = $4,
+					longitude = $5,
+					heading = $6,
+					speed = $7,
+					accuracy = $8,
+					last_heartbeat_at = $9,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalLatitude,
+			originalLongitude,
+			originalHeading,
+			originalSpeed,
+			originalAccuracy,
+			originalHeartbeat,
+		); restoreErr != nil {
+			t.Logf(
+				"restore invalid-telemetry state: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Establish deterministic valid ONLINE + AVAILABLE state.
+	// ---------------------------------------------------------
+
+	const (
+		initialLatitude  = 60.1700
+		initialLongitude = 24.9400
+		initialHeading   = 90.0
+		initialSpeed     = 8.0
+		initialAccuracy  = 5.0
+	)
+
+	initialHeartbeat :=
+		time.Now().UTC().Add(-5 * time.Minute)
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = TRUE,
+				availability_status = 'AVAILABLE',
+				latitude = $2,
+				longitude = $3,
+				heading = $4,
+				speed = $5,
+				accuracy = $6,
+				last_heartbeat_at = $7,
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+		initialLatitude,
+		initialLongitude,
+		initialHeading,
+		initialSpeed,
+		initialAccuracy,
+		initialHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"prepare valid online telemetry state: %v",
+			err,
+		)
+	}
+
+	presenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	service := NewService(
+		Dependencies{
+			Config:   cfg,
+			Presence: presenceRepo,
+		},
+	)
+
+	tests := []struct {
+		name          string
+		request       HeartbeatRequest
+		expectedError error
+	}{
+		{
+			name: "latitude above maximum",
+			request: HeartbeatRequest{
+				UserID:    johnUserID,
+				Latitude:  91,
+				Longitude: 24.94,
+				Heading:   90,
+				Speed:     8,
+				Accuracy:  5,
+			},
+			expectedError: ErrInvalidLatitude,
+		},
+		{
+			name: "longitude above maximum",
+			request: HeartbeatRequest{
+				UserID:    johnUserID,
+				Latitude:  60.17,
+				Longitude: 181,
+				Heading:   90,
+				Speed:     8,
+				Accuracy:  5,
+			},
+			expectedError: ErrInvalidLongitude,
+		},
+		{
+			name: "heading above maximum",
+			request: HeartbeatRequest{
+				UserID:    johnUserID,
+				Latitude:  60.17,
+				Longitude: 24.94,
+				Heading:   361,
+				Speed:     8,
+				Accuracy:  5,
+			},
+			expectedError: ErrInvalidHeading,
+		},
+		{
+			name: "negative speed",
+			request: HeartbeatRequest{
+				UserID:    johnUserID,
+				Latitude:  60.17,
+				Longitude: 24.94,
+				Heading:   90,
+				Speed:     -1,
+				Accuracy:  5,
+			},
+			expectedError: ErrInvalidSpeed,
+		},
+		{
+			name: "negative accuracy",
+			request: HeartbeatRequest{
+				UserID:    johnUserID,
+				Latitude:  60.17,
+				Longitude: 24.94,
+				Heading:   90,
+				Speed:     8,
+				Accuracy:  -1,
+			},
+			expectedError: ErrInvalidAccuracy,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(
+			testCase.name,
+			func(t *testing.T) {
+
+				err := service.Heartbeat(
+					ctx,
+					testCase.request,
+				)
+
+				if !errors.Is(
+					err,
+					testCase.expectedError,
+				) {
+					t.Fatalf(
+						"expected %v, got %v",
+						testCase.expectedError,
+						err,
+					)
+				}
+
+				var (
+					persistedLatitude  *float64
+					persistedLongitude *float64
+					persistedHeading   *float64
+					persistedSpeed     *float64
+					persistedAccuracy  *float64
+					persistedHeartbeat *time.Time
+				)
+
+				if err := db.QueryRow(
+					ctx,
+					`
+						SELECT
+							latitude,
+							longitude,
+							heading,
+							speed,
+							accuracy,
+							last_heartbeat_at
+						FROM driver_presence
+						WHERE driver_id = $1
+					`,
+					johnUserID,
+				).Scan(
+					&persistedLatitude,
+					&persistedLongitude,
+					&persistedHeading,
+					&persistedSpeed,
+					&persistedAccuracy,
+					&persistedHeartbeat,
+				); err != nil {
+					t.Fatalf(
+						"read telemetry after rejected heartbeat: %v",
+						err,
+					)
+				}
+
+				if persistedLatitude == nil ||
+					*persistedLatitude != initialLatitude {
+					t.Fatalf(
+						"expected latitude %v to remain unchanged, got %v",
+						initialLatitude,
+						persistedLatitude,
+					)
+				}
+
+				if persistedLongitude == nil ||
+					*persistedLongitude != initialLongitude {
+					t.Fatalf(
+						"expected longitude %v to remain unchanged, got %v",
+						initialLongitude,
+						persistedLongitude,
+					)
+				}
+
+				if persistedHeading == nil ||
+					*persistedHeading != initialHeading {
+					t.Fatalf(
+						"expected heading %v to remain unchanged, got %v",
+						initialHeading,
+						persistedHeading,
+					)
+				}
+
+				if persistedSpeed == nil ||
+					*persistedSpeed != initialSpeed {
+					t.Fatalf(
+						"expected speed %v to remain unchanged, got %v",
+						initialSpeed,
+						persistedSpeed,
+					)
+				}
+
+				if persistedAccuracy == nil ||
+					*persistedAccuracy != initialAccuracy {
+					t.Fatalf(
+						"expected accuracy %v to remain unchanged, got %v",
+						initialAccuracy,
+						persistedAccuracy,
+					)
+				}
+
+				if persistedHeartbeat == nil {
+					t.Fatal(
+						"expected heartbeat timestamp to remain populated",
+					)
+				}
+
+				const timestampTolerance = time.Millisecond
+
+				heartbeatDifference :=
+					persistedHeartbeat.Sub(initialHeartbeat)
+
+				if heartbeatDifference < 0 {
+					heartbeatDifference = -heartbeatDifference
+				}
+
+				if heartbeatDifference > timestampTolerance {
+					t.Fatalf(
+						"expected heartbeat timestamp %v to remain unchanged, got %v",
+						initialHeartbeat,
+						*persistedHeartbeat,
+					)
+				}
+			},
+		)
+	}
+}
