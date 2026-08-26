@@ -3,6 +3,11 @@ package presence
 import (
 	"context"
 	"errors"
+	"fmt"
+
+	"github.com/JCKFinland/connect/backend/internal/repository"
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
 var ErrDriverAvailabilityLocked = errors.New(
@@ -24,9 +29,9 @@ func (s *Service) UpdateAvailability(
 		)
 	}
 
-	if s.presence == nil {
+	if s.db == nil {
 		return errors.New(
-			"driver presence repository is not configured",
+			"presence database is not configured",
 		)
 	}
 
@@ -36,7 +41,13 @@ func (s *Service) UpdateAvailability(
 		)
 	}
 
+	// ---------------------------------------------------------
+	// 1. Validate driver-controlled availability state before
+	//    starting any persistence work.
+	// ---------------------------------------------------------
+
 	switch req.Status {
+
 	case StatusAvailable,
 		StatusBreak,
 		StatusOffDuty:
@@ -47,21 +58,80 @@ func (s *Service) UpdateAvailability(
 		return ErrInvalidAvailabilityStatus
 	}
 
-	updated, err :=
-		s.presence.UpdateAvailabilityIfIdle(
-			ctx,
-			req.UserID,
-			req.Status,
-			true,
-		)
+	// ---------------------------------------------------------
+	// 2. Lock presence and mutate availability atomically.
+	// ---------------------------------------------------------
 
-	if err != nil {
-		return err
-	}
+	return postgresrepo.RunInTransaction(
+		ctx,
+		s.db,
+		func(tx pgx.Tx) error {
 
-	if !updated {
-		return ErrDriverAvailabilityLocked
-	}
+			presenceRepo :=
+				postgresrepo.NewDriverPresenceRepositoryWithDB(
+					tx,
+				)
 
-	return nil
+			// ---------------------------------------------------------
+			// Lock the driver's lifecycle row first.
+			//
+			// This lets us distinguish:
+			//
+			//   missing presence
+			//       -> ErrDriverNotFound
+			//
+			//   BUSY / active trip
+			//       -> ErrDriverAvailabilityLocked
+			//
+			// The same presence row is also used as the serialization
+			// point by dispatch and assignment lifecycle operations.
+			// ---------------------------------------------------------
+
+			_, err :=
+				presenceRepo.GetByDriverIDForUpdate(
+					ctx,
+					req.UserID,
+				)
+
+			if errors.Is(
+				err,
+				repository.ErrNotFound,
+			) {
+				return ErrDriverNotFound
+			}
+
+			if err != nil {
+				return fmt.Errorf(
+					"lock driver presence before availability update: %w",
+					err,
+				)
+			}
+
+			// ---------------------------------------------------------
+			// Apply the requested manual state only if the driver
+			// remains operationally idle.
+			// ---------------------------------------------------------
+
+			updated, err :=
+				presenceRepo.UpdateAvailabilityIfIdle(
+					ctx,
+					req.UserID,
+					req.Status,
+					true,
+				)
+
+			if err != nil {
+				return fmt.Errorf(
+					"update driver availability: %w",
+					err,
+				)
+			}
+
+			if !updated {
+				return ErrDriverAvailabilityLocked
+			}
+
+			return nil
+		},
+	)
 }
