@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
 var ErrDriverHeartbeatUnavailable = errors.New(
@@ -45,9 +47,9 @@ func (s *Service) Heartbeat(
 		)
 	}
 
-	if s.presence == nil {
+	if s.db == nil {
 		return errors.New(
-			"driver presence repository is not configured",
+			"presence database is not configured",
 		)
 	}
 
@@ -58,7 +60,7 @@ func (s *Service) Heartbeat(
 	}
 
 	// ---------------------------------------------------------
-	// Validate telemetry before touching persistence.
+	// 1. Validate telemetry before touching persistence.
 	//
 	// PostgreSQL CHECK constraints remain the final integrity
 	// backstop, but malformed GPS data should be rejected at
@@ -92,65 +94,95 @@ func (s *Service) Heartbeat(
 	}
 
 	// ---------------------------------------------------------
-	// 1. Confirm presence exists so missing presence can be
-	//    distinguished from an offline/inactive presence row.
+	// 2. Lock and update the driver's heartbeat atomically.
+	//
+	// The driver_presence row is the lifecycle serialization
+	// point shared by online/offline, availability, assignment,
+	// and dispatch operations.
 	// ---------------------------------------------------------
 
-	_, err := s.presence.GetByDriverID(
+	return postgresrepo.RunInTransaction(
 		ctx,
-		req.UserID,
+		s.db,
+		func(tx pgx.Tx) error {
+
+			presenceRepo :=
+				postgresrepo.NewDriverPresenceRepositoryWithDB(
+					tx,
+				)
+
+			// ---------------------------------------------------------
+			// Lock presence first.
+			//
+			// This distinguishes:
+			//
+			//   missing presence
+			//       -> ErrDriverNotFound
+			//
+			//   existing but offline/inactive presence
+			//       -> ErrDriverHeartbeatUnavailable
+			//
+			// It also prevents the row from disappearing or changing
+			// lifecycle state between existence checking and heartbeat.
+			// ---------------------------------------------------------
+
+			_, err :=
+				presenceRepo.GetByDriverIDForUpdate(
+					ctx,
+					req.UserID,
+				)
+
+			if errors.Is(
+				err,
+				repository.ErrNotFound,
+			) {
+				return ErrDriverNotFound
+			}
+
+			if err != nil {
+				return fmt.Errorf(
+					"lock driver presence before heartbeat: %w",
+					err,
+				)
+			}
+
+			// ---------------------------------------------------------
+			// Update live telemetry only for online operational states.
+			//
+			// Valid:
+			//   AVAILABLE
+			//   BUSY
+			//   BREAK
+			//
+			// Rejected:
+			//   OFFLINE
+			//   OFF_DUTY
+			//   SUSPENDED
+			// ---------------------------------------------------------
+
+			updated, err :=
+				presenceRepo.UpdateHeartbeatIfOnline(
+					ctx,
+					req.UserID,
+					req.Latitude,
+					req.Longitude,
+					req.Heading,
+					req.Speed,
+					req.Accuracy,
+				)
+
+			if err != nil {
+				return fmt.Errorf(
+					"update driver heartbeat: %w",
+					err,
+				)
+			}
+
+			if !updated {
+				return ErrDriverHeartbeatUnavailable
+			}
+
+			return nil
+		},
 	)
-
-	if errors.Is(
-		err,
-		repository.ErrNotFound,
-	) {
-		return ErrDriverNotFound
-	}
-
-	if err != nil {
-		return fmt.Errorf(
-			"get driver presence before heartbeat: %w",
-			err,
-		)
-	}
-
-	// ---------------------------------------------------------
-	// 2. Update live location only when the driver is in an
-	//    online operational state.
-	//
-	// Valid:
-	//   AVAILABLE
-	//   BUSY
-	//   BREAK
-	//
-	// Rejected:
-	//   OFFLINE
-	//   OFF_DUTY
-	//   SUSPENDED
-	// ---------------------------------------------------------
-
-	updated, err :=
-		s.presence.UpdateHeartbeatIfOnline(
-			ctx,
-			req.UserID,
-			req.Latitude,
-			req.Longitude,
-			req.Heading,
-			req.Speed,
-			req.Accuracy,
-		)
-
-	if err != nil {
-		return fmt.Errorf(
-			"update driver heartbeat: %w",
-			err,
-		)
-	}
-
-	if !updated {
-		return ErrDriverHeartbeatUnavailable
-	}
-
-	return nil
 }
