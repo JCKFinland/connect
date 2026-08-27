@@ -3052,6 +3052,501 @@ func TestCreateOfferRejectsDriverWithStaleHeartbeat(t *testing.T) {
 	}
 }
 
+func TestCreateOfferRejectsDriverWithFutureHeartbeat(t *testing.T) {
+	ctx := context.Background()
+
+	// ---------------------------------------------------------
+	// 1. Run from backend root so config.Load() finds .env.
+	// ---------------------------------------------------------
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	// ---------------------------------------------------------
+	// 2. Load CONNECT configuration and database.
+	// ---------------------------------------------------------
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	if cfg.Presence.HeartbeatTimeout <= 0 {
+		t.Fatalf(
+			"heartbeat timeout must be greater than zero, got %v",
+			cfg.Presence.HeartbeatTimeout,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	// ---------------------------------------------------------
+	// 3. Serialize access to John's shared dispatch fixture.
+	// ---------------------------------------------------------
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const (
+		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+
+		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
+	)
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	// ---------------------------------------------------------
+	// 4. Remove only genuinely expired pending offers before
+	//    checking whether John's controlled fixture is free.
+	// ---------------------------------------------------------
+
+	if _, err := offerRepo.ExpireStalePending(
+		ctx,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatalf(
+			"expire stale offers before heartbeat test: %v",
+			err,
+		)
+	}
+
+	var existingPendingOfferCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM dispatch_offers
+			WHERE driver_id = $1
+			  AND status = 'PENDING'
+		`,
+		johnDriverID,
+	).Scan(
+		&existingPendingOfferCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing pending driver offer: %v",
+			err,
+		)
+	}
+
+	if existingPendingOfferCount != 0 {
+		t.Skip(
+			"John already has an active PENDING dispatch offer",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 5. Preserve John's complete relevant presence state.
+	// ---------------------------------------------------------
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalLatitude           *float64
+		originalLongitude          *float64
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalLatitude,
+		&originalLongitude,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					latitude = $4,
+					longitude = $5,
+					last_heartbeat_at = $6,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalLatitude,
+			originalLongitude,
+			originalHeartbeat,
+		)
+
+		if restoreErr != nil {
+			t.Logf(
+				"restore driver presence: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// 6. Make John look AVAILABLE but deliberately future-dated.
+	//
+	// Everything except heartbeat timestamp validity is correct.
+	// Dispatch must reject heartbeats that appear to come from
+	// the future.
+
+	futureHeartbeat :=
+		time.Now().UTC().Add(
+			5 * time.Minute,
+		)
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = TRUE,
+				availability_status = 'AVAILABLE',
+				latitude = 60.2055,
+				longitude = 24.6559,
+				last_heartbeat_at = $2,
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+		futureHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"prepare future-heartbeat driver presence: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 7. Create disposable PENDING ride request.
+	// ---------------------------------------------------------
+
+	rideRequestID := uuid.NewString()
+	now := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Future Heartbeat Dispatch Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'Future-dated driver heartbeat regression test',
+				$3,
+				$4,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		now.Add(10*time.Minute),
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create future-heartbeat test ride: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 8. Always remove disposable dispatch state.
+	// ---------------------------------------------------------
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup future-heartbeat offers: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup future-heartbeat ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// 9. Construct the real dispatch service.
+	// ---------------------------------------------------------
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	driverAssignmentRepo :=
+		postgresrepo.NewDriverAssignmentRepository(db)
+
+	driverPresenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	vehicleRepo :=
+		postgresrepo.NewVehicleRepository(db)
+
+	driverRepo :=
+		postgresrepo.NewDriverRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Assignments:  driverAssignmentRepo,
+			Presence:     driverPresenceRepo,
+			Vehicles:     vehicleRepo,
+			Drivers:      driverRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// 10. Attempt dispatch.
+	//
+	// Another eligible driver may legitimately receive the ride,
+	// so ErrNoAvailableDrivers and successful dispatch are both
+	// acceptable outcomes.
+	//
+	// The invariant is that stale John must never receive it.
+	// ---------------------------------------------------------
+
+	offer, err := service.CreateOffer(
+		ctx,
+		rideRequestID,
+		"",
+	)
+
+	if err != nil &&
+		!errors.Is(
+			err,
+			ErrNoAvailableDrivers,
+		) {
+
+		t.Fatalf(
+			"unexpected CreateOffer error: %v",
+			err,
+		)
+	}
+
+	if offer != nil &&
+		offer.DriverID == johnDriverID {
+
+		t.Fatalf(
+			"future-dated driver %s received dispatch offer %s",
+			johnDriverID,
+			offer.ID,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 11. Verify persistence also contains no offer for John.
+	// ---------------------------------------------------------
+
+	var johnOfferCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM dispatch_offers
+			WHERE ride_request_id = $1
+			  AND driver_id = $2
+		`,
+		rideRequestID,
+		johnDriverID,
+	).Scan(
+		&johnOfferCount,
+	); err != nil {
+		t.Fatalf(
+			"count stale-driver offers: %v",
+			err,
+		)
+	}
+
+	if johnOfferCount != 0 {
+		t.Fatalf(
+			"expected zero offers for future-dated driver, got %d",
+			johnOfferCount,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 12. Verify John's stale presence was not mutated merely
+	//     because dispatch rejected him.
+	// ---------------------------------------------------------
+
+	var (
+		persistedIsOnline  bool
+		persistedStatus    string
+		persistedHeartbeat *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&persistedIsOnline,
+		&persistedStatus,
+		&persistedHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"read stale driver presence after dispatch: %v",
+			err,
+		)
+	}
+
+	if !persistedIsOnline {
+		t.Fatal(
+			"expected future-dated driver presence to remain online",
+		)
+	}
+
+	if persistedStatus != "AVAILABLE" {
+		t.Fatalf(
+			"expected future-dated driver to remain AVAILABLE, got %s",
+			persistedStatus,
+		)
+	}
+	if persistedHeartbeat == nil {
+		t.Fatal(
+			"expected future heartbeat timestamp to remain present",
+		)
+	}
+
+	if !persistedHeartbeat.After(time.Now().UTC()) {
+		t.Fatalf(
+			"expected heartbeat to remain future-dated, got %v",
+			*persistedHeartbeat,
+		)
+	}
+}
+
 func TestRejectOfferDoesNotResurrectExpiredRide(t *testing.T) {
 	ctx := context.Background()
 
