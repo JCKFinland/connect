@@ -6721,3 +6721,444 @@ func TestDispatchRideRejectsDriverWithFutureHeartbeat(t *testing.T) {
 		)
 	}
 }
+
+func TestDispatchRideRejectsDriverWithMissingHeartbeat(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const (
+		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+	)
+
+	// ---------------------------------------------------------
+	// Make sure John is not already committed to an active trip.
+	// ---------------------------------------------------------
+
+	var existingActiveTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE driver_id = $1
+			  AND is_active = TRUE
+			  AND deleted_at IS NULL
+			  AND status NOT IN (
+				'COMPLETED',
+				'CANCELLED',
+				'NO_DRIVER_AVAILABLE',
+				'EXPIRED'
+			  )
+		`,
+		johnUserID,
+	).Scan(
+		&existingActiveTripCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing active John trip: %v",
+			err,
+		)
+	}
+
+	if existingActiveTripCount != 0 {
+		t.Skip("John already has an active trip")
+	}
+
+	// ---------------------------------------------------------
+	// Preserve John's presence state.
+	// ---------------------------------------------------------
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalLatitude           *float64
+		originalLongitude          *float64
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalLatitude,
+		&originalLongitude,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original John presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					latitude = $4,
+					longitude = $5,
+					last_heartbeat_at = $6,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalLatitude,
+			originalLongitude,
+			originalHeartbeat,
+		); restoreErr != nil {
+			t.Logf(
+				"restore John presence: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Make John otherwise eligible but remove his heartbeat.
+	// ---------------------------------------------------------
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = TRUE,
+				availability_status = 'AVAILABLE',
+				latitude = 60.2055,
+				longitude = 24.6559,
+				last_heartbeat_at = NULL,
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	); err != nil {
+		t.Fatalf(
+			"prepare missing-heartbeat John presence: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Create disposable PENDING ride.
+	// ---------------------------------------------------------
+
+	rideRequestID := uuid.NewString()
+	now := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'DispatchRide Missing Heartbeat Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'DispatchRide missing heartbeat regression test',
+				$3,
+				$4,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		now.Add(10*time.Minute),
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create DispatchRide missing-heartbeat ride: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM trips
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide missing-heartbeat trips: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide missing-heartbeat ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	service := NewService(
+		Dependencies{
+			DB:     db,
+			Config: cfg,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// Attempt direct dispatch.
+	//
+	// Another legitimate driver may still be selected.
+	// John specifically must never be selected.
+	// ---------------------------------------------------------
+
+	trip, err := service.DispatchRide(
+		ctx,
+		rideRequestID,
+	)
+
+	if err != nil &&
+		!errors.Is(
+			err,
+			ErrNoAvailableDrivers,
+		) {
+		t.Fatalf(
+			"unexpected DispatchRide error: %v",
+			err,
+		)
+	}
+
+	if trip != nil &&
+		trip.DriverID == johnUserID {
+		t.Fatalf(
+			"missing-heartbeat John received dispatched trip %s",
+			trip.ID,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Verify no persisted trip was assigned to John.
+	// ---------------------------------------------------------
+
+	var johnTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE ride_request_id = $1
+			  AND driver_id = $2
+		`,
+		rideRequestID,
+		johnUserID,
+	).Scan(
+		&johnTripCount,
+	); err != nil {
+		t.Fatalf(
+			"count missing-heartbeat John dispatched trips: %v",
+			err,
+		)
+	}
+
+	if johnTripCount != 0 {
+		t.Fatalf(
+			"expected zero trips for missing-heartbeat John, got %d",
+			johnTripCount,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// John's presence must remain unchanged by rejection.
+	// ---------------------------------------------------------
+
+	var (
+		persistedIsOnline  bool
+		persistedStatus    string
+		persistedHeartbeat *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&persistedIsOnline,
+		&persistedStatus,
+		&persistedHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"read John presence after missing-heartbeat DispatchRide: %v",
+			err,
+		)
+	}
+
+	if !persistedIsOnline {
+		t.Fatal(
+			"expected missing-heartbeat John to remain online",
+		)
+	}
+
+	if persistedStatus != "AVAILABLE" {
+		t.Fatalf(
+			"expected missing-heartbeat John to remain AVAILABLE, got %s",
+			persistedStatus,
+		)
+	}
+
+	if persistedHeartbeat != nil {
+		t.Fatalf(
+			"expected John's heartbeat to remain missing, got %v",
+			*persistedHeartbeat,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Ride state depends on whether another valid driver won.
+	// ---------------------------------------------------------
+
+	var persistedRideStatus string
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT status
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&persistedRideStatus,
+	); err != nil {
+		t.Fatalf(
+			"read ride after missing-heartbeat DispatchRide: %v",
+			err,
+		)
+	}
+
+	if trip == nil &&
+		persistedRideStatus != rideRequestStatusPending {
+		t.Fatalf(
+			"expected ride to remain %s when no driver was dispatched, got %s",
+			rideRequestStatusPending,
+			persistedRideStatus,
+		)
+	}
+
+	if trip != nil &&
+		persistedRideStatus != rideRequestStatusAccepted {
+		t.Fatalf(
+			"expected ride to be %s after another driver dispatch, got %s",
+			rideRequestStatusAccepted,
+			persistedRideStatus,
+		)
+	}
+}
