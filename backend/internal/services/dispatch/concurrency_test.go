@@ -7621,3 +7621,487 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 		)
 	}
 }
+
+func TestDispatchRideRejectsDriverWithInvalidLocation(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	if cfg.Presence.HeartbeatTimeout <= 0 {
+		t.Fatalf(
+			"heartbeat timeout must be greater than zero, got %v",
+			cfg.Presence.HeartbeatTimeout,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	// ---------------------------------------------------------
+	// Serialize access to John's shared dispatch fixture.
+	// ---------------------------------------------------------
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const (
+		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+	)
+
+	// ---------------------------------------------------------
+	// John must not already own an active trip.
+	// ---------------------------------------------------------
+
+	var existingActiveTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE driver_id = $1
+			  AND is_active = TRUE
+			  AND deleted_at IS NULL
+			  AND status NOT IN (
+				'COMPLETED',
+				'CANCELLED',
+				'NO_DRIVER_AVAILABLE',
+				'EXPIRED'
+			  )
+		`,
+		johnUserID,
+	).Scan(
+		&existingActiveTripCount,
+	); err != nil {
+		t.Fatalf(
+			"check existing active John trip: %v",
+			err,
+		)
+	}
+
+	if existingActiveTripCount != 0 {
+		t.Skip("John already has an active trip")
+	}
+
+	// ---------------------------------------------------------
+	// Preserve John's existing presence.
+	// ---------------------------------------------------------
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalLatitude           *float64
+		originalLongitude          *float64
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalLatitude,
+		&originalLongitude,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original John presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					latitude = $4,
+					longitude = $5,
+					last_heartbeat_at = $6,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalLatitude,
+			originalLongitude,
+			originalHeartbeat,
+		); restoreErr != nil {
+			t.Logf(
+				"restore John presence: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Make John look operational except for invalid latitude.
+	//
+	// Latitude is deliberately missing.
+	// Heartbeat remains fresh so location alone makes John
+	// ineligible for dispatch.
+	// Heartbeat is deliberately fresh so location is the
+	// eligibility condition being tested.
+	// ---------------------------------------------------------
+
+	freshHeartbeat := time.Now().UTC()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+		UPDATE driver_presence
+		SET
+			is_online = TRUE,
+			availability_status = 'AVAILABLE',
+			latitude = NULL,
+			longitude = 24.6559,
+			last_heartbeat_at = $2,
+			updated_at = NOW()
+		WHERE driver_id = $1
+	`,
+		johnUserID,
+		freshHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"prepare missing-location John presence: %v",
+			err,
+		)
+	}
+	// ---------------------------------------------------------
+	// Create disposable PENDING STANDARD ride.
+	// ---------------------------------------------------------
+
+	rideRequestID := uuid.NewString()
+	now := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'DispatchRide Invalid Location Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'DispatchRide invalid driver location regression test',
+				$3,
+				$4,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		now.Add(10*time.Minute),
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create DispatchRide invalid-location ride: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Clean up any resulting trip, then the disposable ride.
+	// ---------------------------------------------------------
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM trips
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup invalid-location DispatchRide trip: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup invalid-location DispatchRide ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	service := NewService(
+		Dependencies{
+			DB:     db,
+			Config: cfg,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// Dispatch.
+	//
+	// Another eligible driver may legitimately receive the ride.
+	// If nobody else qualifies, ErrNoAvailableDrivers is valid.
+	// John must never be selected.
+	// ---------------------------------------------------------
+
+	trip, dispatchErr := service.DispatchRide(
+		ctx,
+		rideRequestID,
+	)
+
+	if dispatchErr != nil &&
+		!errors.Is(dispatchErr, ErrNoAvailableDrivers) {
+
+		t.Fatalf(
+			"unexpected DispatchRide error: %v",
+			dispatchErr,
+		)
+	}
+
+	if trip != nil && trip.DriverID == johnUserID {
+		t.Fatal(
+			"expected invalid-location John to be rejected by DispatchRide",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// There must be no persisted trip assigned to John.
+	// ---------------------------------------------------------
+
+	var johnTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE ride_request_id = $1
+			  AND driver_id = $2
+		`,
+		rideRequestID,
+		johnUserID,
+	).Scan(
+		&johnTripCount,
+	); err != nil {
+		t.Fatalf(
+			"count John trips for invalid-location ride: %v",
+			err,
+		)
+	}
+
+	if johnTripCount != 0 {
+		t.Fatalf(
+			"expected no trip assigned to invalid-location John, got %d",
+			johnTripCount,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Rejected John must remain AVAILABLE and online.
+	// Dispatch must not reserve an ineligible driver.
+	// ---------------------------------------------------------
+
+	var (
+		persistedIsOnline     bool
+		persistedAvailability string
+		persistedLatitude     *float64
+		persistedLongitude    *float64
+		persistedHeartbeat    *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&persistedIsOnline,
+		&persistedAvailability,
+		&persistedLatitude,
+		&persistedLongitude,
+		&persistedHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"read John presence after invalid-location DispatchRide: %v",
+			err,
+		)
+	}
+
+	if !persistedIsOnline {
+		t.Fatal(
+			"expected rejected John to remain online",
+		)
+	}
+
+	if persistedAvailability != "AVAILABLE" {
+		t.Fatalf(
+			"expected rejected John availability AVAILABLE, got %s",
+			persistedAvailability,
+		)
+	}
+
+	if persistedLatitude != nil {
+		t.Fatalf(
+			"expected rejected John's latitude to remain NULL, got %f",
+			*persistedLatitude,
+		)
+	}
+
+	if persistedLongitude == nil {
+		t.Fatal(
+			"expected John's longitude to remain present",
+		)
+	}
+
+	if persistedHeartbeat == nil {
+		t.Fatal(
+			"expected John's fresh heartbeat to remain present",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Verify the ride lifecycle.
+	//
+	// No alternative driver:
+	//     ride remains PENDING.
+	//
+	// Alternative driver wins:
+	//     ride becomes ACCEPTED.
+	// ---------------------------------------------------------
+
+	var persistedRideStatus string
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT status
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&persistedRideStatus,
+	); err != nil {
+		t.Fatalf(
+			"read invalid-location ride status: %v",
+			err,
+		)
+	}
+
+	if trip == nil {
+		if persistedRideStatus != "PENDING" {
+			t.Fatalf(
+				"expected ride to remain PENDING when no driver was dispatched, got %s",
+				persistedRideStatus,
+			)
+		}
+	} else {
+		if persistedRideStatus != "ACCEPTED" {
+			t.Fatalf(
+				"expected ride ACCEPTED when another driver was dispatched, got %s",
+				persistedRideStatus,
+			)
+		}
+	}
+}
