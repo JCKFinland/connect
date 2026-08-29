@@ -9819,3 +9819,612 @@ func TestDispatchRideRejectsDriverWithIneligibleVehicleType(t *testing.T) {
 		}
 	}
 }
+
+func TestDispatchRideSkipsDriverLockedByConcurrentDispatch(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	// ---------------------------------------------------------
+	// Serialize modifications to John's shared integration fixture.
+	// ---------------------------------------------------------
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(context.Background()); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	const (
+		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+	)
+
+	// ---------------------------------------------------------
+	// John must not already own an active trip.
+	// ---------------------------------------------------------
+
+	var activeTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE driver_id = $1
+			  AND is_active = TRUE
+			  AND deleted_at IS NULL
+			  AND status NOT IN (
+				'COMPLETED',
+				'CANCELLED',
+				'NO_DRIVER_AVAILABLE',
+				'EXPIRED'
+			  )
+		`,
+		johnUserID,
+	).Scan(&activeTripCount); err != nil {
+		t.Fatalf(
+			"check existing active John trip: %v",
+			err,
+		)
+	}
+
+	if activeTripCount != 0 {
+		t.Skip("John already has an active trip")
+	}
+
+	// ---------------------------------------------------------
+	// Preserve John's presence.
+	// ---------------------------------------------------------
+
+	var (
+		originalIsOnline           bool
+		originalAvailabilityStatus string
+		originalLatitude           *float64
+		originalLongitude          *float64
+		originalHeartbeat          *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&originalIsOnline,
+		&originalAvailabilityStatus,
+		&originalLatitude,
+		&originalLongitude,
+		&originalHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"load original John presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_presence
+				SET
+					is_online = $2,
+					availability_status = $3,
+					latitude = $4,
+					longitude = $5,
+					last_heartbeat_at = $6,
+					updated_at = NOW()
+				WHERE driver_id = $1
+			`,
+			johnUserID,
+			originalIsOnline,
+			originalAvailabilityStatus,
+			originalLatitude,
+			originalLongitude,
+			originalHeartbeat,
+		); restoreErr != nil {
+			t.Logf(
+				"restore John presence: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Resolve John's active assignment and vehicle.
+	// ---------------------------------------------------------
+
+	var johnVehicleID string
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT vehicle_id
+			FROM driver_assignments
+			WHERE driver_id = $1
+			  AND unassigned_at IS NULL
+			LIMIT 1
+		`,
+		johnUserID,
+	).Scan(&johnVehicleID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			t.Skip("John has no active assignment fixture")
+		}
+
+		t.Fatalf(
+			"load John's active assignment: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Preserve vehicle eligibility state.
+	// ---------------------------------------------------------
+
+	var (
+		originalVehicleType     string
+		originalVehicleIsActive bool
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				vehicle_type,
+				is_active
+			FROM vehicles
+			WHERE id = $1
+			  AND deleted_at IS NULL
+		`,
+		johnVehicleID,
+	).Scan(
+		&originalVehicleType,
+		&originalVehicleIsActive,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			t.Skip("John's assigned vehicle fixture does not exist")
+		}
+
+		t.Fatalf(
+			"load John's assigned vehicle: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, restoreErr := db.Exec(
+			context.Background(),
+			`
+				UPDATE vehicles
+				SET
+					vehicle_type = $2,
+					is_active = $3,
+					updated_at = NOW()
+				WHERE id = $1
+			`,
+			johnVehicleID,
+			originalVehicleType,
+			originalVehicleIsActive,
+		); restoreErr != nil {
+			t.Logf(
+				"restore John's vehicle: %v",
+				restoreErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Make John fully eligible and place him exactly at pickup.
+	//
+	// We deliberately control all ordinary eligibility gates so
+	// the row lock is the only reason DispatchRide must skip him.
+	// ---------------------------------------------------------
+
+	freshHeartbeat := time.Now().UTC()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_presence
+			SET
+				is_online = TRUE,
+				availability_status = 'AVAILABLE',
+				latitude = 60.2055,
+				longitude = 24.6559,
+				last_heartbeat_at = $2,
+				updated_at = NOW()
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+		freshHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"prepare John presence: %v",
+			err,
+		)
+	}
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE vehicles
+			SET
+				vehicle_type = 'SEDAN',
+				is_active = TRUE,
+				updated_at = NOW()
+			WHERE id = $1
+		`,
+		johnVehicleID,
+	); err != nil {
+		t.Fatalf(
+			"prepare John's eligible vehicle: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Create disposable STANDARD ride.
+	// ---------------------------------------------------------
+
+	rideRequestID := uuid.NewString()
+	now := time.Now().UTC()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'DispatchRide SKIP LOCKED Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'Concurrent driver presence lock regression test',
+				$3,
+				$4,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		now.Add(10*time.Minute),
+	); err != nil {
+		t.Fatalf(
+			"create SKIP LOCKED ride request: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM trips
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup SKIP LOCKED trip: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup SKIP LOCKED ride request: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Transaction A simulates another dispatch already claiming
+	// John's presence row.
+	// ---------------------------------------------------------
+
+	lockTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf(
+			"begin competing presence transaction: %v",
+			err,
+		)
+	}
+
+	lockReleased := false
+
+	defer func() {
+		if !lockReleased {
+			_ = lockTx.Rollback(context.Background())
+		}
+	}()
+
+	var lockedDriverID string
+
+	if err := lockTx.QueryRow(
+		ctx,
+		`
+			SELECT driver_id
+			FROM driver_presence
+			WHERE driver_id = $1
+			FOR UPDATE
+		`,
+		johnUserID,
+	).Scan(&lockedDriverID); err != nil {
+		t.Fatalf(
+			"lock John's presence row: %v",
+			err,
+		)
+	}
+
+	if lockedDriverID != johnUserID {
+		t.Fatalf(
+			"expected locked driver %s, got %s",
+			johnUserID,
+			lockedDriverID,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Transaction B runs the real dispatch flow.
+	//
+	// ListAllAvailable can discover John from the committed state,
+	// but GetAvailableByDriverIDForUpdate must encounter the row
+	// lock and SKIP LOCKED must make John unavailable immediately.
+	//
+	// The timeout also protects this regression test against an
+	// accidental future removal of SKIP LOCKED.
+	// ---------------------------------------------------------
+
+	service := NewService(
+		Dependencies{
+			DB:     db,
+			Config: cfg,
+		},
+	)
+
+	dispatchCtx, cancel :=
+		context.WithTimeout(
+			context.Background(),
+			5*time.Second,
+		)
+	defer cancel()
+
+	trip, dispatchErr := service.DispatchRide(
+		dispatchCtx,
+		rideRequestID,
+	)
+
+	// ---------------------------------------------------------
+	// Release transaction A before reading John's row again.
+	// ---------------------------------------------------------
+
+	if err := lockTx.Rollback(context.Background()); err != nil {
+		t.Fatalf(
+			"release competing presence row lock: %v",
+			err,
+		)
+	}
+
+	lockReleased = true
+
+	// ---------------------------------------------------------
+	// SKIP LOCKED must prevent blocking.
+	//
+	// Another eligible driver may win. If there is no alternative,
+	// ErrNoAvailableDrivers is the correct outcome.
+	// ---------------------------------------------------------
+
+	if errors.Is(dispatchErr, context.DeadlineExceeded) {
+		t.Fatal(
+			"DispatchRide blocked on locked driver; expected FOR UPDATE SKIP LOCKED",
+		)
+	}
+
+	if dispatchErr != nil &&
+		!errors.Is(dispatchErr, ErrNoAvailableDrivers) {
+		t.Fatalf(
+			"unexpected DispatchRide error: %v",
+			dispatchErr,
+		)
+	}
+
+	if trip != nil && trip.DriverID == johnUserID {
+		t.Fatal(
+			"expected concurrently locked John to be skipped",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// No persisted trip may belong to John.
+	// ---------------------------------------------------------
+
+	var johnTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE ride_request_id = $1
+			  AND driver_id = $2
+		`,
+		rideRequestID,
+		johnUserID,
+	).Scan(&johnTripCount); err != nil {
+		t.Fatalf(
+			"count John trips for SKIP LOCKED ride: %v",
+			err,
+		)
+	}
+
+	if johnTripCount != 0 {
+		t.Fatalf(
+			"expected no trip assigned to concurrently locked John, got %d",
+			johnTripCount,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Because this DispatchRide never claimed John, his presence
+	// must still be online + AVAILABLE.
+	// ---------------------------------------------------------
+
+	var (
+		persistedIsOnline     bool
+		persistedAvailability string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		johnUserID,
+	).Scan(
+		&persistedIsOnline,
+		&persistedAvailability,
+	); err != nil {
+		t.Fatalf(
+			"read John presence after concurrent dispatch: %v",
+			err,
+		)
+	}
+
+	if !persistedIsOnline {
+		t.Fatal(
+			"expected concurrently locked John to remain online",
+		)
+	}
+
+	if persistedAvailability != "AVAILABLE" {
+		t.Fatalf(
+			"expected concurrently locked John availability AVAILABLE, got %s",
+			persistedAvailability,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// Ride lifecycle must remain consistent.
+	// ---------------------------------------------------------
+
+	var persistedRideStatus string
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT status
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(&persistedRideStatus); err != nil {
+		t.Fatalf(
+			"read SKIP LOCKED ride status: %v",
+			err,
+		)
+	}
+
+	if trip == nil {
+		if persistedRideStatus != "PENDING" {
+			t.Fatalf(
+				"expected ride PENDING when no alternative driver was dispatched, got %s",
+				persistedRideStatus,
+			)
+		}
+	} else {
+		if persistedRideStatus != "ACCEPTED" {
+			t.Fatalf(
+				"expected ride ACCEPTED when another driver was dispatched, got %s",
+				persistedRideStatus,
+			)
+		}
+	}
+}
