@@ -35,6 +35,7 @@ func scanTripFare(
 		&fare.ChargedDistanceMeters,
 		&fare.ChargedDurationSeconds,
 		&fare.WaitingDurationSeconds,
+		&fare.PricingProfileID,
 		&fare.PricingVersion,
 		&fare.CalculatedAt,
 		&fare.CreatedAt,

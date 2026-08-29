@@ -33,6 +33,7 @@ func (r *TripFareRepository) Create(
 			charged_distance_meters,
 			charged_duration_seconds,
 			waiting_duration_seconds,
+			pricing_profile_id,
 			pricing_version,
 			calculated_at
 		)
@@ -40,7 +41,7 @@ func (r *TripFareRepository) Create(
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10, $11, $12,
 			$13, $14, $15, $16, $17, $18,
-			$19, $20, $21, $22
+			$19, $20, $21, $22, $23
 		)
 		RETURNING
 			id,
@@ -71,6 +72,7 @@ func (r *TripFareRepository) Create(
 		fare.ChargedDistanceMeters,
 		fare.ChargedDurationSeconds,
 		fare.WaitingDurationSeconds,
+		fare.PricingProfileID,
 		fare.PricingVersion,
 		fare.CalculatedAt,
 	).Scan(

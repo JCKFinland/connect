@@ -22,8 +22,9 @@ const tripFareColumns = `
 	charged_distance_meters,
 	charged_duration_seconds,
 	waiting_duration_seconds,
-	pricing_version,
-	calculated_at,
+	pricing_profile_id,
+    pricing_version,
+    calculated_at,
 	created_at,
 	updated_at
 `

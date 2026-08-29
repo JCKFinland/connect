@@ -20,8 +20,9 @@ func (r *TripRepository) Create(
 			driver_id,
 			vehicle_id,
 			company_id,
-			branch_id,
-			fleet_id,
+            branch_id,
+            service_category_id,
+            fleet_id,
 			status,
 			estimated_distance_km,
 			estimated_duration_minutes,
@@ -85,7 +86,8 @@ func (r *TripRepository) Create(
 			$32,
 			$33,
 			$34,
-			$35
+			$35,
+			$36
 		)
 		RETURNING
 			created_at,
@@ -102,6 +104,7 @@ func (r *TripRepository) Create(
 		trip.VehicleID,
 		trip.CompanyID,
 		trip.BranchID,
+		trip.ServiceCategoryID,
 		trip.FleetID,
 		trip.Status,
 		trip.EstimatedDistanceKM,

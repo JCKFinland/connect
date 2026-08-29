@@ -13,20 +13,21 @@ func (r *RideRequestRepository) Update(
 	request *models.RideRequest,
 ) error {
 	const query = `
-		UPDATE ride_requests
-		SET
-			pickup_address = $1,
-			pickup_latitude = $2,
-			pickup_longitude = $3,
-			destination_address = $4,
-			destination_latitude = $5,
-			destination_longitude = $6,
-			requested_vehicle_type = $7,
-			passenger_count = $8,
-			notes = $9,
-			expires_at = $10,
-			updated_at = NOW()
-		WHERE id = $11
+	UPDATE ride_requests
+	SET
+		pickup_address = $1,
+		pickup_latitude = $2,
+		pickup_longitude = $3,
+		destination_address = $4,
+		destination_latitude = $5,
+		destination_longitude = $6,
+		requested_vehicle_type = $7,
+		service_category_id = $8,
+		passenger_count = $9,
+		notes = $10,
+		expires_at = $11,
+		updated_at = NOW()
+	WHERE id = $12
 	`
 
 	result, err := r.db.Exec(
@@ -39,6 +40,7 @@ func (r *RideRequestRepository) Update(
 		request.DestinationLatitude,
 		request.DestinationLongitude,
 		request.RequestedVehicleType,
+		request.ServiceCategoryID,
 		request.PassengerCount,
 		request.Notes,
 		request.ExpiresAt,

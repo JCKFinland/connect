@@ -26,9 +26,10 @@ func (r *TripRepository) List(
 			customer_id,
 			driver_id,
 			vehicle_id,
-			company_id,
-			branch_id,
-			fleet_id,
+			company_id
+            branch_id
+            service_category_id
+            fleet_id
 			status,
 
 			estimated_distance_km,
@@ -176,6 +177,7 @@ func (r *TripRepository) List(
 			&trip.VehicleID,
 			&trip.CompanyID,
 			&trip.BranchID,
+			&trip.ServiceCategoryID,
 			&trip.FleetID,
 			&trip.Status,
 

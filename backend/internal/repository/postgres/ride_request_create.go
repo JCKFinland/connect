@@ -13,24 +13,25 @@ func (r *RideRequestRepository) Create(
 	request *models.RideRequest,
 ) error {
 	const query = `
-		INSERT INTO ride_requests (
-			id,
-			customer_id,
-			pickup_address,
-			pickup_latitude,
-			pickup_longitude,
-			destination_address,
-			destination_latitude,
-			destination_longitude,
-			requested_vehicle_type,
-			passenger_count,
-			status,
-			notes,
-			requested_at,
-			expires_at,
-			created_at,
-			updated_at
-		)
+	INSERT INTO ride_requests (
+		id,
+		customer_id,
+		pickup_address,
+		pickup_latitude,
+		pickup_longitude,
+		destination_address,
+		destination_latitude,
+		destination_longitude,
+		requested_vehicle_type,
+		service_category_id,
+		passenger_count,
+		status,
+		notes,
+		requested_at,
+		expires_at,
+		created_at,
+		updated_at
+	)
 		VALUES (
 			$1,
 			$2,
@@ -47,7 +48,8 @@ func (r *RideRequestRepository) Create(
 			$13,
 			$14,
 			$15,
-			$16
+			$16,
+			$17
 		)
 		RETURNING
 			created_at,
@@ -66,6 +68,7 @@ func (r *RideRequestRepository) Create(
 		request.DestinationLatitude,
 		request.DestinationLongitude,
 		request.RequestedVehicleType,
+		request.ServiceCategoryID,
 		request.PassengerCount,
 		request.Status,
 		request.Notes,

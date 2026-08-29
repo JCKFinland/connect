@@ -382,8 +382,9 @@ func (s *Service) DispatchRide(
 				VehicleID: selectedAssignment.VehicleID,
 				FleetID:   selectedAssignment.FleetID,
 
-				CompanyID: selectedAssignment.CompanyID,
-				BranchID:  selectedAssignment.BranchID,
+				CompanyID:         selectedAssignment.CompanyID,
+				BranchID:          selectedAssignment.BranchID,
+				ServiceCategoryID: request.ServiceCategoryID,
 
 				Status:     tripStatusAssigned,
 				AssignedAt: now,

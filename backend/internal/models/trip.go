@@ -26,6 +26,8 @@ type Trip struct {
 	CompanyID string `db:"company_id" json:"company_id"`
 	BranchID  string `db:"branch_id" json:"branch_id"`
 
+	ServiceCategoryID *string `db:"service_category_id" json:"service_category_id,omitempty"`
+
 	// Trip lifecycle state.
 	Status string `db:"status" json:"status"`
 
@@ -61,15 +63,15 @@ type Trip struct {
 	PassengerNote *string `db:"passenger_note" json:"passenger_note,omitempty"`
 
 	// Operational timestamps.
-	DriverArrivedAt     *time.Time `db:"driver_arrived_at" json:"driver_arrived_at,omitempty"`
-	PassengerOnBoardAt  *time.Time `db:"passenger_on_board_at" json:"passenger_on_board_at,omitempty"`
-	PickupAt            *time.Time `db:"pickup_at" json:"pickup_at,omitempty"`
-	StartedAt           *time.Time `db:"started_at" json:"started_at,omitempty"`
-	CompletedAt         *time.Time `db:"completed_at" json:"completed_at,omitempty"`
-	CancelledAt         *time.Time `db:"cancelled_at" json:"cancelled_at,omitempty"`
+	DriverArrivedAt    *time.Time `db:"driver_arrived_at" json:"driver_arrived_at,omitempty"`
+	PassengerOnBoardAt *time.Time `db:"passenger_on_board_at" json:"passenger_on_board_at,omitempty"`
+	PickupAt           *time.Time `db:"pickup_at" json:"pickup_at,omitempty"`
+	StartedAt          *time.Time `db:"started_at" json:"started_at,omitempty"`
+	CompletedAt        *time.Time `db:"completed_at" json:"completed_at,omitempty"`
+	CancelledAt        *time.Time `db:"cancelled_at" json:"cancelled_at,omitempty"`
 
 	// Cancellation details.
-	CancelledBy       *string `db:"cancelled_by" json:"cancelled_by,omitempty"`
+	CancelledBy        *string `db:"cancelled_by" json:"cancelled_by,omitempty"`
 	CancellationReason *string `db:"cancellation_reason" json:"cancellation_reason,omitempty"`
 
 	// Active state.

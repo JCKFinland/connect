@@ -25,6 +25,8 @@ type RideRequest struct {
 
 	RequestedVehicleType string `db:"requested_vehicle_type" json:"requested_vehicle_type"`
 
+	ServiceCategoryID *string `db:"service_category_id" json:"service_category_id,omitempty"`
+
 	PassengerCount int    `db:"passenger_count" json:"passenger_count"`
 	Status         string `db:"status" json:"status"`
 

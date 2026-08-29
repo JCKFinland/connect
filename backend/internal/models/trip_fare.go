@@ -38,5 +38,7 @@ type TripFare struct {
 
 	PricingVersion string `db:"pricing_version" json:"pricing_version"`
 
+	PricingProfileID *string `db:"pricing_profile_id" json:"pricing_profile_id,omitempty"`
+
 	CalculatedAt time.Time `db:"calculated_at" json:"calculated_at"`
 }

@@ -281,10 +281,11 @@ func (s *Service) AcceptOffer(
 
 				DriverID: driver.UserID,
 
-				VehicleID: offer.VehicleID,
-				CompanyID: offer.CompanyID,
-				BranchID:  offer.BranchID,
-				FleetID:   offer.FleetID,
+				VehicleID:         offer.VehicleID,
+				CompanyID:         offer.CompanyID,
+				BranchID:          offer.BranchID,
+				ServiceCategoryID: request.ServiceCategoryID,
+				FleetID:           offer.FleetID,
 
 				Status:     tripStatusAssigned,
 				AssignedAt: now,

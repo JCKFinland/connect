@@ -539,7 +539,6 @@ func TestCreateOfferConcurrentSameRide(t *testing.T) {
 		)
 	}
 }
-
 func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	ctx := context.Background()
 
@@ -793,7 +792,49 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 8. Create disposable MATCHING ride request.
+	// 8. Create disposable service category.
+	// ---------------------------------------------------------
+
+	serviceCategoryID := uuid.NewString()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO service_categories
+			(
+				id,
+				company_id,
+				code,
+				name,
+				description,
+				is_active,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				$3,
+				'AcceptOffer Test Category',
+				'AcceptOffer service-category propagation regression test',
+				TRUE,
+				NOW(),
+				NOW()
+			)
+		`,
+		serviceCategoryID,
+		companyID,
+		"ACCEPT_TEST_"+uuid.NewString()[:8],
+	); err != nil {
+		t.Fatalf(
+			"create AcceptOffer service category: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 9. Create disposable MATCHING ride request.
 	// ---------------------------------------------------------
 
 	rideRequestID := uuid.NewString()
@@ -814,6 +855,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 				destination_latitude,
 				destination_longitude,
 				requested_vehicle_type,
+				service_category_id,
 				passenger_count,
 				status,
 				notes,
@@ -832,16 +874,18 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 				60.1719,
 				24.9414,
 				'STANDARD',
+				$3,
 				1,
 				'MATCHING',
 				'Concurrent AcceptOffer integration test',
-				$3,
-				$3,
-				$3
+				$4,
+				$4,
+				$4
 			)
 		`,
 		rideRequestID,
 		customerID,
+		serviceCategoryID,
 		now,
 	); err != nil {
 		t.Fatalf(
@@ -851,7 +895,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 9. Create one fresh PENDING dispatch offer.
+	// 10. Create one fresh PENDING dispatch offer.
 	// ---------------------------------------------------------
 
 	if _, err := db.Exec(
@@ -905,9 +949,10 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 10. Cleanup disposable state.
+	// 11. Cleanup disposable state.
 	//
-	// trips must be deleted before the offer/ride because of FKs.
+	// FK-safe order:
+	// trips -> dispatch_offers -> ride_requests -> service_categories
 	// ---------------------------------------------------------
 
 	defer func() {
@@ -954,10 +999,24 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 				cleanupErr,
 			)
 		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM service_categories
+				WHERE id = $1
+			`,
+			serviceCategoryID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup AcceptOffer service category: %v",
+				cleanupErr,
+			)
+		}
 	}()
 
 	// ---------------------------------------------------------
-	// 11. Construct real dispatch service.
+	// 12. Construct real dispatch service.
 	// ---------------------------------------------------------
 
 	rideRequestRepo :=
@@ -993,7 +1052,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	)
 
 	// ---------------------------------------------------------
-	// 12. Launch simultaneous acceptance attempts.
+	// 13. Launch simultaneous acceptance attempts.
 	// ---------------------------------------------------------
 
 	const attemptCount = 5
@@ -1026,7 +1085,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	close(errs)
 
 	// ---------------------------------------------------------
-	// 13. Exactly one acceptance may succeed.
+	// 14. Exactly one acceptance may succeed.
 	// ---------------------------------------------------------
 
 	successCount := 0
@@ -1072,7 +1131,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 14. Verify exactly one trip exists.
+	// 15. Verify exactly one trip exists.
 	// ---------------------------------------------------------
 
 	var tripCount int
@@ -1100,7 +1159,44 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 15. Verify offer is ACCEPTED exactly once.
+	// 16. Verify service category propagated to persisted trip.
+	// ---------------------------------------------------------
+
+	var persistedServiceCategoryID *string
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT service_category_id
+			FROM trips
+			WHERE ride_request_id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&persistedServiceCategoryID,
+	); err != nil {
+		t.Fatalf(
+			"get accepted trip service category: %v",
+			err,
+		)
+	}
+
+	if persistedServiceCategoryID == nil {
+		t.Fatal(
+			"expected accepted trip service category id to be set",
+		)
+	}
+
+	if *persistedServiceCategoryID != serviceCategoryID {
+		t.Fatalf(
+			"expected accepted trip service category id %s, got %s",
+			serviceCategoryID,
+			*persistedServiceCategoryID,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 17. Verify offer is ACCEPTED exactly once.
 	// ---------------------------------------------------------
 
 	var offerStatus string
@@ -1129,7 +1225,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 16. Verify ride is ACCEPTED.
+	// 18. Verify ride is ACCEPTED.
 	// ---------------------------------------------------------
 
 	var rideStatus string
@@ -1158,7 +1254,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 17. Verify John became BUSY.
+	// 19. Verify John became BUSY.
 	// ---------------------------------------------------------
 
 	var availabilityStatus string
@@ -7340,6 +7436,51 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 	// ---------------------------------------------------------
 
 	rideRequestID := uuid.NewString()
+
+	// ---------------------------------------------------------
+	// Create disposable service category for propagation test.
+	// ---------------------------------------------------------
+	const companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
+
+	serviceCategoryID := uuid.NewString()
+
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO service_categories
+		(
+			id,
+			company_id,
+			code,
+			name,
+			description,
+			is_active,
+			created_at,
+			updated_at
+		)
+		VALUES
+		(
+			$1,
+			$2,
+			$3,
+			'Dispatch Test Category',
+			'Dispatch service-category propagation regression test',
+			TRUE,
+			NOW(),
+			NOW()
+		)
+	`,
+		serviceCategoryID,
+		companyID,
+		"DISPATCH_TEST_"+uuid.NewString()[:8],
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create DispatchRide service category: %v",
+			err,
+		)
+	}
 	now := time.Now().UTC()
 
 	_, err = db.Exec(
@@ -7356,7 +7497,8 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 				destination_latitude,
 				destination_longitude,
 				requested_vehicle_type,
-				passenger_count,
+                service_category_id,
+                passenger_count,
 				status,
 				notes,
 				requested_at,
@@ -7375,17 +7517,19 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 				60.1719,
 				24.9414,
 				'STANDARD',
-				1,
-				'PENDING',
+                $3,
+                1,
+                'PENDING',
 				'DispatchRide fresh heartbeat regression test',
-				$3,
 				$4,
-				$3,
-				$3
+				$5,
+				$4,
+				$4
 			)
 		`,
 		rideRequestID,
 		customerID,
+		serviceCategoryID,
 		now,
 		now.Add(10*time.Minute),
 	)
@@ -7397,9 +7541,7 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 		)
 	}
 
-	// ---------------------------------------------------------
-	// Clean up trip first, then ride request.
-	// ---------------------------------------------------------
+	// Clean up trip first, then ride request, then service category.
 
 	defer func() {
 		cleanupCtx := context.Background()
@@ -7414,6 +7556,20 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 		); cleanupErr != nil {
 			t.Logf(
 				"cleanup DispatchRide fresh-heartbeat trip: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM service_categories
+				WHERE id = $1
+			`,
+			serviceCategoryID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide service category: %v",
 				cleanupErr,
 			)
 		}
@@ -7482,27 +7638,44 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 		)
 	}
 
+	if trip.ServiceCategoryID == nil {
+		t.Fatal(
+			"expected dispatched trip service category id to be set",
+		)
+	}
+
+	if *trip.ServiceCategoryID != serviceCategoryID {
+		t.Fatalf(
+			"expected dispatched trip service category id %s, got %s",
+			serviceCategoryID,
+			*trip.ServiceCategoryID,
+		)
+	}
+
 	// ---------------------------------------------------------
 	// Verify persisted trip assignment.
 	// ---------------------------------------------------------
 
 	var (
-		persistedDriverID string
-		persistedStatus   string
+		persistedDriverID          string
+		persistedServiceCategoryID *string
+		persistedStatus            string
 	)
 
 	if err := db.QueryRow(
 		ctx,
 		`
-			SELECT
-				driver_id,
-				status
-			FROM trips
-			WHERE ride_request_id = $1
+		SELECT
+		driver_id,
+		service_category_id,
+		status
+	FROM trips
+	WHERE ride_request_id = $1
 		`,
 		rideRequestID,
 	).Scan(
 		&persistedDriverID,
+		&persistedServiceCategoryID,
 		&persistedStatus,
 	); err != nil {
 		t.Fatalf(
@@ -7516,6 +7689,20 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 			"expected persisted driver %s, got %s",
 			johnUserID,
 			persistedDriverID,
+		)
+	}
+
+	if persistedServiceCategoryID == nil {
+		t.Fatal(
+			"expected persisted trip service category id to be set",
+		)
+	}
+
+	if *persistedServiceCategoryID != serviceCategoryID {
+		t.Fatalf(
+			"expected persisted trip service category id %s, got %s",
+			serviceCategoryID,
+			*persistedServiceCategoryID,
 		)
 	}
 
