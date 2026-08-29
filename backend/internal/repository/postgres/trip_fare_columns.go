@@ -1,0 +1,29 @@
+package postgres
+
+const tripFareColumns = `
+	id,
+	trip_id,
+	base_fare,
+	distance_fare,
+	time_fare,
+	waiting_fare,
+	booking_fee,
+	surge_multiplier,
+	surge_amount,
+	discount_amount,
+	tax_amount,
+	toll_amount,
+	parking_amount,
+	total_amount,
+	currency,
+	distance_rate_per_km,
+	time_rate_per_minute,
+	waiting_rate_per_minute,
+	charged_distance_meters,
+	charged_duration_seconds,
+	waiting_duration_seconds,
+	pricing_version,
+	calculated_at,
+	created_at,
+	updated_at
+`
