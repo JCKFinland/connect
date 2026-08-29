@@ -34,6 +34,13 @@ type Service struct {
 	vehicles     repository.VehicleRepository
 	drivers      repository.DriverRepository
 	offers       repository.DispatchOfferRepository
+
+	// beforeClaimCandidate is an internal test seam used to coordinate
+	// deterministic concurrency tests between candidate ranking and the
+	// final locked eligibility recheck.
+	//
+	// It is nil in normal production operation.
+	beforeClaimCandidate func(driverID string)
 }
 
 func NewService(

@@ -259,6 +259,12 @@ func (s *Service) DispatchRide(
 
 			for _, candidate := range candidates {
 
+				if s.beforeClaimCandidate != nil {
+					s.beforeClaimCandidate(
+						candidate.presence.DriverID,
+					)
+				}
+
 				lockedDriver, err := presence.GetAvailableByDriverIDForUpdate(
 					ctx,
 					candidate.presence.DriverID,
