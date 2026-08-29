@@ -315,8 +315,7 @@ func validateStatusTransition(
 
 	case StatusInProgress:
 		switch newStatus {
-		case StatusCompleted,
-			StatusCancelled:
+		case StatusCancelled:
 			return nil
 		}
 

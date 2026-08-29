@@ -15,7 +15,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
-func TestUpdateStatusCompletedReleasesBusyDriver(t *testing.T) {
+func TestUpdateStatusRejectsDirectCompletion(t *testing.T) {
 	ctx := context.Background()
 
 	// ---------------------------------------------------------
@@ -464,9 +464,11 @@ func TestUpdateStatusCompletedReleasesBusyDriver(t *testing.T) {
 			UserRoles:    userRoleRepo,
 		},
 	)
-
 	// ---------------------------------------------------------
-	// 13. Complete the trip through the actual service.
+	// 13. Generic UpdateStatus must not complete a trip.
+	//
+	// Financial completion is exclusively handled by
+	// CompleteTrip so that fare persistence cannot be bypassed.
 	// ---------------------------------------------------------
 
 	err = service.UpdateStatus(
@@ -475,15 +477,15 @@ func TestUpdateStatusCompletedReleasesBusyDriver(t *testing.T) {
 		StatusCompleted,
 		johnUserID,
 	)
-	if err != nil {
-		t.Fatalf(
-			"complete trip: %v",
-			err,
+
+	if err == nil {
+		t.Fatal(
+			"expected generic trip completion to be rejected",
 		)
 	}
 
 	// ---------------------------------------------------------
-	// 14. Verify terminal trip state.
+	// 14. Verify the trip remained IN_PROGRESS.
 	// ---------------------------------------------------------
 
 	var (
@@ -509,109 +511,66 @@ func TestUpdateStatusCompletedReleasesBusyDriver(t *testing.T) {
 		&completedAt,
 	); err != nil {
 		t.Fatalf(
-			"read completed trip: %v",
+			"read trip after rejected completion: %v",
 			err,
 		)
 	}
 
-	if tripStatus != StatusCompleted {
+	if tripStatus != StatusInProgress {
 		t.Fatalf(
-			"expected trip status %s, got %s",
-			StatusCompleted,
+			"expected trip to remain %s, got %s",
+			StatusInProgress,
 			tripStatus,
 		)
 	}
 
-	if isActive {
+	if !isActive {
 		t.Fatal(
-			"expected completed trip to be inactive",
+			"expected trip to remain active",
 		)
 	}
 
-	if completedAt == nil {
+	if completedAt != nil {
 		t.Fatal(
-			"expected completed_at to be populated",
+			"expected completed_at to remain NULL",
 		)
 	}
 
 	// ---------------------------------------------------------
-	// 15. Verify BUSY driver was released to AVAILABLE.
+	// 15. Driver must remain BUSY.
 	// ---------------------------------------------------------
 
-	var (
-		isOnline           bool
-		availabilityStatus string
-	)
+	var availabilityStatus string
 
 	if err := db.QueryRow(
 		ctx,
 		`
-			SELECT
-				is_online,
-				availability_status
+			SELECT availability_status
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
 		johnUserID,
 	).Scan(
-		&isOnline,
 		&availabilityStatus,
 	); err != nil {
 		t.Fatalf(
-			"read released driver presence: %v",
+			"read driver presence after rejected completion: %v",
 			err,
 		)
 	}
 
-	if !isOnline {
-		t.Fatal(
-			"expected released driver to remain online",
-		)
-	}
-
-	if availabilityStatus != driverAvailabilityAvailable {
+	if availabilityStatus != "BUSY" {
 		t.Fatalf(
-			"expected driver status %s, got %s",
-			driverAvailabilityAvailable,
+			"expected driver to remain BUSY, got %s",
 			availabilityStatus,
 		)
 	}
 
 	// ---------------------------------------------------------
-	// 16. Completing a trip does not rewrite ride_requests.
+	// 16. No completion event may have been created.
 	// ---------------------------------------------------------
 
-	var rideStatus string
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT status
-			FROM ride_requests
-			WHERE id = $1
-		`,
-		rideRequestID,
-	).Scan(
-		&rideStatus,
-	); err != nil {
-		t.Fatalf(
-			"read completed trip ride status: %v",
-			err,
-		)
-	}
-
-	if rideStatus != "ACCEPTED" {
-		t.Fatalf(
-			"expected source ride to remain ACCEPTED, got %s",
-			rideStatus,
-		)
-	}
-
-	// ---------------------------------------------------------
-	// 17. Verify immutable lifecycle event exists.
-	// ---------------------------------------------------------
-
-	var eventCount int
+	var completionEventCount int
 
 	if err := db.QueryRow(
 		ctx,
@@ -619,21 +578,53 @@ func TestUpdateStatusCompletedReleasesBusyDriver(t *testing.T) {
 			SELECT COUNT(*)
 			FROM trip_events
 			WHERE trip_id = $1
+			  AND event_type = $2
 		`,
 		tripID,
+		EventTripCompleted,
 	).Scan(
-		&eventCount,
+		&completionEventCount,
 	); err != nil {
 		t.Fatalf(
-			"count completion trip events: %v",
+			"count completion events: %v",
 			err,
 		)
 	}
 
-	if eventCount != 1 {
+	if completionEventCount != 0 {
 		t.Fatalf(
-			"expected exactly 1 completion lifecycle event, got %d",
-			eventCount,
+			"expected no completion event, got %d",
+			completionEventCount,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 17. No fare may have been created.
+	// ---------------------------------------------------------
+
+	var fareCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trip_fares
+			WHERE trip_id = $1
+		`,
+		tripID,
+	).Scan(
+		&fareCount,
+	); err != nil {
+		t.Fatalf(
+			"count trip fares: %v",
+			err,
+		)
+	}
+
+	if fareCount != 0 {
+		t.Fatalf(
+			"expected no trip fare, got %d",
+			fareCount,
 		)
 	}
 }

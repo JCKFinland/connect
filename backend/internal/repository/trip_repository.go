@@ -39,6 +39,14 @@ type TripRepository interface {
 		status string,
 	) error
 
+	// UpdateActualMetrics persists the authoritative trip meter values.
+	UpdateActualMetrics(
+		ctx context.Context,
+		id string,
+		actualDistanceMeters int64,
+		actualDurationSeconds int64,
+	) error
+
 	// AssignDriver assigns a driver and vehicle to a trip.
 	AssignDriver(
 		ctx context.Context,

@@ -86,3 +86,26 @@ type ListTripsRequest struct {
 	Limit  int `form:"limit"`
 	Offset int `form:"offset"`
 }
+
+// CompleteTripInput contains the authoritative operational
+// measurements and frozen pricing inputs required to finalize a trip.
+type CompleteTripInput struct {
+	ActualDistanceMeters   int64
+	ActualDurationSeconds  int64
+	WaitingDurationSeconds int64
+
+	BaseFare             float64
+	DistanceRatePerKM    float64
+	TimeRatePerMinute    float64
+	WaitingRatePerMinute float64
+	BookingFee           float64
+
+	SurgeMultiplier float64
+	DiscountAmount  float64
+	TaxAmount       float64
+	TollAmount      float64
+	ParkingAmount   float64
+
+	Currency       string
+	PricingVersion string
+}

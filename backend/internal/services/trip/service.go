@@ -5,6 +5,7 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	"github.com/JCKFinland/connect/backend/internal/services/fare"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -104,6 +105,13 @@ type Service interface {
 		trip *models.Trip,
 		userID string,
 	) error
+
+	CompleteTrip(
+		ctx context.Context,
+		id string,
+		performedByUserID string,
+		input CompleteTripInput,
+	) (*models.TripFare, error)
 }
 
 // Dependencies contains the resources required by the trip service.
@@ -115,6 +123,8 @@ type Dependencies struct {
 	Presence     repository.DriverPresenceRepository
 	TripEvents   repository.TripEventRepository
 	UserRoles    repository.UserRoleRepository
+
+	FareCalculator fare.Service
 }
 
 // tripService implements Service.
@@ -126,6 +136,8 @@ type tripService struct {
 	presence     repository.DriverPresenceRepository
 	tripEvents   repository.TripEventRepository
 	userRoles    repository.UserRoleRepository
+
+	fareCalculator fare.Service
 }
 
 // NewService creates a new Trip service.
@@ -140,6 +152,8 @@ func NewService(
 		presence:     deps.Presence,
 		tripEvents:   deps.TripEvents,
 		userRoles:    deps.UserRoles,
+
+		fareCalculator: deps.FareCalculator,
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
 func TestTripFareRepositoryRoundTrip(t *testing.T) {
@@ -53,6 +54,39 @@ func TestTripFareRepositoryRoundTrip(t *testing.T) {
 		)
 	}
 	defer db.Close()
+
+	// ---------------------------------------------------------
+	// Serialize access to John's shared integration fixture.
+	//
+	// Other integration tests temporarily modify John's active
+	// assignment, vehicle, or presence. Without the advisory lock,
+	// this test can race with them when go test ./... runs packages
+	// concurrently.
+	// ---------------------------------------------------------
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+	if err != nil {
+		t.Fatalf(
+			"acquire John dispatch fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release John dispatch fixture lock: %v",
+				err,
+			)
+		}
+	}()
 
 	const (
 		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
