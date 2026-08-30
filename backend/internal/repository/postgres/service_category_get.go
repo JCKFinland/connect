@@ -37,22 +37,19 @@ func (r *ServiceCategoryRepository) GetByID(
 
 func (r *ServiceCategoryRepository) GetByCode(
 	ctx context.Context,
-	companyID string,
 	code string,
 ) (*models.ServiceCategory, error) {
 	query := `
 		SELECT
 			` + serviceCategoryColumns + `
 		FROM service_categories
-		WHERE company_id = $1
-		  AND UPPER(code) = UPPER($2)
+		WHERE UPPER(code) = UPPER($1)
 	`
 
 	category, err := scanServiceCategory(
 		r.db.QueryRow(
 			ctx,
 			query,
-			companyID,
 			code,
 		),
 	)

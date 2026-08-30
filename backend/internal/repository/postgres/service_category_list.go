@@ -7,24 +7,21 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 )
 
-func (r *ServiceCategoryRepository) ListByCompanyID(
+func (r *ServiceCategoryRepository) List(
 	ctx context.Context,
-	companyID string,
 	activeOnly bool,
-) ([]*models.ServiceCategory, error) {
+) ([]models.ServiceCategory, error) {
 	query := `
 		SELECT
 			` + serviceCategoryColumns + `
 		FROM service_categories
-		WHERE company_id = $1
-		  AND ($2 = FALSE OR is_active = TRUE)
+		WHERE ($1 = FALSE OR is_active = TRUE)
 		ORDER BY name ASC, id ASC
 	`
 
 	rows, err := r.db.Query(
 		ctx,
 		query,
-		companyID,
 		activeOnly,
 	)
 	if err != nil {
@@ -35,8 +32,10 @@ func (r *ServiceCategoryRepository) ListByCompanyID(
 	}
 	defer rows.Close()
 
-	categories :=
-		make([]*models.ServiceCategory, 0)
+	categories := make(
+		[]models.ServiceCategory,
+		0,
+	)
 
 	for rows.Next() {
 		category, err :=
@@ -48,8 +47,10 @@ func (r *ServiceCategoryRepository) ListByCompanyID(
 			)
 		}
 
-		categories =
-			append(categories, category)
+		categories = append(
+			categories,
+			*category,
+		)
 	}
 
 	if err := rows.Err(); err != nil {

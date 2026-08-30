@@ -19,13 +19,11 @@ type ServiceCategoryRepository interface {
 
 	GetByCode(
 		ctx context.Context,
-		companyID string,
 		code string,
 	) (*models.ServiceCategory, error)
 
-	ListByCompanyID(
+	List(
 		ctx context.Context,
-		companyID string,
 		activeOnly bool,
-	) ([]*models.ServiceCategory, error)
+	) ([]models.ServiceCategory, error)
 }

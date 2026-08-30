@@ -54,10 +54,9 @@ func TestFarePricingProfileRepositoryResolveEffective(
 		NewFarePricingProfileRepository(db)
 
 	category := &models.ServiceCategory{
-		CompanyID: companyID,
-		Code:      "PRICING_TEST_" + uuid.NewString()[:8],
-		Name:      "Pricing Resolver Test",
-		IsActive:  true,
+		Code:     "PRICING_TEST_" + uuid.NewString()[:8],
+		Name:     "Pricing Resolver Test",
+		IsActive: true,
 	}
 
 	category.ID = uuid.NewString()

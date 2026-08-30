@@ -61,16 +61,10 @@ func TestServiceCategoryRepositoryRoundTrip(
 	}
 	defer db.Close()
 
-	// ---------------------------------------------------------
-	// 3. Use the existing CONNECT company fixture.
-	// ---------------------------------------------------------
-
-	const companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
 	repo := NewServiceCategoryRepository(db)
 
 	// ---------------------------------------------------------
-	// 4. Create disposable category.
+	// 3. Create disposable platform-level category.
 	// ---------------------------------------------------------
 
 	categoryID := uuid.NewString()
@@ -79,13 +73,10 @@ func TestServiceCategoryRepositoryRoundTrip(
 		"Disposable pricing repository integration category"
 
 	category := &models.ServiceCategory{
-		CompanyID: companyID,
-		Code:      "TEST_" + uuid.NewString()[:8],
-		Name:      "Repository Test Category",
-
+		Code:        "TEST_" + uuid.NewString()[:8],
+		Name:        "Repository Test Category",
 		Description: &description,
-
-		IsActive: true,
+		IsActive:    true,
 	}
 
 	category.ID = categoryID
@@ -130,7 +121,7 @@ func TestServiceCategoryRepositoryRoundTrip(
 	}
 
 	// ---------------------------------------------------------
-	// 5. GetByID round trip.
+	// 4. GetByID round trip.
 	// ---------------------------------------------------------
 
 	byID, err := repo.GetByID(
@@ -149,14 +140,6 @@ func TestServiceCategoryRepositoryRoundTrip(
 			"expected category ID %s, got %s",
 			categoryID,
 			byID.ID,
-		)
-	}
-
-	if byID.CompanyID != companyID {
-		t.Fatalf(
-			"expected company ID %s, got %s",
-			companyID,
-			byID.CompanyID,
 		)
 	}
 
@@ -191,12 +174,11 @@ func TestServiceCategoryRepositoryRoundTrip(
 	}
 
 	// ---------------------------------------------------------
-	// 6. GetByCode must be case-insensitive.
+	// 5. GetByCode must be platform-wide and case-insensitive.
 	// ---------------------------------------------------------
 
 	byCode, err := repo.GetByCode(
 		ctx,
-		companyID,
 		stringLower(category.Code),
 	)
 	if err != nil {
@@ -215,15 +197,13 @@ func TestServiceCategoryRepositoryRoundTrip(
 	}
 
 	// ---------------------------------------------------------
-	// 7. ListByCompanyID(activeOnly=true).
+	// 6. List(activeOnly=true).
 	// ---------------------------------------------------------
 
-	activeCategories, err :=
-		repo.ListByCompanyID(
-			ctx,
-			companyID,
-			true,
-		)
+	activeCategories, err := repo.List(
+		ctx,
+		true,
+	)
 	if err != nil {
 		t.Fatalf(
 			"list active service categories: %v",
@@ -247,7 +227,7 @@ func TestServiceCategoryRepositoryRoundTrip(
 	}
 
 	// ---------------------------------------------------------
-	// 8. Mark category inactive directly for repository filtering.
+	// 7. Mark category inactive directly for repository filtering.
 	// ---------------------------------------------------------
 
 	_, err = db.Exec(
@@ -268,12 +248,10 @@ func TestServiceCategoryRepositoryRoundTrip(
 		)
 	}
 
-	activeCategories, err =
-		repo.ListByCompanyID(
-			ctx,
-			companyID,
-			true,
-		)
+	activeCategories, err = repo.List(
+		ctx,
+		true,
+	)
 	if err != nil {
 		t.Fatalf(
 			"list active categories after deactivation: %v",
@@ -290,16 +268,14 @@ func TestServiceCategoryRepositoryRoundTrip(
 	}
 
 	// ---------------------------------------------------------
-	// 9. activeOnly=false must still return historical/inactive
+	// 8. activeOnly=false must still return historical/inactive
 	// category.
 	// ---------------------------------------------------------
 
-	allCategories, err :=
-		repo.ListByCompanyID(
-			ctx,
-			companyID,
-			false,
-		)
+	allCategories, err := repo.List(
+		ctx,
+		false,
+	)
 	if err != nil {
 		t.Fatalf(
 			"list all service categories: %v",
@@ -330,24 +306,23 @@ func TestServiceCategoryRepositoryRoundTrip(
 	}
 
 	// ---------------------------------------------------------
-	// 10. Duplicate code must fail case-insensitively.
+	// 9. Duplicate platform category code must fail
+	// case-insensitively.
 	// ---------------------------------------------------------
 
 	duplicate := &models.ServiceCategory{
-		CompanyID: companyID,
-		Code:      stringLower(category.Code),
-		Name:      "Duplicate Category",
-		IsActive:  true,
+		Code:     stringLower(category.Code),
+		Name:     "Duplicate Category",
+		IsActive: true,
 	}
 
 	err = repo.Create(
 		ctx,
 		duplicate,
 	)
-
 	if err == nil {
 		t.Fatal(
-			"expected duplicate company/category code to fail",
+			"expected duplicate platform category code to fail",
 		)
 	}
 }

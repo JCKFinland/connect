@@ -26,7 +26,6 @@ func (r *ServiceCategoryRepository) Create(
 		INSERT INTO service_categories
 		(
 			id,
-			company_id,
 			code,
 			name,
 			description,
@@ -34,7 +33,7 @@ func (r *ServiceCategoryRepository) Create(
 		)
 		VALUES
 		(
-			$1,$2,$3,$4,$5,$6
+			$1,$2,$3,$4,$5
 		)
 		RETURNING
 			created_at,
@@ -45,7 +44,6 @@ func (r *ServiceCategoryRepository) Create(
 		ctx,
 		query,
 		category.ID,
-		category.CompanyID,
 		category.Code,
 		category.Name,
 		category.Description,

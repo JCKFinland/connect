@@ -797,13 +797,12 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 
 	serviceCategoryID := uuid.NewString()
 
-	if _, err := db.Exec(
+	if _, err = db.Exec(
 		ctx,
 		`
 			INSERT INTO service_categories
 			(
 				id,
-				company_id,
 				code,
 				name,
 				description,
@@ -815,7 +814,6 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 			(
 				$1,
 				$2,
-				$3,
 				'AcceptOffer Test Category',
 				'AcceptOffer service-category propagation regression test',
 				TRUE,
@@ -824,7 +822,6 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 			)
 		`,
 		serviceCategoryID,
-		companyID,
 		"ACCEPT_TEST_"+uuid.NewString()[:8],
 	); err != nil {
 		t.Fatalf(
@@ -7447,31 +7444,28 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 	_, err = db.Exec(
 		ctx,
 		`
-		INSERT INTO service_categories
-		(
-			id,
-			company_id,
-			code,
-			name,
-			description,
-			is_active,
-			created_at,
-			updated_at
-		)
-		VALUES
-		(
-			$1,
-			$2,
-			$3,
-			'Dispatch Test Category',
-			'Dispatch service-category propagation regression test',
-			TRUE,
-			NOW(),
-			NOW()
-		)
-	`,
+			INSERT INTO service_categories
+			(
+				id,
+				code,
+				name,
+				description,
+				is_active,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'DispatchRide Test Category',
+				'DispatchRide service-category propagation regression test',
+				TRUE,
+				NOW(),
+				NOW()
+			)
+		`,
 		serviceCategoryID,
-		companyID,
 		"DISPATCH_TEST_"+uuid.NewString()[:8],
 	)
 

@@ -2,7 +2,6 @@ package postgres
 
 const serviceCategoryColumns = `
 	id,
-	company_id,
 	code,
 	name,
 	description,

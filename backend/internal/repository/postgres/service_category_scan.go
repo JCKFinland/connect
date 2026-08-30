@@ -12,7 +12,6 @@ func scanServiceCategory(
 
 	err := row.Scan(
 		&category.ID,
-		&category.CompanyID,
 		&category.Code,
 		&category.Name,
 		&category.Description,
