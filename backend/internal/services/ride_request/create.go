@@ -48,6 +48,35 @@ func (s *Service) Create(
 		)
 	}
 
+	if s.serviceCategories == nil {
+		return nil, errors.New(
+			"service category repository is not configured",
+		)
+	}
+
+	if req.ServiceCategoryID == "" {
+		return nil, errors.New(
+			"service category ID is required",
+		)
+	}
+
+	category, err := s.serviceCategories.GetByID(
+		ctx,
+		req.ServiceCategoryID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"get service category: %w",
+			err,
+		)
+	}
+
+	if !category.IsActive {
+		return nil, errors.New(
+			"service category is inactive",
+		)
+	}
+
 	now := time.Now().UTC()
 
 	var expiresAt time.Time
@@ -90,6 +119,7 @@ func (s *Service) Create(
 		DestinationLongitude: req.DestinationLongitude,
 
 		RequestedVehicleType: req.RequestedVehicleType,
+		ServiceCategoryID:    &req.ServiceCategoryID,
 		PassengerCount:       req.PassengerCount,
 
 		Status: StatusPending,

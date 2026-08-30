@@ -10,6 +10,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/JCKFinland/connect/backend/internal/services/pricing"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -75,6 +76,15 @@ func (s *Service) DispatchRide(
 			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
 			trips := postgresrepo.NewTripRepositoryWithDB(tx)
 			vehicles := postgresrepo.NewVehicleRepositoryWithDB(tx)
+
+			farePricingProfiles :=
+				postgresrepo.NewFarePricingProfileRepositoryWithDB(tx)
+
+			pricingService := pricing.NewService(
+				pricing.Dependencies{
+					FarePricingProfiles: farePricingProfiles,
+				},
+			)
 
 			// ---------------------------------------------------------
 			// 1. Load and validate ride request
@@ -354,6 +364,40 @@ func (s *Service) DispatchRide(
 				return ErrNoAvailableDrivers
 			}
 
+			if request.ServiceCategoryID == nil ||
+				*request.ServiceCategoryID == "" {
+				return errors.New(
+					"ride request service category is required for dispatch",
+				)
+			}
+
+			branchID := selectedAssignment.BranchID
+
+			resolvedPricing, err := pricingService.Resolve(
+				ctx,
+				pricing.ResolveInput{
+					CompanyID: selectedAssignment.CompanyID,
+					BranchID:  &branchID,
+
+					ServiceCategoryID: *request.ServiceCategoryID,
+
+					At: now,
+				},
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"resolve dispatch pricing: %w",
+					err,
+				)
+			}
+
+			if resolvedPricing == nil ||
+				resolvedPricing.ProfileID == "" {
+				return errors.New(
+					"dispatch pricing resolution returned no pricing profile",
+				)
+			}
+
 			// ---------------------------------------------------------
 			// 4. Build assigned trip
 			// ---------------------------------------------------------
@@ -385,6 +429,7 @@ func (s *Service) DispatchRide(
 				CompanyID:         selectedAssignment.CompanyID,
 				BranchID:          selectedAssignment.BranchID,
 				ServiceCategoryID: request.ServiceCategoryID,
+				PricingProfileID:  &resolvedPricing.ProfileID,
 
 				Status:     tripStatusAssigned,
 				AssignedAt: now,

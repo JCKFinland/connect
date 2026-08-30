@@ -113,6 +113,7 @@ func main() {
 		postgresrepo.NewDriverVehicleAssignmentRepository(db)
 	tripRepo := postgresrepo.NewTripRepository(db)
 	rideRequestRepo := postgresrepo.NewRideRequestRepository(db)
+	serviceCategoryRepo := postgresrepo.NewServiceCategoryRepository(db)
 	tripEventRepo := postgresrepo.NewTripEventRepository(db)
 	dispatchOfferRepo := postgresrepo.NewDispatchOfferRepository(db)
 
@@ -178,9 +179,10 @@ func main() {
 
 	rideRequestService := rideRequestService.NewService(
 		rideRequestService.Dependencies{
-			Config:       cfg,
-			RideRequests: rideRequestRepo,
-			UserRoles:    userRoleRepo,
+			Config:            cfg,
+			RideRequests:      rideRequestRepo,
+			UserRoles:         userRoleRepo,
+			ServiceCategories: serviceCategoryRepo,
 		},
 	)
 

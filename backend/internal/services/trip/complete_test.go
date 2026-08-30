@@ -303,13 +303,110 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	}
 
 	// ---------------------------------------------------------
-	// 10. Create disposable ride + IN_PROGRESS trip.
+	// 10. Create disposable pricing authority, ride, and trip.
 	// ---------------------------------------------------------
+
+	serviceCategoryID := uuid.NewString()
+	pricingProfileID := uuid.NewString()
+	pricingVersion := "rollback-" + uuid.NewString()
 
 	rideRequestID := uuid.NewString()
 	tripID := uuid.NewString()
 
 	now := time.Now().UTC()
+	pricingEffectiveFrom := now.Add(-time.Hour)
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO service_categories
+			(
+				id,
+				code,
+				name,
+				description,
+				is_active,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Fare Rollback Test Category',
+				'Frozen pricing rollback integration test',
+				TRUE,
+				$3,
+				$3
+			)
+		`,
+		serviceCategoryID,
+		"ROLLBACK_"+uuid.NewString()[:8],
+		now,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create rollback service category: %v",
+			err,
+		)
+	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO fare_pricing_profiles
+			(
+				id,
+				company_id,
+				branch_id,
+				service_category_id,
+				version,
+				currency,
+				base_fare,
+				distance_rate_per_km,
+				time_rate_per_minute,
+				waiting_rate_per_minute,
+				booking_fee,
+				surge_multiplier,
+				effective_from,
+				effective_to,
+				is_active,
+				created_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				$3,
+				$4,
+				$5,
+				'EUR',
+				4.90,
+				1.50,
+				0.25,
+				0.50,
+				2.00,
+				1.00,
+				$6,
+				NULL,
+				TRUE,
+				$7
+			)
+		`,
+		pricingProfileID,
+		companyID,
+		branchID,
+		serviceCategoryID,
+		pricingVersion,
+		pricingEffectiveFrom,
+		now,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create rollback pricing profile: %v",
+			err,
+		)
+	}
 
 	_, err = db.Exec(
 		ctx,
@@ -325,6 +422,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 				destination_latitude,
 				destination_longitude,
 				requested_vehicle_type,
+				service_category_id,
 				passenger_count,
 				status,
 				notes,
@@ -344,17 +442,19 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 				60.1719,
 				24.9414,
 				'STANDARD',
+				$3,
 				1,
 				'ACCEPTED',
 				'Fare failure must roll back completion',
-				$3,
 				$4,
-				$3,
-				$3
+				$5,
+				$4,
+				$4
 			)
 		`,
 		rideRequestID,
 		customerID,
+		serviceCategoryID,
 		now,
 		now.Add(10*time.Minute),
 	)
@@ -378,6 +478,8 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 				company_id,
 				branch_id,
 				fleet_id,
+				service_category_id,
+				pricing_profile_id,
 				status,
 				actual_distance_meters,
 				actual_duration_seconds,
@@ -397,14 +499,16 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 				$6,
 				$7,
 				$8,
+				$9,
+				$10,
 				'IN_PROGRESS',
 				111,
 				222,
-				$9,
-				$9,
+				$11,
+				$11,
 				TRUE,
-				$9,
-				$9
+				$11,
+				$11
 			)
 		`,
 		tripID,
@@ -415,6 +519,8 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 		companyID,
 		branchID,
 		fleetID,
+		serviceCategoryID,
+		pricingProfileID,
 		now,
 	)
 	if err != nil {
@@ -437,6 +543,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 			INSERT INTO trip_fares
 			(
 				trip_id,
+				pricing_profile_id,
 				base_fare,
 				total_amount,
 				currency,
@@ -447,15 +554,17 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 			VALUES
 			(
 				$1,
+				$2,
 				1.00,
 				1.00,
 				'EUR',
 				1.00,
 				'rollback-fixture',
-				$2
+				$3
 			)
 		`,
 		tripID,
+		pricingProfileID,
 		now,
 	)
 	if err != nil {
@@ -501,6 +610,34 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 				cleanupErr,
 			)
 		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM fare_pricing_profiles
+				WHERE id = $1
+			`,
+			pricingProfileID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback pricing profile: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM service_categories
+				WHERE id = $1
+			`,
+			serviceCategoryID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback service category: %v",
+				cleanupErr,
+			)
+		}
 	}()
 
 	// ---------------------------------------------------------
@@ -524,7 +661,6 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 			FareCalculator: fare.NewService(),
 		},
 	)
-
 	// ---------------------------------------------------------
 	// 14. Attempt completion.
 	//
@@ -537,29 +673,9 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 		tripID,
 		johnUserID,
 		CompleteTripInput{
-			ActualDistanceMeters: 8420,
-
-			ActualDurationSeconds: 900,
-
+			ActualDistanceMeters:   8420,
+			ActualDurationSeconds:  900,
 			WaitingDurationSeconds: 150,
-
-			BaseFare: 4.90,
-
-			DistanceRatePerKM: 1.50,
-
-			TimeRatePerMinute: 0.25,
-
-			WaitingRatePerMinute: 0.50,
-
-			BookingFee: 2.00,
-
-			SurgeMultiplier: 1.00,
-
-			TaxAmount: 5.17,
-
-			Currency: "EUR",
-
-			PricingVersion: "v1",
 		},
 	)
 
@@ -584,7 +700,6 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 			err,
 		)
 	}
-
 	// ---------------------------------------------------------
 	// 15. Trip lifecycle and metrics must have rolled back.
 	// ---------------------------------------------------------
@@ -1045,12 +1160,109 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	}
 
 	// ---------------------------------------------------------
-	// 9. Create disposable ride and IN_PROGRESS trip.
+	// 9. Create disposable pricing authority, ride, and trip.
 	// ---------------------------------------------------------
+
+	serviceCategoryID := uuid.NewString()
+	pricingProfileID := uuid.NewString()
+	pricingVersion := "completion-" + uuid.NewString()
 
 	rideRequestID := uuid.NewString()
 	tripID := uuid.NewString()
 	now := time.Now().UTC()
+	pricingEffectiveFrom := now.Add(-time.Hour)
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO service_categories
+			(
+				id,
+				code,
+				name,
+				description,
+				is_active,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Fare Completion Test Category',
+				'Frozen pricing completion integration test',
+				TRUE,
+				$3,
+				$3
+			)
+		`,
+		serviceCategoryID,
+		"COMPLETE_"+uuid.NewString()[:8],
+		now,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create completion service category: %v",
+			err,
+		)
+	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO fare_pricing_profiles
+			(
+				id,
+				company_id,
+				branch_id,
+				service_category_id,
+				version,
+				currency,
+				base_fare,
+				distance_rate_per_km,
+				time_rate_per_minute,
+				waiting_rate_per_minute,
+				booking_fee,
+				surge_multiplier,
+				effective_from,
+				effective_to,
+				is_active,
+				created_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				$3,
+				$4,
+				$5,
+				'EUR',
+				4.90,
+				1.50,
+				0.25,
+				0.50,
+				2.00,
+				1.00,
+				$6,
+				NULL,
+				TRUE,
+				$7
+			)
+		`,
+		pricingProfileID,
+		companyID,
+		branchID,
+		serviceCategoryID,
+		pricingVersion,
+		pricingEffectiveFrom,
+		now,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create completion pricing profile: %v",
+			err,
+		)
+	}
 
 	_, err = db.Exec(
 		ctx,
@@ -1066,6 +1278,7 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 				destination_latitude,
 				destination_longitude,
 				requested_vehicle_type,
+				service_category_id,
 				passenger_count,
 				status,
 				notes,
@@ -1085,17 +1298,19 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 				60.1719,
 				24.9414,
 				'STANDARD',
+				$3,
 				1,
 				'ACCEPTED',
 				'Successful atomic fare completion test',
-				$3,
 				$4,
-				$3,
-				$3
+				$5,
+				$4,
+				$4
 			)
 		`,
 		rideRequestID,
 		customerID,
+		serviceCategoryID,
 		now,
 		now.Add(10*time.Minute),
 	)
@@ -1119,6 +1334,8 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 				company_id,
 				branch_id,
 				fleet_id,
+				service_category_id,
+				pricing_profile_id,
 				status,
 				assigned_at,
 				started_at,
@@ -1136,12 +1353,14 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 				$6,
 				$7,
 				$8,
+				$9,
+				$10,
 				'IN_PROGRESS',
-				$9,
-				$9,
+				$11,
+				$11,
 				TRUE,
-				$9,
-				$9
+				$11,
+				$11
 			)
 		`,
 		tripID,
@@ -1152,6 +1371,8 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		companyID,
 		branchID,
 		fleetID,
+		serviceCategoryID,
+		pricingProfileID,
 		now,
 	)
 	if err != nil {
@@ -1191,6 +1412,34 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 				cleanupErr,
 			)
 		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM fare_pricing_profiles
+				WHERE id = $1
+			`,
+			pricingProfileID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup completion pricing profile: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM service_categories
+				WHERE id = $1
+			`,
+			serviceCategoryID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup completion service category: %v",
+				cleanupErr,
+			)
+		}
 	}()
 
 	// ---------------------------------------------------------
@@ -1214,7 +1463,6 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 			FareCalculator: fare.NewService(),
 		},
 	)
-
 	// ---------------------------------------------------------
 	// 11. Complete through the production transaction.
 	// ---------------------------------------------------------
@@ -1224,29 +1472,9 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		tripID,
 		johnUserID,
 		CompleteTripInput{
-			ActualDistanceMeters: 8420,
-
-			ActualDurationSeconds: 900,
-
+			ActualDistanceMeters:   8420,
+			ActualDurationSeconds:  900,
 			WaitingDurationSeconds: 150,
-
-			BaseFare: 4.90,
-
-			DistanceRatePerKM: 1.50,
-
-			TimeRatePerMinute: 0.25,
-
-			WaitingRatePerMinute: 0.50,
-
-			BookingFee: 2.00,
-
-			SurgeMultiplier: 1.00,
-
-			TaxAmount: 5.17,
-
-			Currency: "EUR",
-
-			PricingVersion: "v1",
 		},
 	)
 	if err != nil {
@@ -1276,10 +1504,17 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
-	if completedFare.TotalAmount != 29.70 {
+	if completedFare.PricingProfileID == nil {
+		t.Fatal(
+			"expected completed fare pricing profile id to be set",
+		)
+	}
+
+	if *completedFare.PricingProfileID != pricingProfileID {
 		t.Fatalf(
-			"expected fare total 29.70, got %.2f",
-			completedFare.TotalAmount,
+			"expected fare pricing profile id %s, got %s",
+			pricingProfileID,
+			*completedFare.PricingProfileID,
 		)
 	}
 
@@ -1363,12 +1598,13 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	// ---------------------------------------------------------
 
 	var (
-		fareCount              int
-		totalAmount            float64
-		chargedDistanceMeters  int64
-		chargedDurationSeconds int64
-		waitingSeconds         int64
-		pricingVersion         string
+		fareCount                 int
+		totalAmount               float64
+		chargedDistanceMeters     int64
+		chargedDurationSeconds    int64
+		waitingSeconds            int64
+		persistedPricingVersion   string
+		persistedPricingProfileID *string
 	)
 
 	err = db.QueryRow(
@@ -1380,7 +1616,8 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 				MAX(charged_distance_meters),
 				MAX(charged_duration_seconds),
 				MAX(waiting_duration_seconds),
-				MAX(pricing_version)
+				MAX(pricing_version),
+				MAX(pricing_profile_id::text)
 			FROM trip_fares
 			WHERE trip_id = $1
 		`,
@@ -1391,7 +1628,8 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		&chargedDistanceMeters,
 		&chargedDurationSeconds,
 		&waitingSeconds,
-		&pricingVersion,
+		&persistedPricingVersion,
+		&persistedPricingProfileID,
 	)
 	if err != nil {
 		t.Fatalf(
@@ -1407,9 +1645,9 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
-	if totalAmount != 29.70 {
+	if totalAmount != 24.53 {
 		t.Fatalf(
-			"expected persisted total 29.70, got %.2f",
+			"expected persisted total 24.53, got %.2f",
 			totalAmount,
 		)
 	}
@@ -1435,10 +1673,25 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
-	if pricingVersion != "v1" {
+	if persistedPricingVersion != pricingVersion {
 		t.Fatalf(
-			"expected pricing version v1, got %s",
+			"expected pricing version %s, got %s",
 			pricingVersion,
+			persistedPricingVersion,
+		)
+	}
+
+	if persistedPricingProfileID == nil {
+		t.Fatal(
+			"expected persisted pricing profile id",
+		)
+	}
+
+	if *persistedPricingProfileID != pricingProfileID {
+		t.Fatalf(
+			"expected persisted pricing profile id %s, got %s",
+			pricingProfileID,
+			*persistedPricingProfileID,
 		)
 	}
 

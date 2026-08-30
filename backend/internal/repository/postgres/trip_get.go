@@ -23,8 +23,9 @@ func (r *TripRepository) GetByID(
 			company_id,
             branch_id,
             service_category_id,
+            pricing_profile_id,
             fleet_id,
-			status,
+            status,
 
 			estimated_distance_km,
 			estimated_duration_minutes,
@@ -84,6 +85,7 @@ func (r *TripRepository) GetByID(
 		&trip.CompanyID,
 		&trip.BranchID,
 		&trip.ServiceCategoryID,
+		&trip.PricingProfileID,
 		&trip.FleetID,
 		&trip.Status,
 

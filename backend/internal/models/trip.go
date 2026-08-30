@@ -27,6 +27,7 @@ type Trip struct {
 	BranchID  string `db:"branch_id" json:"branch_id"`
 
 	ServiceCategoryID *string `db:"service_category_id" json:"service_category_id,omitempty"`
+	PricingProfileID  *string `db:"pricing_profile_id" json:"pricing_profile_id,omitempty"`
 
 	// Trip lifecycle state.
 	Status string `db:"status" json:"status"`

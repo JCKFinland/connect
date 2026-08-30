@@ -12,6 +12,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/JCKFinland/connect/backend/internal/services/pricing"
 )
 
 var (
@@ -85,6 +86,14 @@ func (s *Service) AcceptOffer(
 			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
 			rideRequests := postgresrepo.NewRideRequestRepositoryWithDB(tx)
 			trips := postgresrepo.NewTripRepositoryWithDB(tx)
+			farePricingProfiles :=
+				postgresrepo.NewFarePricingProfileRepositoryWithDB(tx)
+
+			pricingService := pricing.NewService(
+				pricing.Dependencies{
+					FarePricingProfiles: farePricingProfiles,
+				},
+			)
 
 			// ---------------------------------------------------------
 			// 1. Lock dispatch offer.
@@ -253,6 +262,40 @@ func (s *Service) AcceptOffer(
 				)
 			}
 
+			if request.ServiceCategoryID == nil ||
+				*request.ServiceCategoryID == "" {
+				return errors.New(
+					"ride request service category is required for offer acceptance",
+				)
+			}
+
+			branchID := offer.BranchID
+
+			resolvedPricing, err := pricingService.Resolve(
+				ctx,
+				pricing.ResolveInput{
+					CompanyID: offer.CompanyID,
+					BranchID:  &branchID,
+
+					ServiceCategoryID: *request.ServiceCategoryID,
+
+					At: now,
+				},
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"resolve offer acceptance pricing: %w",
+					err,
+				)
+			}
+
+			if resolvedPricing == nil ||
+				resolvedPricing.ProfileID == "" {
+				return errors.New(
+					"offer acceptance pricing resolution returned no pricing profile",
+				)
+			}
+
 			// ---------------------------------------------------------
 			// 6. Build ASSIGNED trip.
 			//
@@ -285,6 +328,7 @@ func (s *Service) AcceptOffer(
 				CompanyID:         offer.CompanyID,
 				BranchID:          offer.BranchID,
 				ServiceCategoryID: request.ServiceCategoryID,
+				PricingProfileID:  &resolvedPricing.ProfileID,
 				FleetID:           offer.FleetID,
 
 				Status:     tripStatusAssigned,

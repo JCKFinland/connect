@@ -8,6 +8,8 @@ const tripColumns = `
     vehicle_id,
     company_id,
     branch_id,
+    service_category_id,
+    pricing_profile_id,
     fleet_id,
     status,
 

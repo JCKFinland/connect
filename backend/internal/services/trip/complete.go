@@ -90,6 +90,8 @@ func (s *tripService) CompleteTrip(
 
 			tripFares :=
 				postgresrepo.NewTripFareRepositoryWithDB(tx)
+			farePricingProfiles :=
+				postgresrepo.NewFarePricingProfileRepositoryWithDB(tx)
 
 			// -------------------------------------------------
 			// Lock authoritative trip row.
@@ -124,6 +126,58 @@ func (s *tripService) CompleteTrip(
 				)
 			}
 
+			if currentTrip.PricingProfileID == nil ||
+				*currentTrip.PricingProfileID == "" {
+				return fmt.Errorf(
+					"trip has no frozen pricing profile",
+				)
+			}
+
+			pricingProfile, err :=
+				farePricingProfiles.GetByID(
+					ctx,
+					*currentTrip.PricingProfileID,
+				)
+			if err != nil {
+				return fmt.Errorf(
+					"get frozen trip pricing profile: %w",
+					err,
+				)
+			}
+
+			if pricingProfile == nil {
+				return fmt.Errorf(
+					"frozen trip pricing profile was not found",
+				)
+			}
+
+			if pricingProfile.ID != *currentTrip.PricingProfileID {
+				return fmt.Errorf(
+					"frozen trip pricing profile mismatch",
+				)
+			}
+
+			if currentTrip.ServiceCategoryID == nil ||
+				*currentTrip.ServiceCategoryID == "" {
+				return fmt.Errorf(
+					"trip has no frozen service category",
+				)
+			}
+
+			if pricingProfile.ServiceCategoryID !=
+				*currentTrip.ServiceCategoryID {
+
+				return fmt.Errorf(
+					"frozen pricing profile service category does not match trip service category",
+				)
+			}
+
+			if pricingProfile.CompanyID != currentTrip.CompanyID {
+				return fmt.Errorf(
+					"frozen pricing profile company does not match trip company",
+				)
+			}
+
 			// -------------------------------------------------
 			// Calculate the immutable fare snapshot before any
 			// trip lifecycle state is changed.
@@ -141,29 +195,21 @@ func (s *tripService) CompleteTrip(
 						WaitingSeconds: input.WaitingDurationSeconds,
 
 						Pricing: fare.PricingSnapshot{
-							BaseFare: input.BaseFare,
+							BaseFare: pricingProfile.BaseFare,
 
-							DistanceRatePerKM: input.DistanceRatePerKM,
+							DistanceRatePerKM: pricingProfile.DistanceRatePerKM,
 
-							TimeRatePerMinute: input.TimeRatePerMinute,
+							TimeRatePerMinute: pricingProfile.TimeRatePerMinute,
 
-							WaitingRatePerMinute: input.WaitingRatePerMinute,
+							WaitingRatePerMinute: pricingProfile.WaitingRatePerMinute,
 
-							BookingFee: input.BookingFee,
+							BookingFee: pricingProfile.BookingFee,
 
-							SurgeMultiplier: input.SurgeMultiplier,
+							SurgeMultiplier: pricingProfile.SurgeMultiplier,
 
-							DiscountAmount: input.DiscountAmount,
+							Currency: pricingProfile.Currency,
 
-							TaxAmount: input.TaxAmount,
-
-							TollAmount: input.TollAmount,
-
-							ParkingAmount: input.ParkingAmount,
-
-							Currency: input.Currency,
-
-							PricingVersion: input.PricingVersion,
+							PricingVersion: pricingProfile.Version,
 						},
 					},
 				)
@@ -173,6 +219,9 @@ func (s *tripService) CompleteTrip(
 					err,
 				)
 			}
+
+			calculatedFare.PricingProfileID =
+				currentTrip.PricingProfileID
 
 			// -------------------------------------------------
 			// Persist authoritative operational meter values.

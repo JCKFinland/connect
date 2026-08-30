@@ -15,6 +15,7 @@ type CreateRideRequestRequest struct {
 	DestinationLongitude float64 `json:"destination_longitude" binding:"required"`
 
 	RequestedVehicleType string `json:"requested_vehicle_type"`
+	ServiceCategoryID    string `json:"service_category_id" binding:"required"`
 	PassengerCount       int    `json:"passenger_count"`
 
 	Notes string `json:"notes"`

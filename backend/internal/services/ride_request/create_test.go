@@ -15,6 +15,47 @@ type createRideRequestTestRepository struct {
 	created *models.RideRequest
 }
 
+type createServiceCategoryTestRepository struct {
+	category *models.ServiceCategory
+	err      error
+}
+
+func (r *createServiceCategoryTestRepository) Create(
+	ctx context.Context,
+	category *models.ServiceCategory,
+) error {
+	return nil
+}
+
+func (r *createServiceCategoryTestRepository) GetByID(
+	ctx context.Context,
+	id string,
+) (*models.ServiceCategory, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+
+	if r.category == nil || r.category.ID != id {
+		return nil, repository.ErrNotFound
+	}
+
+	return r.category, nil
+}
+
+func (r *createServiceCategoryTestRepository) GetByCode(
+	ctx context.Context,
+	code string,
+) (*models.ServiceCategory, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (r *createServiceCategoryTestRepository) List(
+	ctx context.Context,
+	activeOnly bool,
+) ([]models.ServiceCategory, error) {
+	return nil, nil
+}
+
 func (r *createRideRequestTestRepository) Create(
 	ctx context.Context,
 	request *models.RideRequest,
@@ -111,10 +152,13 @@ func TestCreateAppliesDefaultMatchingLifetime(t *testing.T) {
 		Dependencies{
 			Config: &config.Config{
 				RideRequest: config.RideRequestConfig{
-					DefaultMatchingLifetime: defaultLifetime,
+					DefaultMatchingLifetime: 10 * time.Minute,
 				},
 			},
 			RideRequests: repo,
+			ServiceCategories: &createServiceCategoryTestRepository{
+				category: validServiceCategory(),
+			},
 		},
 	)
 
@@ -203,6 +247,9 @@ func TestCreatePreservesFutureExplicitExpiry(t *testing.T) {
 				},
 			},
 			RideRequests: repo,
+			ServiceCategories: &createServiceCategoryTestRepository{
+				category: validServiceCategory(),
+			},
 		},
 	)
 
@@ -277,6 +324,9 @@ func TestCreateRejectsExpiredExplicitExpiry(t *testing.T) {
 				},
 			},
 			RideRequests: repo,
+			ServiceCategories: &createServiceCategoryTestRepository{
+				category: validServiceCategory(),
+			},
 		},
 	)
 
@@ -336,9 +386,108 @@ func validCreateRideRequest() CreateRideRequestRequest {
 		DestinationLongitude: 24.9414,
 
 		RequestedVehicleType: "STANDARD",
+		ServiceCategoryID:    validServiceCategory().ID,
 
 		PassengerCount: 1,
 
 		Notes: "Ride expiry policy test",
+	}
+}
+
+func validServiceCategory() *models.ServiceCategory {
+	return &models.ServiceCategory{
+		BaseModel: models.BaseModel{
+			ID: "11111111-1111-4111-8111-111111111111",
+		},
+		Code:     "BASIC",
+		Name:     "Basic",
+		IsActive: true,
+	}
+}
+
+func TestCreateRejectsUnknownServiceCategory(t *testing.T) {
+	repo := &createRideRequestTestRepository{}
+
+	service := NewService(
+		Dependencies{
+			Config: &config.Config{
+				RideRequest: config.RideRequestConfig{
+					DefaultMatchingLifetime: 10 * time.Minute,
+				},
+			},
+			RideRequests:      repo,
+			ServiceCategories: &createServiceCategoryTestRepository{},
+		},
+	)
+
+	request, err := service.Create(
+		context.Background(),
+		validCreateRideRequest(),
+	)
+
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound, got request=%v err=%v",
+			request,
+			err,
+		)
+	}
+
+	if request != nil {
+		t.Fatalf(
+			"expected no created request, got %+v",
+			request,
+		)
+	}
+
+	if repo.created != nil {
+		t.Fatalf(
+			"expected unknown category ride not to be persisted, got %+v",
+			repo.created,
+		)
+	}
+}
+
+func TestCreateRejectsInactiveServiceCategory(t *testing.T) {
+	repo := &createRideRequestTestRepository{}
+
+	category := validServiceCategory()
+	category.IsActive = false
+
+	service := NewService(
+		Dependencies{
+			Config: &config.Config{
+				RideRequest: config.RideRequestConfig{
+					DefaultMatchingLifetime: 10 * time.Minute,
+				},
+			},
+			RideRequests: repo,
+			ServiceCategories: &createServiceCategoryTestRepository{
+				category: category,
+			},
+		},
+	)
+
+	request, err := service.Create(
+		context.Background(),
+		validCreateRideRequest(),
+	)
+
+	if err == nil {
+		t.Fatal("expected inactive service category error")
+	}
+
+	if request != nil {
+		t.Fatalf(
+			"expected no created request, got %+v",
+			request,
+		)
+	}
+
+	if repo.created != nil {
+		t.Fatalf(
+			"expected inactive category ride not to be persisted, got %+v",
+			repo.created,
+		)
 	}
 }
