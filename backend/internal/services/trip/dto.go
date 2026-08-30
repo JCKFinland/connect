@@ -86,11 +86,3 @@ type ListTripsRequest struct {
 	Limit  int `form:"limit"`
 	Offset int `form:"offset"`
 }
-
-// CompleteTripInput contains the authoritative operational
-// measurements required to finalize a trip.
-type CompleteTripInput struct {
-	ActualDistanceMeters   int64
-	ActualDurationSeconds  int64
-	WaitingDurationSeconds int64
-}

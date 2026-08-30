@@ -107,37 +107,76 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	)
 
 	// ---------------------------------------------------------
-	// 5. John must have DRIVER authorization.
+	// 5. Add the role only when missing and remove only the
+	// assignment created by this test during cleanup.
 	// ---------------------------------------------------------
 
-	userRoleRepo :=
-		repository.NewUserRoleRepository(db)
+	var driverRoleID string
 
-	roles, err := userRoleRepo.GetUserRoles(
+	err = db.QueryRow(
 		ctx,
-		johnUserID,
+		`
+		SELECT id
+		FROM roles
+		WHERE name = 'DRIVER'
+	`,
+	).Scan(
+		&driverRoleID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"load John roles: %v",
+			"resolve DRIVER role: %v",
 			err,
 		)
 	}
 
-	hasDriverRole := false
-
-	for _, role := range roles {
-		if role == "DRIVER" {
-			hasDriverRole = true
-			break
-		}
-	}
-
-	if !hasDriverRole {
-		t.Skip(
-			"John fixture does not currently have DRIVER role",
+	commandTag, err := db.Exec(
+		ctx,
+		`
+		INSERT INTO user_roles (
+			user_id,
+			role_id
+		)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id, role_id) DO NOTHING
+	`,
+		johnUserID,
+		driverRoleID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"ensure John DRIVER role: %v",
+			err,
 		)
 	}
+
+	driverRoleAddedByTest :=
+		commandTag.RowsAffected() == 1
+
+	if driverRoleAddedByTest {
+		defer func() {
+			cleanupCtx := context.Background()
+
+			if _, cleanupErr := db.Exec(
+				cleanupCtx,
+				`
+				DELETE FROM user_roles
+				WHERE user_id = $1
+				  AND role_id = $2
+			`,
+				johnUserID,
+				driverRoleID,
+			); cleanupErr != nil {
+				t.Logf(
+					"cleanup temporary DRIVER role: %v",
+					cleanupErr,
+				)
+			}
+		}()
+	}
+
+	userRoleRepo :=
+		repository.NewUserRoleRepository(db)
 
 	// ---------------------------------------------------------
 	// 6. Resolve John's current active assignment.
@@ -163,9 +202,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 				fleet_id
 			FROM driver_assignments
 			WHERE driver_id = $1
-			  AND status = 'ACTIVE'
-			  AND is_active = TRUE
-			  AND released_at IS NULL
+			  AND unassigned_at IS NULL
 			ORDER BY assigned_at DESC
 			LIMIT 1
 		`,
@@ -531,6 +568,52 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	}
 
 	// ---------------------------------------------------------
+	// 11. Create authoritative trip location evidence.
+	//
+	// These samples are intentionally simple and valid so
+	// CompleteTrip reaches fare persistence, where this test
+	// expects the UNIQUE(trip_id) failure.
+	// ---------------------------------------------------------
+
+	location1Time := now.Add(1 * time.Minute)
+	location2Time := now.Add(2 * time.Minute)
+
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO trip_locations (
+			id,
+			trip_id,
+			driver_id,
+			latitude,
+			longitude,
+			accuracy_meters,
+			recorded_at
+		)
+		VALUES
+			($1, $2, $3, $4, $5, $6, $7),
+			($8, $2, $3, $9, $10, $6, $11)
+	`,
+		uuid.NewString(),
+		tripID,
+		johnUserID,
+		60.1700,
+		24.9300,
+		5.0,
+		location1Time,
+		uuid.NewString(),
+		60.1710,
+		24.9310,
+		location2Time,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create rollback trip location evidence: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
 	// 11. Pre-create the authoritative fare.
 	//
 	// CompleteTrip will later attempt another INSERT for this
@@ -575,7 +658,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	}
 
 	// ---------------------------------------------------------
-	// 12. Cleanup.
+	// 13. Cleanup.
 	//
 	// Deleting the trip cascades trip_fares and trip_events.
 	// ---------------------------------------------------------
@@ -641,7 +724,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	}()
 
 	// ---------------------------------------------------------
-	// 13. Construct real production service dependencies.
+	// 14. Construct real production service dependencies.
 	// ---------------------------------------------------------
 
 	service := NewService(
@@ -662,7 +745,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 		},
 	)
 	// ---------------------------------------------------------
-	// 14. Attempt completion.
+	// 15. Attempt completion.
 	//
 	// Metrics will be updated inside the transaction first.
 	// Fare persistence must then fail on UNIQUE(trip_id).
@@ -672,11 +755,6 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 		ctx,
 		tripID,
 		johnUserID,
-		CompleteTripInput{
-			ActualDistanceMeters:   8420,
-			ActualDurationSeconds:  900,
-			WaitingDurationSeconds: 150,
-		},
 	)
 
 	if err == nil {
@@ -701,7 +779,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 		)
 	}
 	// ---------------------------------------------------------
-	// 15. Trip lifecycle and metrics must have rolled back.
+	// 16. Trip lifecycle and metrics must have rolled back.
 	// ---------------------------------------------------------
 
 	var (
@@ -776,7 +854,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	}
 
 	// ---------------------------------------------------------
-	// 16. No completion event may survive.
+	// 17. No completion event may survive.
 	// ---------------------------------------------------------
 
 	var completionEventCount int
@@ -809,7 +887,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	}
 
 	// ---------------------------------------------------------
-	// 17. Driver must remain BUSY.
+	// 18. Driver must remain BUSY.
 	// ---------------------------------------------------------
 
 	var (
@@ -852,7 +930,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	}
 
 	// ---------------------------------------------------------
-	// 18. Only the pre-existing fare must remain.
+	// 19. Only the pre-existing fare must remain.
 	// ---------------------------------------------------------
 
 	var fareCount int
@@ -967,37 +1045,79 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	)
 
 	// ---------------------------------------------------------
-	// 4. Verify DRIVER authorization.
+	// 4. Ensure John has DRIVER authorization for this test.
+	//
+	// The shared fixture may not permanently have DRIVER.
+	// Add the role only when missing and remove only the
+	// assignment created by this test during cleanup.
 	// ---------------------------------------------------------
 
-	userRoleRepo :=
-		repository.NewUserRoleRepository(db)
+	var driverRoleID string
 
-	roles, err := userRoleRepo.GetUserRoles(
+	err = db.QueryRow(
 		ctx,
-		johnUserID,
+		`
+		SELECT id
+		FROM roles
+		WHERE name = 'DRIVER'
+	`,
+	).Scan(
+		&driverRoleID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"load John roles: %v",
+			"resolve DRIVER role: %v",
 			err,
 		)
 	}
 
-	hasDriverRole := false
-
-	for _, role := range roles {
-		if role == "DRIVER" {
-			hasDriverRole = true
-			break
-		}
-	}
-
-	if !hasDriverRole {
-		t.Skip(
-			"John fixture does not currently have DRIVER role",
+	commandTag, err := db.Exec(
+		ctx,
+		`
+		INSERT INTO user_roles (
+			user_id,
+			role_id
+		)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id, role_id) DO NOTHING
+	`,
+		johnUserID,
+		driverRoleID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"ensure John DRIVER role: %v",
+			err,
 		)
 	}
+
+	driverRoleAddedByTest :=
+		commandTag.RowsAffected() == 1
+
+	if driverRoleAddedByTest {
+		defer func() {
+			cleanupCtx := context.Background()
+
+			if _, cleanupErr := db.Exec(
+				cleanupCtx,
+				`
+				DELETE FROM user_roles
+				WHERE user_id = $1
+				  AND role_id = $2
+			`,
+				johnUserID,
+				driverRoleID,
+			); cleanupErr != nil {
+				t.Logf(
+					"cleanup temporary DRIVER role: %v",
+					cleanupErr,
+				)
+			}
+		}()
+	}
+
+	userRoleRepo :=
+		repository.NewUserRoleRepository(db)
 
 	// ---------------------------------------------------------
 	// 5. Resolve current active assignment.
@@ -1013,18 +1133,16 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	err = db.QueryRow(
 		ctx,
 		`
-			SELECT
-				vehicle_id,
-				company_id,
-				branch_id,
-				fleet_id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND status = 'ACTIVE'
-			  AND is_active = TRUE
-			  AND released_at IS NULL
-			ORDER BY assigned_at DESC
-			LIMIT 1
+		SELECT
+        vehicle_id,
+        company_id,
+        branch_id,
+        fleet_id
+        FROM driver_assignments
+        WHERE driver_id = $1
+        AND unassigned_at IS NULL
+        ORDER BY assigned_at DESC
+        LIMIT 1
 		`,
 		johnUserID,
 	).Scan(
@@ -1382,6 +1500,61 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
+	// ---------------------------------------------------------
+	// 10. Create authoritative trip location evidence.
+	//
+	// These persisted GPS samples deliberately produce
+	// measurements are derived exclusively from persisted trip evidence.
+	// This proves completion uses server-side trip evidence,
+	// not caller-supplied distance/time/waiting values.
+	// ---------------------------------------------------------
+
+	location1Time := now.Add(1 * time.Minute)
+	location2Time := now.Add(2 * time.Minute)
+	location3Time := now.Add(3 * time.Minute)
+
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO trip_locations (
+			id,
+			trip_id,
+			driver_id,
+			latitude,
+			longitude,
+			accuracy_meters,
+			recorded_at
+		)
+		VALUES
+			($1,  $2, $3, $4, $5, $6, $7),
+			($8,  $2, $3, $9, $10, $6, $11),
+			($12, $2, $3, $13, $14, $6, $15)
+	`,
+		uuid.NewString(),
+		tripID,
+		johnUserID,
+		60.170000,
+		24.930000,
+		5.0,
+		location1Time,
+
+		uuid.NewString(),
+		60.170500,
+		24.930000,
+		location2Time,
+
+		uuid.NewString(),
+		60.170500,
+		24.930000,
+		location3Time,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create completion trip location evidence: %v",
+			err,
+		)
+	}
+
 	defer func() {
 		cleanupCtx := context.Background()
 
@@ -1471,11 +1644,6 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		ctx,
 		tripID,
 		johnUserID,
-		CompleteTripInput{
-			ActualDistanceMeters:   8420,
-			ActualDurationSeconds:  900,
-			WaitingDurationSeconds: 150,
-		},
 	)
 	if err != nil {
 		t.Fatalf(
@@ -1577,19 +1745,29 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
-	if actualDistanceMeters == nil ||
-		*actualDistanceMeters != 8420 {
-		t.Fatalf(
-			"expected actual distance 8420, got %v",
-			actualDistanceMeters,
+	if actualDistanceMeters == nil {
+		t.Fatal(
+			"expected actual distance to be persisted",
 		)
 	}
 
-	if actualDurationSeconds == nil ||
-		*actualDurationSeconds != 900 {
+	if *actualDistanceMeters != 56 {
 		t.Fatalf(
-			"expected actual duration 900, got %v",
-			actualDurationSeconds,
+			"expected authoritative actual distance 56, got %d",
+			*actualDistanceMeters,
+		)
+	}
+
+	if actualDurationSeconds == nil {
+		t.Fatal(
+			"expected actual duration to be persisted",
+		)
+	}
+
+	if *actualDurationSeconds != 120 {
+		t.Fatalf(
+			"expected authoritative actual duration 120, got %d",
+			*actualDurationSeconds,
 		)
 	}
 
@@ -1645,30 +1823,30 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
-	if totalAmount != 24.53 {
+	if totalAmount != 7.98 {
 		t.Fatalf(
-			"expected persisted total 24.53, got %.2f",
+			"expected persisted total 7.98, got %.2f",
 			totalAmount,
 		)
 	}
 
-	if chargedDistanceMeters != 8420 {
+	if chargedDistanceMeters != 56 {
 		t.Fatalf(
-			"expected charged distance 8420, got %d",
+			"expected charged distance 56, got %d",
 			chargedDistanceMeters,
 		)
 	}
 
-	if chargedDurationSeconds != 900 {
+	if chargedDurationSeconds != 120 {
 		t.Fatalf(
-			"expected charged duration 900, got %d",
+			"expected charged duration 120, got %d",
 			chargedDurationSeconds,
 		)
 	}
 
-	if waitingSeconds != 150 {
+	if waitingSeconds != 60 {
 		t.Fatalf(
-			"expected waiting duration 150, got %d",
+			"expected waiting duration 60, got %d",
 			waitingSeconds,
 		)
 	}

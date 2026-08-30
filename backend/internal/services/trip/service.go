@@ -108,9 +108,8 @@ type Service interface {
 
 	CompleteTrip(
 		ctx context.Context,
-		id string,
-		performedByUserID string,
-		input CompleteTripInput,
+		tripID string,
+		actorUserID string,
 	) (*models.TripFare, error)
 }
 

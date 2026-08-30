@@ -9,6 +9,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/services/fare"
+	"github.com/JCKFinland/connect/backend/internal/services/tripmeter"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,7 +19,6 @@ func (s *tripService) CompleteTrip(
 	ctx context.Context,
 	id string,
 	performedByUserID string,
-	input CompleteTripInput,
 ) (*models.TripFare, error) {
 	if id == "" {
 		return nil, fmt.Errorf(
@@ -41,24 +41,6 @@ func (s *tripService) CompleteTrip(
 	if s.fareCalculator == nil {
 		return nil, fmt.Errorf(
 			"fare calculator is not configured",
-		)
-	}
-
-	if input.ActualDistanceMeters < 0 {
-		return nil, fmt.Errorf(
-			"actual distance cannot be negative",
-		)
-	}
-
-	if input.ActualDurationSeconds < 0 {
-		return nil, fmt.Errorf(
-			"actual duration cannot be negative",
-		)
-	}
-
-	if input.WaitingDurationSeconds < 0 {
-		return nil, fmt.Errorf(
-			"waiting duration cannot be negative",
 		)
 	}
 
@@ -92,6 +74,8 @@ func (s *tripService) CompleteTrip(
 				postgresrepo.NewTripFareRepositoryWithDB(tx)
 			farePricingProfiles :=
 				postgresrepo.NewFarePricingProfileRepositoryWithDB(tx)
+			tripLocations :=
+				postgresrepo.NewTripLocationRepositoryWithDB(tx)
 
 			// -------------------------------------------------
 			// Lock authoritative trip row.
@@ -179,6 +163,40 @@ func (s *tripService) CompleteTrip(
 			}
 
 			// -------------------------------------------------
+			// Calculate authoritative operational measurements
+			// from persisted trip GPS/location evidence.
+			//
+			// The repository is transaction-bound so the evidence
+			// used for finalization is read within the same
+			// transaction that locks and completes the trip.
+			// -------------------------------------------------
+
+			tripMeterService := tripmeter.NewService(
+				tripmeter.Dependencies{
+					TripLocations: tripLocations,
+				},
+			)
+
+			measurement, err :=
+				tripMeterService.MeasureTrip(
+					ctx,
+					currentTrip.ID,
+				)
+			if err != nil {
+				return fmt.Errorf(
+					"measure trip from location evidence: %w",
+					err,
+				)
+			}
+
+			if measurement.AcceptedSamples < 2 {
+				return fmt.Errorf(
+					"insufficient trip location evidence: accepted samples %d",
+					measurement.AcceptedSamples,
+				)
+			}
+
+			// -------------------------------------------------
 			// Calculate the immutable fare snapshot before any
 			// trip lifecycle state is changed.
 			// -------------------------------------------------
@@ -188,11 +206,11 @@ func (s *tripService) CompleteTrip(
 					fare.CalculationInput{
 						TripID: currentTrip.ID,
 
-						DistanceMeters: input.ActualDistanceMeters,
+						DistanceMeters: measurement.DistanceMeters,
 
-						DurationSeconds: input.ActualDurationSeconds,
+						DurationSeconds: measurement.DurationSeconds,
 
-						WaitingSeconds: input.WaitingDurationSeconds,
+						WaitingSeconds: measurement.WaitingDurationSeconds,
 
 						Pricing: fare.PricingSnapshot{
 							BaseFare: pricingProfile.BaseFare,
@@ -230,8 +248,8 @@ func (s *tripService) CompleteTrip(
 			if err := trips.UpdateActualMetrics(
 				ctx,
 				currentTrip.ID,
-				input.ActualDistanceMeters,
-				input.ActualDurationSeconds,
+				measurement.DistanceMeters,
+				measurement.DurationSeconds,
 			); err != nil {
 				return fmt.Errorf(
 					"persist trip completion metrics: %w",
