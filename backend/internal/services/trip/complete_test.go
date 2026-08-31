@@ -2,6 +2,7 @@ package trip
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -930,7 +931,42 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	}
 
 	// ---------------------------------------------------------
-	// 19. Only the pre-existing fare must remain.
+	// 19. Meter audit snapshot must also roll back.
+	//
+	// CompleteTrip persists the authoritative meter snapshot
+	// before fare persistence. Because fare persistence failed,
+	// the transaction must leave no measurement snapshot behind.
+	// ---------------------------------------------------------
+
+	var meterMeasurementCount int
+
+	err = db.QueryRow(
+		ctx,
+		`
+		SELECT COUNT(*)
+		FROM trip_meter_measurements
+		WHERE trip_id = $1
+	`,
+		tripID,
+	).Scan(
+		&meterMeasurementCount,
+	)
+	if err != nil {
+		t.Fatalf(
+			"count trip meter measurements after rollback: %v",
+			err,
+		)
+	}
+
+	if meterMeasurementCount != 0 {
+		t.Fatalf(
+			"expected no trip meter measurement after rollback, got %d",
+			meterMeasurementCount,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 20. Only the pre-existing fare must remain.
 	// ---------------------------------------------------------
 
 	var fareCount int
@@ -1687,7 +1723,142 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	}
 
 	// ---------------------------------------------------------
-	// 12. Verify authoritative completed trip measurements.
+	// 12. Verify immutable authoritative meter snapshot.
+	//
+	// Successful completion must persist exactly one meter
+	// snapshot containing the measurement used for both the
+	// trip operational metrics and the finalized fare.
+	// ---------------------------------------------------------
+
+	var (
+		meterMeasurementID   string
+		measurementSource    string
+		algorithmVersion     string
+		meterDistanceMeters  int64
+		meterDurationSeconds int64
+		meterWaitingSeconds  int64
+		acceptedSamples      int
+		rejectedSamples      int
+		rejectedSegments     int
+		meterMeasuredAt      time.Time
+		meterCreatedAt       time.Time
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			measurement_source,
+			algorithm_version,
+			distance_meters,
+			duration_seconds,
+			waiting_duration_seconds,
+			accepted_samples,
+			rejected_samples,
+			rejected_segments,
+			measured_at,
+			created_at
+		FROM trip_meter_measurements
+		WHERE trip_id = $1
+	`,
+		tripID,
+	).Scan(
+		&meterMeasurementID,
+		&measurementSource,
+		&algorithmVersion,
+		&meterDistanceMeters,
+		&meterDurationSeconds,
+		&meterWaitingSeconds,
+		&acceptedSamples,
+		&rejectedSamples,
+		&rejectedSegments,
+		&meterMeasuredAt,
+		&meterCreatedAt,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read trip meter measurement after completion: %v",
+			err,
+		)
+	}
+
+	if meterMeasurementID == "" {
+		t.Fatal(
+			"expected persisted trip meter measurement ID",
+		)
+	}
+
+	if measurementSource != "GPS" {
+		t.Fatalf(
+			"expected measurement source GPS, got %s",
+			measurementSource,
+		)
+	}
+
+	if algorithmVersion != "gps-v1" {
+		t.Fatalf(
+			"expected algorithm version gps-v1, got %s",
+			algorithmVersion,
+		)
+	}
+
+	if meterDistanceMeters != 56 {
+		t.Fatalf(
+			"expected meter distance 56, got %d",
+			meterDistanceMeters,
+		)
+	}
+
+	if meterDurationSeconds != 120 {
+		t.Fatalf(
+			"expected meter duration 120, got %d",
+			meterDurationSeconds,
+		)
+	}
+
+	if meterWaitingSeconds != 60 {
+		t.Fatalf(
+			"expected meter waiting duration 60, got %d",
+			meterWaitingSeconds,
+		)
+	}
+
+	if acceptedSamples != 3 {
+		t.Fatalf(
+			"expected 3 accepted samples, got %d",
+			acceptedSamples,
+		)
+	}
+
+	if rejectedSamples != 0 {
+		t.Fatalf(
+			"expected 0 rejected samples, got %d",
+			rejectedSamples,
+		)
+	}
+
+	if rejectedSegments != 0 {
+		t.Fatalf(
+			"expected 0 rejected segments, got %d",
+			rejectedSegments,
+		)
+	}
+
+	if meterMeasuredAt.IsZero() {
+		t.Fatal(
+			"expected meter measured_at to be set",
+		)
+	}
+
+	if meterCreatedAt.IsZero() {
+		t.Fatal(
+			"expected meter created_at to be set",
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 13. Verify authoritative completed trip measurements.
 	// ---------------------------------------------------------
 
 	var (
@@ -1772,7 +1943,7 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	}
 
 	// ---------------------------------------------------------
-	// 13. Verify persisted fare snapshot.
+	// 14. Verify persisted fare snapshot.
 	// ---------------------------------------------------------
 
 	var (
@@ -1874,7 +2045,7 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	}
 
 	// ---------------------------------------------------------
-	// 14. Exactly one completion event must exist.
+	// 15. Exactly one completion event must exist.
 	// ---------------------------------------------------------
 
 	var completionEventCount int
@@ -1906,8 +2077,51 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
+	var eventMetadata []byte
+
+	err = db.QueryRow(
+		ctx,
+		`
+		SELECT metadata
+		FROM trip_events
+		WHERE trip_id = $1
+		  AND event_type = $2
+		LIMIT 1
+	`,
+		tripID,
+		EventTripCompleted,
+	).Scan(
+		&eventMetadata,
+	)
+	if err != nil {
+		t.Fatalf(
+			"read completion event metadata: %v",
+			err,
+		)
+	}
+
+	var completionMetadata map[string]string
+
+	if err := json.Unmarshal(
+		eventMetadata,
+		&completionMetadata,
+	); err != nil {
+		t.Fatalf(
+			"decode completion event metadata: %v",
+			err,
+		)
+	}
+
+	if completionMetadata["meter_measurement_id"] != meterMeasurementID {
+		t.Fatalf(
+			"expected completion event meter measurement id %s, got %s",
+			meterMeasurementID,
+			completionMetadata["meter_measurement_id"],
+		)
+	}
+
 	// ---------------------------------------------------------
-	// 15. Driver must be released to AVAILABLE.
+	// 16. Driver must be released to AVAILABLE.
 	// ---------------------------------------------------------
 
 	var (
@@ -1952,7 +2166,7 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	}
 
 	// ---------------------------------------------------------
-	// 16. Completion does not rewrite ride request status.
+	// 17. Completion does not rewrite ride request status.
 	// ---------------------------------------------------------
 
 	var rideStatus string

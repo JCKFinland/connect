@@ -76,6 +76,8 @@ func (s *tripService) CompleteTrip(
 				postgresrepo.NewFarePricingProfileRepositoryWithDB(tx)
 			tripLocations :=
 				postgresrepo.NewTripLocationRepositoryWithDB(tx)
+			tripMeterMeasurements :=
+				postgresrepo.NewTripMeterMeasurementRepositoryWithDB(tx)
 
 			// -------------------------------------------------
 			// Lock authoritative trip row.
@@ -197,6 +199,44 @@ func (s *tripService) CompleteTrip(
 			}
 
 			// -------------------------------------------------
+			// Persist immutable authoritative meter snapshot.
+			//
+			// This records exactly which measurement result was
+			// used to finalize the trip and calculate its fare.
+			//
+			// Because this repository is transaction-bound, the
+			// snapshot rolls back if any later completion step
+			// fails.
+			// -------------------------------------------------
+
+			meterSnapshot := &models.TripMeterMeasurement{
+				TripID: currentTrip.ID,
+
+				MeasurementSource: tripmeter.MeasurementSourceGPS,
+				AlgorithmVersion:  tripmeter.AlgorithmVersionGPSV1,
+
+				DistanceMeters:         measurement.DistanceMeters,
+				DurationSeconds:        measurement.DurationSeconds,
+				WaitingDurationSeconds: measurement.WaitingDurationSeconds,
+
+				AcceptedSamples:  measurement.AcceptedSamples,
+				RejectedSamples:  measurement.RejectedSamples,
+				RejectedSegments: measurement.RejectedSegments,
+
+				MeasuredAt: time.Now().UTC(),
+			}
+
+			if err := tripMeterMeasurements.Create(
+				ctx,
+				meterSnapshot,
+			); err != nil {
+				return fmt.Errorf(
+					"persist trip meter measurement: %w",
+					err,
+				)
+			}
+
+			// -------------------------------------------------
 			// Calculate the immutable fare snapshot before any
 			// trip lifecycle state is changed.
 			// -------------------------------------------------
@@ -296,9 +336,10 @@ func (s *tripService) CompleteTrip(
 
 			metadata, err := json.Marshal(
 				map[string]string{
-					"previous_status": currentTrip.Status,
-					"new_status":      StatusCompleted,
-					"fare_id":         calculatedFare.ID,
+					"previous_status":      currentTrip.Status,
+					"new_status":           StatusCompleted,
+					"fare_id":              calculatedFare.ID,
+					"meter_measurement_id": meterSnapshot.ID,
 				},
 			)
 			if err != nil {
