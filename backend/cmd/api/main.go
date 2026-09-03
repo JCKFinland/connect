@@ -18,6 +18,7 @@ import (
 
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	driverservice "github.com/JCKFinland/connect/backend/internal/services/driver"
+	fareservice "github.com/JCKFinland/connect/backend/internal/services/fare"
 
 	"github.com/JCKFinland/connect/backend/internal/security"
 
@@ -116,6 +117,7 @@ func main() {
 	serviceCategoryRepo := postgresrepo.NewServiceCategoryRepository(db)
 	tripEventRepo := postgresrepo.NewTripEventRepository(db)
 	dispatchOfferRepo := postgresrepo.NewDispatchOfferRepository(db)
+	tripLocationRepo := postgresrepo.NewTripLocationRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -168,12 +170,14 @@ func main() {
 
 	tripService := tripservice.NewService(
 		tripservice.Dependencies{
-			DB:           db,
-			Trips:        tripRepo,
-			RideRequests: rideRequestRepo,
-			Presence:     driverPresenceRepo,
-			TripEvents:   tripEventRepo,
-			UserRoles:    userRoleRepo,
+			DB:             db,
+			Trips:          tripRepo,
+			RideRequests:   rideRequestRepo,
+			Presence:       driverPresenceRepo,
+			TripEvents:     tripEventRepo,
+			UserRoles:      userRoleRepo,
+			TripLocations:  tripLocationRepo,
+			FareCalculator: fareservice.NewService(),
 		},
 	)
 

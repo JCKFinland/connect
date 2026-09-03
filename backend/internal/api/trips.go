@@ -537,6 +537,68 @@ func (h *TripHandler) UpdateTripStatus(c *gin.Context) {
 	})
 }
 
+// Complete handles POST /api/v1/trips/:id/complete.
+//
+// Completion must go through the authoritative CompleteTrip service path.
+// The generic status endpoint must never be used to transition a trip
+// directly to COMPLETED because completion also persists the trip-meter
+// measurement, fare snapshot, audit event, and releases the driver.
+func (h *TripHandler) Complete(c *gin.Context) {
+	id := c.Param("id")
+
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Trip ID is required",
+		})
+		return
+	}
+
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
+	completedFare, err := h.service.CompleteTrip(
+		c.Request.Context(),
+		id,
+		user.ID,
+	)
+	if err != nil {
+		if errors.Is(err, trip.ErrTripStatusAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to complete this trip",
+			})
+			return
+		}
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "Trip not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Trip completed successfully",
+		"data":    completedFare,
+	})
+}
+
 // AssignDriver handles POST /api/v1/trips/:id/assign.
 func (h *TripHandler) AssignDriver(c *gin.Context) {
 	id := c.Param("id")

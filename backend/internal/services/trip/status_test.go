@@ -116,34 +116,72 @@ func TestUpdateStatusRejectsDirectCompletion(t *testing.T) {
 	//    UpdateStatus service path.
 	// ---------------------------------------------------------
 
-	userRoleRepo :=
-		repository.NewUserRoleRepository(db)
+	var driverRoleID string
 
-	roles, err := userRoleRepo.GetUserRoles(
+	err = db.QueryRow(
 		ctx,
-		johnUserID,
+		`
+		SELECT id
+		FROM roles
+		WHERE name = 'DRIVER'
+	`,
+	).Scan(
+		&driverRoleID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"load John roles: %v",
+			"resolve DRIVER role: %v",
 			err,
 		)
 	}
 
-	hasDriverRole := false
-
-	for _, role := range roles {
-		if role == "DRIVER" {
-			hasDriverRole = true
-			break
-		}
-	}
-
-	if !hasDriverRole {
-		t.Skip(
-			"John fixture does not currently have DRIVER role",
+	commandTag, err := db.Exec(
+		ctx,
+		`
+		INSERT INTO user_roles (
+			user_id,
+			role_id
+		)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id, role_id) DO NOTHING
+	`,
+		johnUserID,
+		driverRoleID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"ensure John DRIVER role: %v",
+			err,
 		)
 	}
+
+	driverRoleAddedByTest :=
+		commandTag.RowsAffected() == 1
+
+	if driverRoleAddedByTest {
+		defer func() {
+			cleanupCtx := context.Background()
+
+			if _, cleanupErr := db.Exec(
+				cleanupCtx,
+				`
+				DELETE FROM user_roles
+				WHERE user_id = $1
+				  AND role_id = $2
+			`,
+				johnUserID,
+				driverRoleID,
+			); cleanupErr != nil {
+				t.Logf(
+					"cleanup temporary DRIVER role: %v",
+					cleanupErr,
+				)
+			}
+		}()
+	}
+
+	userRoleRepo :=
+		repository.NewUserRoleRepository(db)
 
 	// ---------------------------------------------------------
 	// 6. Avoid interfering with an existing active trip.

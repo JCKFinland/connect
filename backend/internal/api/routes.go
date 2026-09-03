@@ -222,8 +222,10 @@ func RegisterRoutes(
 			trips.DELETE("/:id", tripHandler.DeleteTrip)
 
 			trips.PATCH("/:id/status", tripHandler.UpdateTripStatus)
+			trips.POST("/:id/complete", tripHandler.Complete)
 			trips.POST("/:id/assign", tripHandler.AssignDriver)
 			trips.GET("/:id/events", tripHandler.ListTripEvents)
+			trips.POST("/:id/locations", tripHandler.RecordTripLocation)
 		}
 
 		// ---------------------------------------------------

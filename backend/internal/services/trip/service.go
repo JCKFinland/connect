@@ -111,17 +111,25 @@ type Service interface {
 		tripID string,
 		actorUserID string,
 	) (*models.TripFare, error)
+
+	RecordTripLocation(
+		ctx context.Context,
+		tripID string,
+		actorUserID string,
+		req RecordLocationRequest,
+	) (*models.TripLocation, error)
 }
 
 // Dependencies contains the resources required by the trip service.
 type Dependencies struct {
 	DB *pgxpool.Pool
 
-	Trips        repository.TripRepository
-	RideRequests repository.RideRequestRepository
-	Presence     repository.DriverPresenceRepository
-	TripEvents   repository.TripEventRepository
-	UserRoles    repository.UserRoleRepository
+	Trips         repository.TripRepository
+	RideRequests  repository.RideRequestRepository
+	Presence      repository.DriverPresenceRepository
+	TripEvents    repository.TripEventRepository
+	UserRoles     repository.UserRoleRepository
+	TripLocations repository.TripLocationRepository
 
 	FareCalculator fare.Service
 }
@@ -130,11 +138,12 @@ type Dependencies struct {
 type tripService struct {
 	db *pgxpool.Pool
 
-	repo         repository.TripRepository
-	rideRequests repository.RideRequestRepository
-	presence     repository.DriverPresenceRepository
-	tripEvents   repository.TripEventRepository
-	userRoles    repository.UserRoleRepository
+	repo          repository.TripRepository
+	rideRequests  repository.RideRequestRepository
+	presence      repository.DriverPresenceRepository
+	tripEvents    repository.TripEventRepository
+	userRoles     repository.UserRoleRepository
+	tripLocations repository.TripLocationRepository
 
 	fareCalculator fare.Service
 }
@@ -146,11 +155,12 @@ func NewService(
 	return &tripService{
 		db: deps.DB,
 
-		repo:         deps.Trips,
-		rideRequests: deps.RideRequests,
-		presence:     deps.Presence,
-		tripEvents:   deps.TripEvents,
-		userRoles:    deps.UserRoles,
+		repo:          deps.Trips,
+		rideRequests:  deps.RideRequests,
+		presence:      deps.Presence,
+		tripEvents:    deps.TripEvents,
+		userRoles:     deps.UserRoles,
+		tripLocations: deps.TripLocations,
 
 		fareCalculator: deps.FareCalculator,
 	}
