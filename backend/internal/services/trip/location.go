@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -38,9 +40,9 @@ func (s *tripService) RecordTripLocation(
 		)
 	}
 
-	if s.repo == nil {
+	if s.db == nil {
 		return nil, errors.New(
-			"trip repository is not configured",
+			"trip database is not configured",
 		)
 	}
 
@@ -50,10 +52,11 @@ func (s *tripService) RecordTripLocation(
 		)
 	}
 
-	if s.tripLocations == nil {
-		return nil, errors.New(
-			"trip location repository is not configured",
-		)
+	// Validate request data before taking the trip row lock.
+	//
+	// Invalid GPS data should never hold a lifecycle lock.
+	if err := validateRecordLocationRequest(req); err != nil {
+		return nil, err
 	}
 
 	roles, err := s.userRoles.GetUserRoles(
@@ -80,59 +83,92 @@ func (s *tripService) RecordTripLocation(
 		return nil, ErrTripLocationAccessDenied
 	}
 
-	currentTrip, err := s.repo.GetByID(
+	var recordedLocation *models.TripLocation
+
+	err = postgresrepo.RunInTransaction(
 		ctx,
-		tripID,
+		s.db,
+		func(tx pgx.Tx) error {
+			trips :=
+				postgresrepo.NewTripRepositoryWithDB(tx)
+
+			tripLocations :=
+				postgresrepo.NewTripLocationRepositoryWithDB(tx)
+
+			// -------------------------------------------------
+			// Serialize GPS ingestion against trip completion.
+			//
+			// CompleteTrip locks this same trip row before it
+			// reads the authoritative GPS evidence. Therefore:
+			//
+			//   1. a location committed before completion gets
+			//      included in the final evidence set; or
+			//   2. completion wins the lock, changes the trip to
+			//      COMPLETED, and this request is rejected.
+			//
+			// No GPS sample can be committed after completion
+			// based on a stale IN_PROGRESS read.
+			// -------------------------------------------------
+
+			currentTrip, err :=
+				trips.GetByIDForUpdate(
+					ctx,
+					tripID,
+				)
+			if err != nil {
+				return fmt.Errorf(
+					"get trip for location recording: %w",
+					err,
+				)
+			}
+
+			if currentTrip.DriverID != actorUserID {
+				return ErrTripLocationAccessDenied
+			}
+
+			if currentTrip.Status != StatusInProgress {
+				return ErrTripNotInProgress
+			}
+
+			var heading *int16
+
+			if req.Heading != nil {
+				value := int16(*req.Heading)
+				heading = &value
+			}
+
+			location := &models.TripLocation{
+				TripID:         currentTrip.ID,
+				DriverID:       actorUserID,
+				Latitude:       req.Latitude,
+				Longitude:      req.Longitude,
+				Altitude:       req.Altitude,
+				SpeedKMH:       req.SpeedKMH,
+				Heading:        heading,
+				AccuracyMeters: req.AccuracyMeters,
+				RecordedAt:     req.RecordedAt.UTC(),
+			}
+
+			if err := tripLocations.Create(
+				ctx,
+				location,
+			); err != nil {
+				return fmt.Errorf(
+					"record trip location: %w",
+					err,
+				)
+			}
+
+			recordedLocation = location
+
+			return nil
+		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"get trip for location recording: %w",
-			err,
-		)
-	}
-
-	if currentTrip.DriverID != actorUserID {
-		return nil, ErrTripLocationAccessDenied
-	}
-
-	if currentTrip.Status != StatusInProgress {
-		return nil, ErrTripNotInProgress
-	}
-
-	if err := validateRecordLocationRequest(req); err != nil {
 		return nil, err
 	}
 
-	var heading *int16
-
-	if req.Heading != nil {
-		value := int16(*req.Heading)
-		heading = &value
-	}
-
-	location := &models.TripLocation{
-		TripID:         currentTrip.ID,
-		DriverID:       actorUserID,
-		Latitude:       req.Latitude,
-		Longitude:      req.Longitude,
-		Altitude:       req.Altitude,
-		SpeedKMH:       req.SpeedKMH,
-		Heading:        heading,
-		AccuracyMeters: req.AccuracyMeters,
-		RecordedAt:     req.RecordedAt.UTC(),
-	}
-
-	if err := s.tripLocations.Create(
-		ctx,
-		location,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"record trip location: %w",
-			err,
-		)
-	}
-
-	return location, nil
+	return recordedLocation, nil
 }
 
 func validateRecordLocationRequest(
