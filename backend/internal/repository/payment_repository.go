@@ -28,4 +28,20 @@ type PaymentRepository interface {
 		ctx context.Context,
 		tripID string,
 	) (*models.Payment, error)
+
+	// GetByIDForUpdate retrieves and locks a payment for the
+	// duration of the current PostgreSQL transaction.
+	GetByIDForUpdate(
+		ctx context.Context,
+		id string,
+	) (*models.Payment, error)
+
+	// UpdateStatus atomically persists a payment lifecycle state.
+	//
+	// paid_at is set when a payment first becomes PAID.
+	UpdateStatus(
+		ctx context.Context,
+		id string,
+		status string,
+	) error
 }
