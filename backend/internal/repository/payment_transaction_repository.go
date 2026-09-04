@@ -24,6 +24,16 @@ type CreatePaymentTransactionParams struct {
 	GatewayRequest json.RawMessage
 }
 
+type UpdatePaymentTransactionResultParams struct {
+	ID string
+
+	Status string
+
+	ProviderTransactionID *string
+
+	GatewayResponse json.RawMessage
+}
+
 // PaymentTransactionRepository defines persistence operations for
 // provider-facing payment transactions.
 type PaymentTransactionRepository interface {
@@ -58,4 +68,9 @@ type PaymentTransactionRepository interface {
 		ctx context.Context,
 		id string,
 	) (*models.PaymentTransaction, error)
+
+	UpdateResult(
+		ctx context.Context,
+		params UpdatePaymentTransactionResultParams,
+	) error
 }
