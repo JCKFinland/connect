@@ -34,6 +34,11 @@ type LogConfig struct {
 	Level string
 }
 
+// StripeConfig contains Stripe payment-provider configuration.
+type StripeConfig struct {
+	WebhookSecret string
+}
+
 // Config represents the application's configuration.
 type Config struct {
 	App         AppConfig
@@ -41,6 +46,7 @@ type Config struct {
 	JWT         JWTConfig
 	Presence    PresenceConfig
 	RideRequest RideRequestConfig
+	Stripe      StripeConfig
 	Log         LogConfig
 }
 
@@ -123,6 +129,13 @@ func Load() (*Config, error) {
 
 		RideRequest: RideRequestConfig{
 			DefaultMatchingLifetime: defaultMatchingLifetime,
+		},
+
+		Stripe: StripeConfig{
+			WebhookSecret: GetEnv(
+				"STRIPE_WEBHOOK_SECRET",
+				"",
+			),
 		},
 
 		Log: LogConfig{

@@ -50,6 +50,10 @@ import (
 	dispatchservice "github.com/JCKFinland/connect/backend/internal/services/dispatch"
 
 	"github.com/JCKFinland/connect/backend/pkg/logger"
+
+	stripepayment "github.com/JCKFinland/connect/backend/internal/payments/stripe"
+	paymentcallbackservice "github.com/JCKFinland/connect/backend/internal/services/paymentcallback"
+	paymenttransactionservice "github.com/JCKFinland/connect/backend/internal/services/paymenttransaction"
 )
 
 func main() {
@@ -120,6 +124,8 @@ func main() {
 	dispatchOfferRepo := postgresrepo.NewDispatchOfferRepository(db)
 	tripLocationRepo := postgresrepo.NewTripLocationRepository(db)
 	paymentRepo := postgresrepo.NewPaymentRepository(db)
+	paymentTransactionRepo :=
+		postgresrepo.NewPaymentTransactionRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -191,6 +197,60 @@ func main() {
 			UserRoles: userRoleRepo,
 		},
 	)
+
+	paymentTransactionService :=
+		paymenttransactionservice.NewService(db)
+
+	paymentCallbackService :=
+		paymentcallbackservice.NewService(
+			paymentcallbackservice.Dependencies{
+				Transactions: paymentTransactionRepo,
+
+				PaymentTransactions: paymentTransactionService,
+			},
+		)
+
+	paymentCallbackRegistry :=
+		paymentcallbackservice.NewVerifierRegistry()
+
+	var paymentCallbackHandler *api.PaymentCallbackHandler
+
+	if cfg.Stripe.WebhookSecret != "" {
+		stripeVerifier, err :=
+			stripepayment.NewWebhookVerifier(
+				cfg.Stripe.WebhookSecret,
+			)
+		if err != nil {
+			log.Error(
+				"failed to configure Stripe webhook verifier",
+				"error",
+				err,
+			)
+			os.Exit(1)
+		}
+
+		if err := paymentCallbackRegistry.Register(
+			stripepayment.ProviderName,
+			stripeVerifier,
+		); err != nil {
+			log.Error(
+				"failed to register Stripe webhook verifier",
+				"error",
+				err,
+			)
+			os.Exit(1)
+		}
+
+		paymentCallbackHandler =
+			api.NewPaymentCallbackHandler(
+				paymentCallbackService,
+				paymentCallbackRegistry,
+			)
+
+		log.Info(
+			"Stripe payment callbacks enabled",
+		)
+	}
 
 	rideRequestService := rideRequestService.NewService(
 		rideRequestService.Dependencies{
@@ -337,6 +397,7 @@ func main() {
 		driverVehicleAssignmentHandler,
 		tripHandler,
 		paymentHandler,
+		paymentCallbackHandler,
 		rideRequestHandler,
 		dispatchHandler,
 	)

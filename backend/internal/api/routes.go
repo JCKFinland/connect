@@ -26,6 +26,7 @@ func RegisterRoutes(
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 	tripHandler *TripHandler,
 	paymentHandler *PaymentHandler,
+	paymentCallbackHandler *PaymentCallbackHandler,
 	rideRequestHandler *RideRequestHandler,
 	dispatchHandler *DispatchHandler,
 ) {
@@ -36,6 +37,18 @@ func RegisterRoutes(
 		// ---------------------------------------------------
 		// Public Routes (Accessible without JWT tokens)
 		// ---------------------------------------------------
+
+		// ---------------------------------------------------
+		// Payment Provider Callback Routes
+		// ---------------------------------------------------
+		//
+		// Provider callbacks do not use CONNECT user JWT
+		// authentication. Their trust boundary is the
+		// provider-specific cryptographic verifier.
+		registerPaymentCallbackRoutes(
+			v1,
+			paymentCallbackHandler,
+		)
 
 		// Attaches the explicit closure checking database connectivity metrics.
 		v1.GET("/health", HealthHandler(db))
@@ -285,4 +298,18 @@ func RegisterRoutes(
 			)
 		}
 	}
+}
+
+func registerPaymentCallbackRoutes(
+	v1 *gin.RouterGroup,
+	handler *PaymentCallbackHandler,
+) {
+	if handler == nil {
+		return
+	}
+
+	v1.POST(
+		"/payment-callbacks/:provider",
+		handler.Handle,
+	)
 }
