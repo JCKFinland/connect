@@ -22,4 +22,20 @@ var (
 	ErrRefundExceedsPaymentAmount = errors.New(
 		"successful refunds exceed payment amount",
 	)
+
+	ErrInvalidPaymentOperation = errors.New(
+		"invalid payment operation",
+	)
+
+	ErrPaymentOperationIdempotencyConflict = errors.New(
+		"payment operation idempotency conflict",
+	)
+
+	ErrPaymentOperationAmountRequired = errors.New(
+		"payment operation amount is required",
+	)
+
+	ErrPaymentOperationAmountInvalid = errors.New(
+		"invalid payment operation amount",
+	)
 )

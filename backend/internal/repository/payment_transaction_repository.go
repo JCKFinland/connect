@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 )
@@ -78,6 +79,12 @@ type PaymentTransactionRepository interface {
 		ctx context.Context,
 		paymentID string,
 	) (SuccessfulRefundState, error)
+
+	ValidateRefundAmount(
+		ctx context.Context,
+		paymentID string,
+		refundAmount string,
+	) error
 }
 
 type SuccessfulRefundState string
@@ -87,4 +94,8 @@ const (
 	SuccessfulRefundPartial SuccessfulRefundState = "PARTIAL"
 	SuccessfulRefundFull    SuccessfulRefundState = "FULL"
 	SuccessfulRefundOver    SuccessfulRefundState = "OVER"
+)
+
+var ErrRefundAmountExceedsRemaining = errors.New(
+	"refund amount exceeds remaining refundable amount",
 )

@@ -555,6 +555,24 @@ func TestPaymentTransactionRepositoryRoundTripAndIdentityConstraints(
 		)
 	}
 
+	// The first transaction must leave the in-flight state before another
+	// provider operation may be created for the same payment.
+	if err := repo.UpdateResult(
+		ctx,
+		repository.UpdatePaymentTransactionResultParams{
+			ID: transaction.ID,
+
+			Status: "SUCCESS",
+
+			ProviderTransactionID: &providerTransactionID,
+		},
+	); err != nil {
+		t.Fatalf(
+			"complete first transaction before second operation: %v",
+			err,
+		)
+	}
+
 	// Create another transaction with a different idempotency key,
 	// then prove the same provider transaction ID cannot be reused.
 	secondIdempotencyKey := uuid.NewString()

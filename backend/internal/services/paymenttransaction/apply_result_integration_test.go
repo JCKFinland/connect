@@ -57,6 +57,13 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 			"dispatch-fixture:john",
 		)
 
+	if err != nil {
+		t.Fatalf(
+			"acquire fixture lock: %v",
+			err,
+		)
+	}
+
 	defer func() {
 		if err := releaseFixtureLock(
 			context.Background(),

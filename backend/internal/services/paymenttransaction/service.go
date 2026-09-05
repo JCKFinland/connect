@@ -16,7 +16,26 @@ type ApplyResultRequest struct {
 	GatewayResponse json.RawMessage
 }
 
+type InitiateOperationRequest struct {
+	PaymentID string
+
+	Provider       string
+	IdempotencyKey string
+
+	TransactionType string
+
+	// Required only for REFUND.
+	Amount string
+
+	GatewayRequest json.RawMessage
+}
+
 type Service interface {
+	InitiateOperation(
+		ctx context.Context,
+		req InitiateOperationRequest,
+	) (*models.PaymentTransaction, error)
+
 	ApplyResult(
 		ctx context.Context,
 		transactionID string,
