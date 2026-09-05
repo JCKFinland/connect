@@ -14,4 +14,12 @@ var (
 	ErrProviderIdentityConflict = errors.New(
 		"payment transaction provider identity conflict",
 	)
+
+	ErrUnsupportedTransactionType = errors.New(
+		"unsupported payment transaction type",
+	)
+
+	ErrRefundExceedsPaymentAmount = errors.New(
+		"successful refunds exceed payment amount",
+	)
 )

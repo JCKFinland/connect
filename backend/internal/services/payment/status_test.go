@@ -93,6 +93,13 @@ func TestPaymentStatusTransitions(t *testing.T) {
 			to:   StatusPaid,
 			want: false,
 		},
+
+		{
+			name: "pending to authorized",
+			from: StatusPending,
+			to:   StatusAuthorized,
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {

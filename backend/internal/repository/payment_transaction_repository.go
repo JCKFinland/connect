@@ -73,4 +73,18 @@ type PaymentTransactionRepository interface {
 		ctx context.Context,
 		params UpdatePaymentTransactionResultParams,
 	) error
+
+	GetSuccessfulRefundState(
+		ctx context.Context,
+		paymentID string,
+	) (SuccessfulRefundState, error)
 }
+
+type SuccessfulRefundState string
+
+const (
+	SuccessfulRefundNone    SuccessfulRefundState = "NONE"
+	SuccessfulRefundPartial SuccessfulRefundState = "PARTIAL"
+	SuccessfulRefundFull    SuccessfulRefundState = "FULL"
+	SuccessfulRefundOver    SuccessfulRefundState = "OVER"
+)

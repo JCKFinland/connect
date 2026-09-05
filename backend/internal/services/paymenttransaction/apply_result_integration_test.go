@@ -12,6 +12,7 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
+	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/testutil"
@@ -46,8 +47,9 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 	}
 	defer db.Close()
 
-	// Use one existing payment only as the FK parent for this isolated
-	// payment_transactions test. No payment state is modified.
+	// Build a self-contained completed-trip, fare, and payment fixture.
+	// The test verifies transactional reconciliation between the provider
+	// transaction and the authoritative aggregate payment.
 	releaseFixtureLock, err :=
 		testutil.AcquirePostgresFixtureLock(
 			ctx,
@@ -354,9 +356,8 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 
 	service := NewService(db)
 
-	// ---------------------------------------------------------
-	// 1. Prove ApplyResult serializes on FOR UPDATE.
-	// ---------------------------------------------------------
+	// 1. Prove ApplyResult serializes all financial operations
+	//    through the authoritative parent payment row.
 
 	lockTx, err := db.Begin(ctx)
 	if err != nil {
@@ -366,20 +367,20 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 		)
 	}
 
-	lockedRepo :=
-		postgresrepo.NewPaymentTransactionRepositoryWithDB(
+	lockedPayments :=
+		postgresrepo.NewPaymentRepositoryWithDB(
 			lockTx,
 		)
 
-	_, err = lockedRepo.GetByIDForUpdate(
+	_, err = lockedPayments.GetByIDForUpdate(
 		ctx,
-		transaction.ID,
+		paymentID,
 	)
 	if err != nil {
 		_ = lockTx.Rollback(ctx)
 
 		t.Fatalf(
-			"lock transaction row: %v",
+			"lock aggregate payment row: %v",
 			err,
 		)
 	}
@@ -480,6 +481,32 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 		t.Fatalf(
 			"apply SUCCESS result: %v",
 			err,
+		)
+	}
+
+	aggregatePayment, err :=
+		postgresrepo.NewPaymentRepository(db).
+			GetByID(
+				ctx,
+				paymentID,
+			)
+	if err != nil {
+		t.Fatalf(
+			"reload aggregate payment after SALE success: %v",
+			err,
+		)
+	}
+
+	if aggregatePayment.Status != "PAID" {
+		t.Fatalf(
+			"expected aggregate payment PAID after SALE success, got %s",
+			aggregatePayment.Status,
+		)
+	}
+
+	if aggregatePayment.PaidAt == nil {
+		t.Fatal(
+			"expected aggregate payment paid_at after SALE success",
 		)
 	}
 
@@ -620,4 +647,364 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 			err,
 		)
 	}
+
+	// ---------------------------------------------------------
+	// 7. AUTHORIZE SUCCESS -> aggregate payment AUTHORIZED.
+	// ---------------------------------------------------------
+
+	_, err = db.Exec(
+		ctx,
+		`
+		UPDATE payments
+		SET
+			status = 'PENDING',
+			paid_at = NULL,
+			updated_at = NOW()
+		WHERE id = $1
+	`,
+		paymentID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"reset payment before AUTHORIZE test: %v",
+			err,
+		)
+	}
+
+	authorizeTx := createTestPaymentTransaction(
+		t,
+		ctx,
+		repo,
+		paymentID,
+		TypeAuthorize,
+		"1.00",
+	)
+
+	defer func() {
+		_, _ = db.Exec(
+			context.Background(),
+			`DELETE FROM payment_transactions WHERE id = $1`,
+			authorizeTx.ID,
+		)
+	}()
+
+	_, err = service.ApplyResult(
+		ctx,
+		authorizeTx.ID,
+		ApplyResultRequest{
+			Status: StatusSuccess,
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"apply AUTHORIZE success: %v",
+			err,
+		)
+	}
+
+	authorizedPayment, err :=
+		postgresrepo.NewPaymentRepository(db).
+			GetByID(
+				ctx,
+				paymentID,
+			)
+	if err != nil {
+		t.Fatalf(
+			"reload payment after AUTHORIZE: %v",
+			err,
+		)
+	}
+
+	if authorizedPayment.Status != "AUTHORIZED" {
+		t.Fatalf(
+			"expected AUTHORIZED after AUTHORIZE success, got %s",
+			authorizedPayment.Status,
+		)
+	}
+
+	if authorizedPayment.PaidAt != nil {
+		t.Fatal(
+			"expected paid_at to remain nil after authorization only",
+		)
+	}
+	// ---------------------------------------------------------
+	// 8. Cumulative REFUND SUCCESS -> PARTIAL -> REFUNDED.
+	// ---------------------------------------------------------
+
+	_, err = db.Exec(
+		ctx,
+		`
+		UPDATE payments
+		SET
+			status = 'PAID',
+			paid_at = COALESCE(paid_at, NOW()),
+			updated_at = NOW()
+		WHERE id = $1
+	`,
+		paymentID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"prepare payment for refund test: %v",
+			err,
+		)
+	}
+
+	refundOne := createTestPaymentTransaction(
+		t,
+		ctx,
+		repo,
+		paymentID,
+		TypeRefund,
+		"0.40",
+	)
+
+	defer func() {
+		_, _ = db.Exec(
+			context.Background(),
+			`DELETE FROM payment_transactions WHERE id = $1`,
+			refundOne.ID,
+		)
+	}()
+
+	_, err = service.ApplyResult(
+		ctx,
+		refundOne.ID,
+		ApplyResultRequest{
+			Status: StatusSuccess,
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"apply first refund success: %v",
+			err,
+		)
+	}
+
+	partialPayment, err :=
+		postgresrepo.NewPaymentRepository(db).
+			GetByID(
+				ctx,
+				paymentID,
+			)
+	if err != nil {
+		t.Fatalf(
+			"reload payment after partial refund: %v",
+			err,
+		)
+	}
+
+	if partialPayment.Status != "PARTIALLY_REFUNDED" {
+		t.Fatalf(
+			"expected PARTIALLY_REFUNDED, got %s",
+			partialPayment.Status,
+		)
+	}
+
+	refundTwo := createTestPaymentTransaction(
+		t,
+		ctx,
+		repo,
+		paymentID,
+		TypeRefund,
+		"0.60",
+	)
+
+	defer func() {
+		_, _ = db.Exec(
+			context.Background(),
+			`DELETE FROM payment_transactions WHERE id = $1`,
+			refundTwo.ID,
+		)
+	}()
+
+	_, err = service.ApplyResult(
+		ctx,
+		refundTwo.ID,
+		ApplyResultRequest{
+			Status: StatusSuccess,
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"apply second refund success: %v",
+			err,
+		)
+	}
+
+	refundedPayment, err :=
+		postgresrepo.NewPaymentRepository(db).
+			GetByID(
+				ctx,
+				paymentID,
+			)
+	if err != nil {
+		t.Fatalf(
+			"reload fully refunded payment: %v",
+			err,
+		)
+	}
+
+	if refundedPayment.Status != "REFUNDED" {
+		t.Fatalf(
+			"expected REFUNDED after cumulative full refund, got %s",
+			refundedPayment.Status,
+		)
+	}
+	// ---------------------------------------------------------
+	// 9. Over-refund rolls back transaction SUCCESS atomically.
+	// ---------------------------------------------------------
+
+	_, err = db.Exec(
+		ctx,
+		`
+		UPDATE payments
+		SET
+			status = 'PAID',
+			updated_at = NOW()
+		WHERE id = $1
+	`,
+		paymentID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"reset payment before over-refund test: %v",
+			err,
+		)
+	}
+
+	// Remove earlier refund evidence so this test starts from zero.
+	_, err = db.Exec(
+		ctx,
+		`
+		DELETE FROM payment_transactions
+		WHERE payment_id = $1
+		  AND transaction_type = 'REFUND'
+	`,
+		paymentID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"clear refund transactions before over-refund test: %v",
+			err,
+		)
+	}
+
+	overRefund := createTestPaymentTransaction(
+		t,
+		ctx,
+		repo,
+		paymentID,
+		TypeRefund,
+		"1.01",
+	)
+
+	defer func() {
+		_, _ = db.Exec(
+			context.Background(),
+			`DELETE FROM payment_transactions WHERE id = $1`,
+			overRefund.ID,
+		)
+	}()
+
+	_, err = service.ApplyResult(
+		ctx,
+		overRefund.ID,
+		ApplyResultRequest{
+			Status: StatusSuccess,
+		},
+	)
+
+	if !errors.Is(
+		err,
+		ErrRefundExceedsPaymentAmount,
+	) {
+		t.Fatalf(
+			"expected ErrRefundExceedsPaymentAmount, got %v",
+			err,
+		)
+	}
+
+	rolledBackTransaction, err :=
+		repo.GetByID(
+			ctx,
+			overRefund.ID,
+		)
+	if err != nil {
+		t.Fatalf(
+			"reload over-refund transaction: %v",
+			err,
+		)
+	}
+
+	if rolledBackTransaction.Status != StatusPending {
+		t.Fatalf(
+			"expected over-refund transaction rollback to PENDING, got %s",
+			rolledBackTransaction.Status,
+		)
+	}
+
+	rolledBackPayment, err :=
+		postgresrepo.NewPaymentRepository(db).
+			GetByID(
+				ctx,
+				paymentID,
+			)
+	if err != nil {
+		t.Fatalf(
+			"reload payment after over-refund rollback: %v",
+			err,
+		)
+	}
+
+	if rolledBackPayment.Status != "PAID" {
+		t.Fatalf(
+			"expected payment to remain PAID after over-refund rollback, got %s",
+			rolledBackPayment.Status,
+		)
+	}
+
+}
+
+func createTestPaymentTransaction(
+	t *testing.T,
+	ctx context.Context,
+	repo *postgresrepo.PaymentTransactionRepository,
+	paymentID string,
+	transactionType string,
+	amount string,
+) *models.PaymentTransaction {
+	t.Helper()
+
+	idempotencyKey := uuid.NewString()
+
+	transaction, err := repo.Create(
+		ctx,
+		repository.CreatePaymentTransactionParams{
+			PaymentID: paymentID,
+
+			TransactionReference: "txn_" + uuid.NewString(),
+
+			Provider: "TEST_PROVIDER",
+
+			IdempotencyKey: &idempotencyKey,
+
+			TransactionType: transactionType,
+
+			Amount: amount,
+
+			Currency: "EUR",
+
+			GatewayRequest: json.RawMessage(`{"test":true}`),
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"create %s payment transaction: %v",
+			transactionType,
+			err,
+		)
+	}
+
+	return transaction
 }

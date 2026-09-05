@@ -47,6 +47,41 @@ func (s *paymentTransactionService) ApplyResult(
 					tx,
 				)
 
+			payments :=
+				postgresrepo.NewPaymentRepositoryWithDB(
+					tx,
+				)
+
+			// Read the transaction first so we know which parent
+			// payment row must be locked.
+			candidate, err :=
+				transactions.GetByID(
+					ctx,
+					transactionID,
+				)
+			if err != nil {
+				return fmt.Errorf(
+					"get payment transaction before reconciliation lock: %w",
+					err,
+				)
+			}
+
+			// Lock the aggregate payment before the child transaction.
+			//
+			// This serializes all financial operations belonging to
+			// the same payment, including concurrent refunds.
+			currentPayment, err :=
+				payments.GetByIDForUpdate(
+					ctx,
+					candidate.PaymentID,
+				)
+			if err != nil {
+				return fmt.Errorf(
+					"lock aggregate payment for reconciliation: %w",
+					err,
+				)
+			}
+
 			current, err :=
 				transactions.GetByIDForUpdate(
 					ctx,
@@ -59,6 +94,7 @@ func (s *paymentTransactionService) ApplyResult(
 				)
 			}
 
+			// A provider identity may be filled once, but never changed.
 			if current.ProviderTransactionID != nil &&
 				req.ProviderTransactionID != nil &&
 				*current.ProviderTransactionID !=
@@ -67,54 +103,77 @@ func (s *paymentTransactionService) ApplyResult(
 				return ErrProviderIdentityConflict
 			}
 
-			// Exact duplicate delivery is idempotent.
-			// Same-status provider delivery is idempotent.
+			// ---------------------------------------------------------
+			// Same-status provider delivery.
+			// ---------------------------------------------------------
+
 			if current.Status == req.Status {
-				// If CONNECT already has the provider identity, there is
-				// nothing lifecycle-sensitive left to change.
-				if current.ProviderTransactionID != nil ||
-					req.ProviderTransactionID == nil {
+				// A later duplicate delivery may legitimately provide
+				// the provider transaction ID that was unavailable on
+				// the first delivery.
+				if current.ProviderTransactionID == nil &&
+					req.ProviderTransactionID != nil {
 
-					updated = current
-					return nil
-				}
-
-				// A later duplicate delivery may legitimately supply the
-				// provider transaction identifier that was unavailable on
-				// the earlier delivery. Fill it exactly once without changing
-				// the transaction lifecycle state.
-				if err := transactions.UpdateResult(
-					ctx,
-					repository.UpdatePaymentTransactionResultParams{
-						ID: current.ID,
-
-						Status: current.Status,
-
-						ProviderTransactionID: req.ProviderTransactionID,
-
-						GatewayResponse: nil,
-					},
-				); err != nil {
-					return fmt.Errorf(
-						"persist payment transaction provider identity: %w",
-						err,
-					)
-				}
-
-				updated, err =
-					transactions.GetByID(
+					if err := transactions.UpdateResult(
 						ctx,
-						current.ID,
-					)
-				if err != nil {
-					return fmt.Errorf(
-						"reload payment transaction after provider identity update: %w",
-						err,
-					)
+						repository.UpdatePaymentTransactionResultParams{
+							ID: current.ID,
+
+							Status: current.Status,
+
+							ProviderTransactionID: req.ProviderTransactionID,
+
+							// Do not overwrite the original provider
+							// response during identity enrichment.
+							GatewayResponse: nil,
+						},
+					); err != nil {
+						return fmt.Errorf(
+							"persist payment transaction provider identity: %w",
+							err,
+						)
+					}
+
+					updated, err =
+						transactions.GetByID(
+							ctx,
+							current.ID,
+						)
+					if err != nil {
+						return fmt.Errorf(
+							"reload payment transaction after provider identity update: %w",
+							err,
+						)
+					}
+				} else {
+					updated = current
+				}
+
+				// A SUCCESS replay must still reconcile the aggregate
+				// payment. This makes reconciliation repairable if an
+				// earlier attempt updated the provider transaction but
+				// did not complete aggregate state reconciliation.
+				if updated.Status == StatusSuccess {
+					if err := reconcileSuccessfulPaymentOperation(
+						ctx,
+						payments,
+						transactions,
+						currentPayment,
+						updated,
+					); err != nil {
+						return fmt.Errorf(
+							"reconcile successful payment operation: %w",
+							err,
+						)
+					}
 				}
 
 				return nil
 			}
+
+			// ---------------------------------------------------------
+			// New lifecycle transition.
+			// ---------------------------------------------------------
 
 			if !canTransition(
 				current.Status,
@@ -156,6 +215,24 @@ func (s *paymentTransactionService) ApplyResult(
 					"reload payment transaction: %w",
 					err,
 				)
+			}
+
+			// Successful provider operations now reconcile the
+			// authoritative aggregate payment inside this same
+			// PostgreSQL transaction.
+			if updated.Status == StatusSuccess {
+				if err := reconcileSuccessfulPaymentOperation(
+					ctx,
+					payments,
+					transactions,
+					currentPayment,
+					updated,
+				); err != nil {
+					return fmt.Errorf(
+						"reconcile successful payment operation: %w",
+						err,
+					)
+				}
 			}
 
 			return nil

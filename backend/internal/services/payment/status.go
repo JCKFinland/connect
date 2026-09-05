@@ -39,6 +39,7 @@ func canTransition(
 	case StatusPending:
 		switch to {
 		case StatusProcessing,
+			StatusAuthorized,
 			StatusCancelled,
 			StatusPaid:
 
@@ -87,4 +88,16 @@ func canTransition(
 	}
 
 	return false
+}
+
+// CanTransitionStatus exposes the authoritative payment lifecycle
+// transition rule to financial reconciliation services.
+func CanTransitionStatus(
+	from string,
+	to string,
+) bool {
+	return canTransition(
+		from,
+		to,
+	)
 }
