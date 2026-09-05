@@ -35,6 +35,7 @@ import (
 	vehicleservice "github.com/JCKFinland/connect/backend/internal/services/vehicle"
 
 	dvassignmentservice "github.com/JCKFinland/connect/backend/internal/services/driver_vehicle_assignment"
+	paymentservice "github.com/JCKFinland/connect/backend/internal/services/payment"
 
 	tripservice "github.com/JCKFinland/connect/backend/internal/services/trip"
 
@@ -118,6 +119,7 @@ func main() {
 	tripEventRepo := postgresrepo.NewTripEventRepository(db)
 	dispatchOfferRepo := postgresrepo.NewDispatchOfferRepository(db)
 	tripLocationRepo := postgresrepo.NewTripLocationRepository(db)
+	paymentRepo := postgresrepo.NewPaymentRepository(db)
 
 	// ----------------------------------------------------------------------
 	// Security
@@ -178,6 +180,15 @@ func main() {
 			UserRoles:      userRoleRepo,
 			TripLocations:  tripLocationRepo,
 			FareCalculator: fareservice.NewService(),
+		},
+	)
+
+	paymentService := paymentservice.NewService(
+		paymentservice.Dependencies{
+			DB:        db,
+			Payments:  paymentRepo,
+			Trips:     tripRepo,
+			UserRoles: userRoleRepo,
 		},
 	)
 
@@ -294,6 +305,7 @@ func main() {
 			driverVehicleAssignmentService,
 		)
 	tripHandler := api.NewTripHandler(tripService)
+	paymentHandler := api.NewPaymentHandler(paymentService)
 
 	rideRequestHandler := api.NewRideRequestHandler(
 		rideRequestService,
@@ -324,6 +336,7 @@ func main() {
 		driverHandler,
 		driverVehicleAssignmentHandler,
 		tripHandler,
+		paymentHandler,
 		rideRequestHandler,
 		dispatchHandler,
 	)

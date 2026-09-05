@@ -25,6 +25,7 @@ func RegisterRoutes(
 	driverHandler *DriverHandler,
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 	tripHandler *TripHandler,
+	paymentHandler *PaymentHandler,
 	rideRequestHandler *RideRequestHandler,
 	dispatchHandler *DispatchHandler,
 ) {
@@ -226,6 +227,21 @@ func RegisterRoutes(
 			trips.POST("/:id/assign", tripHandler.AssignDriver)
 			trips.GET("/:id/events", tripHandler.ListTripEvents)
 			trips.POST("/:id/locations", tripHandler.RecordTripLocation)
+
+			trips.POST("/:id/payments", paymentHandler.CreateForCompletedTrip)
+			trips.GET("/:id/payment", paymentHandler.GetTripPayment)
+		}
+
+		// ---------------------------------------------------
+		// Payment Routes (/api/v1/payments/*)
+		// ---------------------------------------------------
+
+		payments := v1.Group("/payments")
+
+		payments.Use(authMiddleware.RequireAuth())
+
+		{
+			payments.GET("/:id", paymentHandler.GetPayment)
 		}
 
 		// ---------------------------------------------------

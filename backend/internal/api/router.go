@@ -29,6 +29,7 @@ func NewRouter(
 	driverHandler *DriverHandler,
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 	tripHandler *TripHandler,
+	paymentHandler *PaymentHandler,
 	rideRequestHandler *RideRequestHandler,
 	dispatchHandler *DispatchHandler,
 ) *gin.Engine {
@@ -77,6 +78,7 @@ func NewRouter(
 		driverHandler,
 		driverVehicleAssignmentHandler,
 		tripHandler,
+		paymentHandler,
 		rideRequestHandler,
 		dispatchHandler,
 	)

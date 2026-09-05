@@ -31,20 +31,43 @@ type Service interface {
 		id string,
 		status string,
 	) (*models.Payment, error)
+
+	CreateForCompletedTripAuthorized(
+		ctx context.Context,
+		tripID string,
+		paymentMethod string,
+		userID string,
+	) (*models.Payment, error)
+
+	GetByIDAuthorized(
+		ctx context.Context,
+		id string,
+		userID string,
+	) (*models.Payment, error)
+
+	GetByTripIDAuthorized(
+		ctx context.Context,
+		tripID string,
+		userID string,
+	) (*models.Payment, error)
 }
 
 // Dependencies contains payment service dependencies.
 type Dependencies struct {
 	DB *pgxpool.Pool
 
-	Payments repository.PaymentRepository
+	Payments  repository.PaymentRepository
+	Trips     repository.TripRepository
+	UserRoles repository.UserRoleRepository
 }
 
 // paymentService implements Service.
 type paymentService struct {
 	db *pgxpool.Pool
 
-	payments repository.PaymentRepository
+	payments  repository.PaymentRepository
+	trips     repository.TripRepository
+	userRoles repository.UserRoleRepository
 }
 
 // NewService creates a payment service.
@@ -52,8 +75,10 @@ func NewService(
 	deps Dependencies,
 ) Service {
 	return &paymentService{
-		db:       deps.DB,
-		payments: deps.Payments,
+		db:        deps.DB,
+		payments:  deps.Payments,
+		trips:     deps.Trips,
+		userRoles: deps.UserRoles,
 	}
 }
 
