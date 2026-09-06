@@ -53,6 +53,7 @@ import (
 
 	stripepayment "github.com/JCKFinland/connect/backend/internal/payments/stripe"
 	paymentcallbackservice "github.com/JCKFinland/connect/backend/internal/services/paymentcallback"
+	paymentexecutionservice "github.com/JCKFinland/connect/backend/internal/services/paymentexecution"
 	paymenttransactionservice "github.com/JCKFinland/connect/backend/internal/services/paymenttransaction"
 )
 
@@ -200,6 +201,45 @@ func main() {
 
 	paymentTransactionService :=
 		paymenttransactionservice.NewService(db)
+
+	var paymentExecutionHandler *api.PaymentExecutionHandler
+
+	if cfg.Stripe.SecretKey != "" {
+		stripeExecutor, err :=
+			stripepayment.NewExecutor(
+				cfg.Stripe.SecretKey,
+			)
+		if err != nil {
+			log.Error(
+				"failed to configure Stripe payment executor",
+				"error",
+				err,
+			)
+			os.Exit(1)
+		}
+
+		paymentExecutionService :=
+			paymentexecutionservice.NewService(
+				paymentexecutionservice.Dependencies{
+					Transactions: paymentTransactionRepo,
+
+					PaymentTransactions: paymentTransactionService,
+
+					Stripe: stripeExecutor,
+				},
+			)
+
+		paymentExecutionHandler =
+			api.NewPaymentExecutionHandler(
+				paymentService,
+				paymentTransactionRepo,
+				paymentExecutionService,
+			)
+
+		log.Info(
+			"Stripe payment execution enabled",
+		)
+	}
 
 	paymentCallbackService :=
 		paymentcallbackservice.NewService(
@@ -397,6 +437,7 @@ func main() {
 		driverVehicleAssignmentHandler,
 		tripHandler,
 		paymentHandler,
+		paymentExecutionHandler,
 		paymentCallbackHandler,
 		rideRequestHandler,
 		dispatchHandler,

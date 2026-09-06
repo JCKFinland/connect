@@ -234,6 +234,10 @@ func TestExecuteStripeSaleDoesNotResolveParent(
 					ProviderTransactionID: "pi_sale_123",
 
 					Status: paymenttransaction.StatusProcessing,
+
+					ClientSecret: "pi_sale_123_secret_test",
+
+					RequiresCustomerAction: true,
 				}, nil
 			},
 		}
@@ -305,12 +309,39 @@ func TestExecuteStripeSaleDoesNotResolveParent(
 		)
 	}
 
-	if result.Status !=
+	if result == nil {
+		t.Fatal(
+			"expected payment execution result",
+		)
+	}
+
+	if result.Transaction == nil {
+		t.Fatal(
+			"expected payment transaction result",
+		)
+	}
+
+	if result.Transaction.Status !=
 		paymenttransaction.StatusProcessing {
 
 		t.Fatalf(
 			"expected PROCESSING, got %s",
-			result.Status,
+			result.Transaction.Status,
+		)
+	}
+
+	if result.ClientSecret !=
+		"pi_sale_123_secret_test" {
+
+		t.Fatalf(
+			"client secret mismatch: got %q",
+			result.ClientSecret,
+		)
+	}
+
+	if !result.RequiresCustomerAction {
+		t.Fatal(
+			"expected customer action to be required",
 		)
 	}
 }

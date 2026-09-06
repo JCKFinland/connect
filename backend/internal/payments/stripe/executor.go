@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	stripego "github.com/stripe/stripe-go/v86"
+
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/services/paymenttransaction"
 )
@@ -52,6 +54,14 @@ type ExecuteResult struct {
 	ProviderTransactionID string
 
 	Status string
+
+	// ClientSecret is an ephemeral Stripe credential used by the
+	// customer application to continue PaymentIntent confirmation.
+	//
+	// It must not be logged or persisted.
+	ClientSecret string
+
+	RequiresCustomerAction bool
 }
 
 type Executor interface {
@@ -61,10 +71,35 @@ type Executor interface {
 	) (*ExecuteResult, error)
 }
 
-type executor struct{}
+type executor struct {
+	paymentIntents paymentIntentClient
+}
 
-func NewExecutor() Executor {
-	return &executor{}
+func NewExecutor(
+	secretKey string,
+) (Executor, error) {
+	secretKey = strings.TrimSpace(secretKey)
+
+	if secretKey == "" {
+		return nil, fmt.Errorf(
+			"%w: Stripe secret key is required",
+			ErrInvalidOperation,
+		)
+	}
+
+	client := stripego.NewClient(secretKey)
+
+	return &executor{
+		paymentIntents: client.V1PaymentIntents,
+	}, nil
+}
+
+func newExecutorWithPaymentIntents(
+	client paymentIntentClient,
+) Executor {
+	return &executor{
+		paymentIntents: client,
+	}
 }
 
 func (e *executor) Execute(
@@ -75,6 +110,12 @@ func (e *executor) Execute(
 		return nil, fmt.Errorf(
 			"%w: payment transaction is required",
 			ErrInvalidOperation,
+		)
+	}
+
+	if e.paymentIntents == nil {
+		return nil, errors.New(
+			"Stripe PaymentIntent client is not configured",
 		)
 	}
 
@@ -130,29 +171,31 @@ func (e *executor) Execute(
 
 	switch transaction.TransactionType {
 	case paymenttransaction.TypeSale,
-		paymenttransaction.TypeAuthorize,
-		paymenttransaction.TypeCapture,
+		paymenttransaction.TypeAuthorize:
+
+		return e.createPaymentIntent(
+			ctx,
+			transaction,
+		)
+
+	case paymenttransaction.TypeCapture,
 		paymenttransaction.TypeRefund,
 		paymenttransaction.TypeVoid:
 
-		switch transaction.TransactionType {
-		case paymenttransaction.TypeCapture,
-			paymenttransaction.TypeRefund,
-			paymenttransaction.TypeVoid:
-
-			if strings.TrimSpace(
-				req.ParentProviderTransactionID,
-			) == "" {
-				return nil, fmt.Errorf(
-					"%w: parent provider transaction ID is required for %s",
-					ErrInvalidOperation,
-					transaction.TransactionType,
-				)
-			}
+		if strings.TrimSpace(
+			req.ParentProviderTransactionID,
+		) == "" {
+			return nil, fmt.Errorf(
+				"%w: parent provider transaction ID is required for %s",
+				ErrInvalidOperation,
+				transaction.TransactionType,
+			)
 		}
 
-		// Supported CONNECT operation types. Provider execution will
-		// be implemented behind this boundary.
+		return nil, errors.New(
+			"Stripe provider execution is not implemented for " +
+				transaction.TransactionType,
+		)
 
 	default:
 		return nil, fmt.Errorf(
@@ -161,11 +204,121 @@ func (e *executor) Execute(
 			transaction.TransactionType,
 		)
 	}
+}
 
-	return nil, errors.New(
-		"Stripe provider execution is not implemented",
+func (e *executor) createPaymentIntent(
+	ctx context.Context,
+	transaction *models.PaymentTransaction,
+) (*ExecuteResult, error) {
+	amount, err :=
+		amountToMinorUnits(
+			transaction.Amount,
+			transaction.Currency,
+		)
+	if err != nil {
+		return nil, err
+	}
+
+	currency :=
+		strings.ToLower(
+			strings.TrimSpace(
+				transaction.Currency,
+			),
+		)
+
+	captureMethod :=
+		string(
+			stripego.PaymentIntentCaptureMethodAutomatic,
+		)
+
+	if transaction.TransactionType ==
+		paymenttransaction.TypeAuthorize {
+
+		captureMethod =
+			string(
+				stripego.PaymentIntentCaptureMethodManual,
+			)
+	}
+
+	automaticPaymentMethodsEnabled := true
+
+	description :=
+		"CONNECT payment " +
+			transaction.PaymentID
+
+	params :=
+		&stripego.PaymentIntentCreateParams{
+			Amount: &amount,
+
+			Currency: &currency,
+
+			CaptureMethod: &captureMethod,
+
+			AutomaticPaymentMethods: &stripego.PaymentIntentCreateAutomaticPaymentMethodsParams{
+				Enabled: &automaticPaymentMethodsEnabled,
+			},
+
+			Description: &description,
+
+			Metadata: map[string]string{
+				"connect_payment_id": transaction.PaymentID,
+
+				"connect_transaction_id": transaction.ID,
+
+				"connect_transaction_reference": transaction.TransactionReference,
+
+				"connect_transaction_type": transaction.TransactionType,
+			},
+		}
+
+	params.SetIdempotencyKey(
+		strings.TrimSpace(
+			*transaction.IdempotencyKey,
+		),
 	)
 
+	intent, err :=
+		e.paymentIntents.Create(
+			ctx,
+			params,
+		)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"create Stripe PaymentIntent: %w",
+			err,
+		)
+	}
+
+	if intent == nil {
+		return nil, errors.New(
+			"Stripe PaymentIntent create returned nil result",
+		)
+	}
+
+	if strings.TrimSpace(intent.ID) == "" {
+		return nil, errors.New(
+			"Stripe PaymentIntent create returned empty ID",
+		)
+	}
+
+	status, requiresCustomerAction, err :=
+		mapPaymentIntentStatus(
+			transaction.TransactionType,
+			intent.Status,
+		)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExecuteResult{
+		ProviderTransactionID: intent.ID,
+
+		Status: status,
+
+		ClientSecret: intent.ClientSecret,
+
+		RequiresCustomerAction: requiresCustomerAction,
+	}, nil
 }
 
 var _ Executor = (*executor)(nil)

@@ -5,9 +5,22 @@ import (
 	"errors"
 	"testing"
 
+	stripego "github.com/stripe/stripe-go/v86"
+
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/services/paymenttransaction"
 )
+
+type fakePaymentIntentClient struct{}
+
+func (fakePaymentIntentClient) Create(
+	context.Context,
+	*stripego.PaymentIntentCreateParams,
+) (*stripego.PaymentIntent, error) {
+	return nil, errors.New(
+		"Stripe provider execution is not implemented",
+	)
+}
 
 func TestExecutorRejectsInvalidOperation(t *testing.T) {
 	t.Parallel()
@@ -128,7 +141,10 @@ func TestExecutorRejectsInvalidOperation(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor()
+	executor :=
+		newExecutorWithPaymentIntents(
+			fakePaymentIntentClient{},
+		)
 
 	for _, test := range tests {
 		test := test
@@ -182,7 +198,10 @@ func TestExecutorRecognizesSupportedOperationTypes(
 		paymenttransaction.TypeVoid,
 	}
 
-	executor := NewExecutor()
+	executor :=
+		newExecutorWithPaymentIntents(
+			fakePaymentIntentClient{},
+		)
 
 	for _, operationType := range operationTypes {
 		operationType := operationType
@@ -305,7 +324,10 @@ func TestExecutorRequiresParentProviderIdentityForDependentOperations(
 		},
 	}
 
-	executor := NewExecutor()
+	executor :=
+		newExecutorWithPaymentIntents(
+			fakePaymentIntentClient{},
+		)
 
 	for _, tt := range tests {
 		tt := tt
@@ -382,7 +404,10 @@ func TestExecutorAcceptsParentProviderIdentityForDependentOperations(
 		paymenttransaction.TypeVoid,
 	}
 
-	executor := NewExecutor()
+	executor :=
+		newExecutorWithPaymentIntents(
+			fakePaymentIntentClient{},
+		)
 
 	for _, operationType := range operationTypes {
 		operationType := operationType
@@ -444,3 +469,54 @@ func TestExecutorAcceptsParentProviderIdentityForDependentOperations(
 		)
 	}
 }
+
+func TestNewExecutorRequiresSecretKey(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	executor, err :=
+		NewExecutor("   ")
+
+	if executor != nil {
+		t.Fatalf(
+			"expected nil executor, got %+v",
+			executor,
+		)
+	}
+
+	if !errors.Is(
+		err,
+		ErrInvalidOperation,
+	) {
+		t.Fatalf(
+			"expected ErrInvalidOperation, got %v",
+			err,
+		)
+	}
+}
+
+func TestNewExecutorAcceptsSecretKey(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	executor, err :=
+		NewExecutor(
+			"sk_test_connect",
+		)
+	if err != nil {
+		t.Fatalf(
+			"create Stripe executor: %v",
+			err,
+		)
+	}
+
+	if executor == nil {
+		t.Fatal(
+			"expected Stripe executor",
+		)
+	}
+}
+
+var _ paymentIntentClient = fakePaymentIntentClient{}

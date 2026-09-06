@@ -26,6 +26,7 @@ func RegisterRoutes(
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 	tripHandler *TripHandler,
 	paymentHandler *PaymentHandler,
+	paymentExecutionHandler *PaymentExecutionHandler,
 	paymentCallbackHandler *PaymentCallbackHandler,
 	rideRequestHandler *RideRequestHandler,
 	dispatchHandler *DispatchHandler,
@@ -254,8 +255,17 @@ func RegisterRoutes(
 		payments.Use(authMiddleware.RequireAuth())
 
 		{
-			payments.GET("/:id", paymentHandler.GetPayment)
+			payments.GET(
+				"/:id",
+				paymentHandler.GetPayment,
+			)
 		}
+
+		registerPaymentExecutionRoutes(
+			v1,
+			authMiddleware,
+			paymentExecutionHandler,
+		)
 
 		// ---------------------------------------------------
 		// Ride Request Routes (/api/v1/ride-requests/*)
@@ -311,5 +321,27 @@ func registerPaymentCallbackRoutes(
 	v1.POST(
 		"/payment-callbacks/:provider",
 		handler.Handle,
+	)
+}
+
+func registerPaymentExecutionRoutes(
+	v1 *gin.RouterGroup,
+	authMiddleware *middleware.AuthMiddleware,
+	handler *PaymentExecutionHandler,
+) {
+	if handler == nil {
+		return
+	}
+
+	payments :=
+		v1.Group("/payments")
+
+	payments.Use(
+		authMiddleware.RequireAuth(),
+	)
+
+	payments.POST(
+		"/:id/transactions/:transaction_id/execute",
+		handler.Execute,
 	)
 }

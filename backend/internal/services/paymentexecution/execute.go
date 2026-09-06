@@ -42,7 +42,7 @@ func NewService(
 func (s *service) Execute(
 	ctx context.Context,
 	transactionID string,
-) (*models.PaymentTransaction, error) {
+) (*Result, error) {
 	if transactionID == "" {
 		return nil, errors.New(
 			"payment transaction ID is required",
@@ -92,7 +92,7 @@ func (s *service) Execute(
 func (s *service) executeStripe(
 	ctx context.Context,
 	transaction *models.PaymentTransaction,
-) (*models.PaymentTransaction, error) {
+) (*Result, error) {
 	if s.stripe == nil {
 		return nil, errors.New(
 			"Stripe payment executor is not configured",
@@ -150,7 +150,13 @@ func (s *service) executeStripe(
 		)
 	}
 
-	return updated, nil
+	return &Result{
+		Transaction: updated,
+
+		ClientSecret: result.ClientSecret,
+
+		RequiresCustomerAction: result.RequiresCustomerAction,
+	}, nil
 }
 
 func (s *service) resolveParentProviderTransactionID(

@@ -36,6 +36,7 @@ type LogConfig struct {
 
 // StripeConfig contains Stripe payment-provider configuration.
 type StripeConfig struct {
+	SecretKey     string
 	WebhookSecret string
 }
 
@@ -132,6 +133,11 @@ func Load() (*Config, error) {
 		},
 
 		Stripe: StripeConfig{
+			SecretKey: GetEnv(
+				"STRIPE_SECRET_KEY",
+				"",
+			),
+
 			WebhookSecret: GetEnv(
 				"STRIPE_WEBHOOK_SECRET",
 				"",
