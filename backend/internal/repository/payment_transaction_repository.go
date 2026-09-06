@@ -85,6 +85,13 @@ type PaymentTransactionRepository interface {
 		paymentID string,
 		refundAmount string,
 	) error
+
+	GetLatestSuccessfulByPaymentAndTypes(
+		ctx context.Context,
+		paymentID string,
+		provider string,
+		transactionTypes []string,
+	) (*models.PaymentTransaction, error)
 }
 
 type SuccessfulRefundState string

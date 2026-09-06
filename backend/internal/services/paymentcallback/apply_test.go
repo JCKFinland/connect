@@ -348,3 +348,18 @@ func TestApplyProviderCallbackRejectsInvalidRequest(
 		)
 	}
 }
+
+func (f *fakePaymentTransactionRepository) GetLatestSuccessfulByPaymentAndTypes(
+	context.Context,
+	string,
+	string,
+	[]string,
+) (*models.PaymentTransaction, error) {
+	panic(
+		"unexpected GetLatestSuccessfulByPaymentAndTypes call",
+	)
+}
+
+var _ repository.PaymentTransactionRepository = (*fakePaymentTransactionRepository)(nil)
+
+var _ paymenttransaction.Service = (*fakePaymentTransactionService)(nil)

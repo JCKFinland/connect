@@ -511,21 +511,18 @@ func TestPaymentTransactionRepositoryRoundTripAndIdentityConstraints(
 	// Assign an external provider transaction identifier to the
 	// original row so we can prove migration 39 protects it.
 	providerTransactionID :=
-		"provider_" + uuid.NewString()
+		"provider_txn_" + uuid.NewString()
 
-	_, err = db.Exec(
+	if err := repo.UpdateResult(
 		ctx,
-		`
-			UPDATE payment_transactions
-			SET
-				provider_transaction_id = $1,
-				updated_at = NOW()
-			WHERE id = $2
-		`,
-		providerTransactionID,
-		transaction.ID,
-	)
-	if err != nil {
+		repository.UpdatePaymentTransactionResultParams{
+			ID: transaction.ID,
+
+			Status: "PENDING",
+
+			ProviderTransactionID: &providerTransactionID,
+		},
+	); err != nil {
 		t.Fatalf(
 			"assign provider transaction ID: %v",
 			err,
