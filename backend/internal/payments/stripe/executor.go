@@ -73,6 +73,8 @@ type Executor interface {
 
 type executor struct {
 	paymentIntents paymentIntentClient
+
+	refunds refundClient
 }
 
 func NewExecutor(
@@ -91,6 +93,8 @@ func NewExecutor(
 
 	return &executor{
 		paymentIntents: client.V1PaymentIntents,
+
+		refunds: client.V1Refunds,
 	}, nil
 }
 
@@ -99,6 +103,17 @@ func newExecutorWithPaymentIntents(
 ) Executor {
 	return &executor{
 		paymentIntents: client,
+	}
+}
+
+func newExecutorWithClients(
+	paymentIntents paymentIntentClient,
+	refunds refundClient,
+) Executor {
+	return &executor{
+		paymentIntents: paymentIntents,
+
+		refunds: refunds,
 	}
 }
 
@@ -178,10 +193,7 @@ func (e *executor) Execute(
 			transaction,
 		)
 
-	case paymenttransaction.TypeCapture,
-		paymenttransaction.TypeRefund,
-		paymenttransaction.TypeVoid:
-
+	case paymenttransaction.TypeCapture:
 		if strings.TrimSpace(
 			req.ParentProviderTransactionID,
 		) == "" {
@@ -192,9 +204,44 @@ func (e *executor) Execute(
 			)
 		}
 
-		return nil, errors.New(
-			"Stripe provider execution is not implemented for " +
+		return e.capturePaymentIntent(
+			ctx,
+			transaction,
+			req.ParentProviderTransactionID,
+		)
+
+	case paymenttransaction.TypeVoid:
+		if strings.TrimSpace(
+			req.ParentProviderTransactionID,
+		) == "" {
+			return nil, fmt.Errorf(
+				"%w: parent provider transaction ID is required for %s",
+				ErrInvalidOperation,
 				transaction.TransactionType,
+			)
+		}
+
+		return e.cancelPaymentIntent(
+			ctx,
+			transaction,
+			req.ParentProviderTransactionID,
+		)
+
+	case paymenttransaction.TypeRefund:
+		if strings.TrimSpace(
+			req.ParentProviderTransactionID,
+		) == "" {
+			return nil, fmt.Errorf(
+				"%w: parent provider transaction ID is required for %s",
+				ErrInvalidOperation,
+				transaction.TransactionType,
+			)
+		}
+
+		return e.createRefund(
+			ctx,
+			transaction,
+			req.ParentProviderTransactionID,
 		)
 
 	default:
@@ -316,6 +363,238 @@ func (e *executor) createPaymentIntent(
 		Status: status,
 
 		ClientSecret: intent.ClientSecret,
+
+		RequiresCustomerAction: requiresCustomerAction,
+	}, nil
+}
+
+func (e *executor) capturePaymentIntent(
+	ctx context.Context,
+	transaction *models.PaymentTransaction,
+	parentProviderTransactionID string,
+) (*ExecuteResult, error) {
+	amount, err :=
+		amountToMinorUnits(
+			transaction.Amount,
+			transaction.Currency,
+		)
+	if err != nil {
+		return nil, err
+	}
+
+	params :=
+		&stripego.PaymentIntentCaptureParams{
+			AmountToCapture: &amount,
+
+			Metadata: map[string]string{
+				"connect_payment_id": transaction.PaymentID,
+
+				"connect_transaction_id": transaction.ID,
+
+				"connect_transaction_reference": transaction.TransactionReference,
+
+				"connect_transaction_type": transaction.TransactionType,
+			},
+		}
+
+	params.SetIdempotencyKey(
+		strings.TrimSpace(
+			*transaction.IdempotencyKey,
+		),
+	)
+
+	intent, err :=
+		e.paymentIntents.Capture(
+			ctx,
+			strings.TrimSpace(
+				parentProviderTransactionID,
+			),
+			params,
+		)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"capture Stripe PaymentIntent: %w",
+			err,
+		)
+	}
+
+	if intent == nil {
+		return nil, errors.New(
+			"Stripe PaymentIntent capture returned nil result",
+		)
+	}
+
+	if strings.TrimSpace(intent.ID) == "" {
+		return nil, errors.New(
+			"Stripe PaymentIntent capture returned empty ID",
+		)
+	}
+
+	status, requiresCustomerAction, err :=
+		mapPaymentIntentStatus(
+			transaction.TransactionType,
+			intent.Status,
+		)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExecuteResult{
+		ProviderTransactionID: intent.ID,
+
+		Status: status,
+
+		ClientSecret: intent.ClientSecret,
+
+		RequiresCustomerAction: requiresCustomerAction,
+	}, nil
+}
+
+func (e *executor) cancelPaymentIntent(
+	ctx context.Context,
+	transaction *models.PaymentTransaction,
+	parentProviderTransactionID string,
+) (*ExecuteResult, error) {
+	params :=
+		&stripego.PaymentIntentCancelParams{}
+
+	params.SetIdempotencyKey(
+		strings.TrimSpace(
+			*transaction.IdempotencyKey,
+		),
+	)
+
+	intent, err :=
+		e.paymentIntents.Cancel(
+			ctx,
+			strings.TrimSpace(
+				parentProviderTransactionID,
+			),
+			params,
+		)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"cancel Stripe PaymentIntent: %w",
+			err,
+		)
+	}
+
+	if intent == nil {
+		return nil, errors.New(
+			"Stripe PaymentIntent cancel returned nil result",
+		)
+	}
+
+	if strings.TrimSpace(intent.ID) == "" {
+		return nil, errors.New(
+			"Stripe PaymentIntent cancel returned empty ID",
+		)
+	}
+
+	status, requiresCustomerAction, err :=
+		mapPaymentIntentStatus(
+			transaction.TransactionType,
+			intent.Status,
+		)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExecuteResult{
+		ProviderTransactionID: intent.ID,
+
+		Status: status,
+
+		ClientSecret: intent.ClientSecret,
+
+		RequiresCustomerAction: requiresCustomerAction,
+	}, nil
+}
+
+func (e *executor) createRefund(
+	ctx context.Context,
+	transaction *models.PaymentTransaction,
+	parentProviderTransactionID string,
+) (*ExecuteResult, error) {
+	if e.refunds == nil {
+		return nil, errors.New(
+			"Stripe Refund client is not configured",
+		)
+	}
+
+	amount, err :=
+		amountToMinorUnits(
+			transaction.Amount,
+			transaction.Currency,
+		)
+	if err != nil {
+		return nil, err
+	}
+
+	paymentIntentID :=
+		strings.TrimSpace(
+			parentProviderTransactionID,
+		)
+
+	params :=
+		&stripego.RefundCreateParams{
+			Amount: &amount,
+
+			PaymentIntent: &paymentIntentID,
+
+			Metadata: map[string]string{
+				"connect_payment_id": transaction.PaymentID,
+
+				"connect_transaction_id": transaction.ID,
+
+				"connect_transaction_reference": transaction.TransactionReference,
+
+				"connect_transaction_type": transaction.TransactionType,
+			},
+		}
+
+	params.SetIdempotencyKey(
+		strings.TrimSpace(
+			*transaction.IdempotencyKey,
+		),
+	)
+
+	refund, err :=
+		e.refunds.Create(
+			ctx,
+			params,
+		)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"create Stripe refund: %w",
+			err,
+		)
+	}
+
+	if refund == nil {
+		return nil, errors.New(
+			"Stripe refund create returned nil result",
+		)
+	}
+
+	if strings.TrimSpace(refund.ID) == "" {
+		return nil, errors.New(
+			"Stripe refund create returned empty ID",
+		)
+	}
+
+	status, requiresCustomerAction, err :=
+		mapRefundStatus(
+			refund.Status,
+		)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExecuteResult{
+		ProviderTransactionID: refund.ID,
+
+		Status: status,
 
 		RequiresCustomerAction: requiresCustomerAction,
 	}, nil

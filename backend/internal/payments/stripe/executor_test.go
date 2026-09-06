@@ -22,6 +22,26 @@ func (fakePaymentIntentClient) Create(
 	)
 }
 
+func (fakePaymentIntentClient) Capture(
+	context.Context,
+	string,
+	*stripego.PaymentIntentCaptureParams,
+) (*stripego.PaymentIntent, error) {
+	return nil, errors.New(
+		"Stripe provider execution is not implemented",
+	)
+}
+
+func (fakePaymentIntentClient) Cancel(
+	context.Context,
+	string,
+	*stripego.PaymentIntentCancelParams,
+) (*stripego.PaymentIntent, error) {
+	return nil, errors.New(
+		"Stripe provider execution is not implemented",
+	)
+}
+
 func TestExecutorRejectsInvalidOperation(t *testing.T) {
 	t.Parallel()
 
