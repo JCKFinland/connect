@@ -202,6 +202,12 @@ func main() {
 	paymentTransactionService :=
 		paymenttransactionservice.NewService(db)
 
+	paymentTransactionHandler :=
+		api.NewPaymentTransactionHandler(
+			paymentService,
+			paymentTransactionService,
+		)
+
 	var paymentExecutionHandler *api.PaymentExecutionHandler
 
 	if cfg.Stripe.SecretKey != "" {
@@ -437,6 +443,7 @@ func main() {
 		driverVehicleAssignmentHandler,
 		tripHandler,
 		paymentHandler,
+		paymentTransactionHandler,
 		paymentExecutionHandler,
 		paymentCallbackHandler,
 		rideRequestHandler,

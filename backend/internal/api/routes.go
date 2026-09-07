@@ -26,6 +26,7 @@ func RegisterRoutes(
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 	tripHandler *TripHandler,
 	paymentHandler *PaymentHandler,
+	paymentTransactionHandler *PaymentTransactionHandler,
 	paymentExecutionHandler *PaymentExecutionHandler,
 	paymentCallbackHandler *PaymentCallbackHandler,
 	rideRequestHandler *RideRequestHandler,
@@ -116,7 +117,6 @@ func RegisterRoutes(
 			// Updates operational statuses (e.g., changing from "Available" to "On Break").
 			driver.GET("/available", driverPresenceHandler.ListAvailable)
 			driver.PATCH("/availability", driverPresenceHandler.UpdateAvailability)
-
 		}
 
 		// ---------------------------------------------------
@@ -259,6 +259,13 @@ func RegisterRoutes(
 				"/:id",
 				paymentHandler.GetPayment,
 			)
+
+			if paymentTransactionHandler != nil {
+				payments.POST(
+					"/:id/transactions",
+					paymentTransactionHandler.Initiate,
+				)
+			}
 		}
 
 		registerPaymentExecutionRoutes(

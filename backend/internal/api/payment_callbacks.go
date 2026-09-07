@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -27,6 +28,30 @@ func NewPaymentCallbackHandler(
 		service:  service,
 		registry: registry,
 	}
+}
+
+// PaymentCallbackResponse is the intentionally restricted public response
+// returned after a provider callback is processed.
+//
+// Provider request/response payloads, idempotency keys, and other gateway
+// internals must never be exposed through this callback endpoint.
+type PaymentCallbackResponse struct {
+	ID string `json:"id"`
+
+	PaymentID string `json:"payment_id"`
+
+	Provider string `json:"provider"`
+
+	ProviderTransactionID *string `json:"provider_transaction_id,omitempty"`
+
+	TransactionType string `json:"transaction_type"`
+
+	Status string `json:"status"`
+
+	Amount   string `json:"amount"`
+	Currency string `json:"currency"`
+
+	ProcessedAt *time.Time `json:"processed_at,omitempty"`
 }
 
 func (h *PaymentCallbackHandler) Handle(
@@ -166,12 +191,38 @@ func (h *PaymentCallbackHandler) Handle(
 		return
 	}
 
+	if result == nil {
+		response.InternalServerError(c)
+		return
+	}
+
+	data :=
+		PaymentCallbackResponse{
+			ID: result.ID,
+
+			PaymentID: result.PaymentID,
+
+			Provider: result.Provider,
+
+			ProviderTransactionID: result.ProviderTransactionID,
+
+			TransactionType: result.TransactionType,
+
+			Status: result.Status,
+
+			Amount: result.Amount,
+
+			Currency: result.Currency,
+
+			ProcessedAt: result.ProcessedAt,
+		}
+
 	c.JSON(
 		http.StatusOK,
 		gin.H{
 			"success": true,
 			"message": "Payment callback processed",
-			"data":    result,
+			"data":    data,
 		},
 	)
 }
