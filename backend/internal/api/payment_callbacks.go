@@ -157,11 +157,15 @@ func (h *PaymentCallbackHandler) Handle(
 			paymentcallback.ApplyProviderCallbackRequest{
 				Provider: verified.Provider,
 
+				TransactionID: verified.TransactionID,
+
+				PaymentID: verified.PaymentID,
+
 				ProviderTransactionID: verified.ProviderTransactionID,
 
 				ProviderStatus: verified.ProviderStatus,
 
-				RawPayload: rawBody,
+				RawPayload: verified.RawPayload,
 			},
 		)
 	if err != nil {

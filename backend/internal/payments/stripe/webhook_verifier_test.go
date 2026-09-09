@@ -3,10 +3,10 @@ package stripe
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
-	stripego "github.com/stripe/stripe-go/v86"
 	"github.com/stripe/stripe-go/v86/webhook"
 
 	"github.com/JCKFinland/connect/backend/internal/services/paymentcallback"
@@ -23,18 +23,31 @@ func signedStripePayload(
 	t.Helper()
 
 	payload := []byte(
-		`{
-			"id":"evt_test_connect",
-			"object":"event",
-			"api_version":"` + stripego.APIVersion + `",
-			"type":"` + eventType + `",
-			"data":{
-				"object":{
-					"id":"` + paymentIntentID + `",
-					"object":"payment_intent"
+		fmt.Sprintf(
+			`{
+				"id": "evt_test_connect",
+				"object": "event",
+				"api_version": "2026-08-26.dahlia",
+				"type": %q,
+				"data": {
+					"object": {
+						"id": %q,
+						"object": "payment_intent",
+						"status": "requires_capture",
+						"amount": 628,
+						"currency": "eur",
+						"metadata": {
+							"connect_transaction_id": "transaction_test_connect",
+							"connect_payment_id": "payment_test_connect",
+							"connect_transaction_reference": "txn_test_connect",
+							"connect_transaction_type": "AUTHORIZE"
+						}
+					}
 				}
-			}
-		}`,
+			}`,
+			eventType,
+			paymentIntentID,
+		),
 	)
 
 	signed :=
@@ -60,6 +73,11 @@ func TestWebhookVerifierAcceptsSignedPaymentIntentEvents(
 			name:       "processing",
 			eventType:  "payment_intent.processing",
 			wantStatus: paymenttransaction.StatusProcessing,
+		},
+		{
+			name:       "amount capturable updated",
+			eventType:  "payment_intent.amount_capturable_updated",
+			wantStatus: paymenttransaction.StatusSuccess,
 		},
 		{
 			name:       "succeeded",
@@ -134,6 +152,24 @@ func TestWebhookVerifierAcceptsSignedPaymentIntentEvents(
 					t.Fatalf(
 						"expected PaymentIntent ID pi_test_connect, got %s",
 						result.ProviderTransactionID,
+					)
+				}
+
+				if result.TransactionID !=
+					"transaction_test_connect" {
+
+					t.Fatalf(
+						"expected CONNECT transaction ID transaction_test_connect, got %s",
+						result.TransactionID,
+					)
+				}
+
+				if result.PaymentID !=
+					"payment_test_connect" {
+
+					t.Fatalf(
+						"expected CONNECT payment ID payment_test_connect, got %s",
+						result.PaymentID,
 					)
 				}
 

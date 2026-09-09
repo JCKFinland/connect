@@ -10,8 +10,15 @@ import (
 type ApplyProviderCallbackRequest struct {
 	Provider string
 
-	// ProviderTransactionID identifies the provider-side financial
-	// operation being reported by the callback.
+	// TransactionID is the exact CONNECT transaction identity extracted from
+	// trusted provider callback metadata when available.
+	TransactionID string
+
+	// PaymentID is the CONNECT payment identity extracted from trusted
+	// provider callback metadata when available.
+	PaymentID string
+
+	// ProviderTransactionID identifies the provider-side payment resource.
 	ProviderTransactionID string
 
 	// ProviderStatus is the provider-neutral lifecycle result after

@@ -509,7 +509,7 @@ func TestPaymentTransactionRepositoryRoundTripAndIdentityConstraints(
 	}
 
 	// Assign an external provider transaction identifier to the
-	// original row so we can prove migration 39 protects it.
+	// original row so we can verify provider-resource lookup behavior.
 	providerTransactionID :=
 		"provider_txn_" + uuid.NewString()
 
@@ -571,7 +571,8 @@ func TestPaymentTransactionRepositoryRoundTripAndIdentityConstraints(
 	}
 
 	// Create another transaction with a different idempotency key,
-	// then prove the same provider transaction ID cannot be reused.
+	// then prove the same provider transaction ID may be shared
+	// across distinct CONNECT operations.
 	secondIdempotencyKey := uuid.NewString()
 
 	second, err := repo.Create(
@@ -611,21 +612,40 @@ func TestPaymentTransactionRepositoryRoundTripAndIdentityConstraints(
 		providerTransactionID,
 		second.ID,
 	)
-
-	if err == nil {
-		t.Fatal(
-			"expected duplicate provider transaction ID to fail",
+	if err != nil {
+		t.Fatalf(
+			"expected shared provider transaction ID to be allowed, got %v",
+			err,
 		)
 	}
 
-	pgErr = nil
+	var secondProviderTransactionID *string
 
-	if !errors.As(err, &pgErr) ||
-		pgErr.Code != "23505" {
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT provider_transaction_id
+			FROM payment_transactions
+			WHERE id = $1
+		`,
+		second.ID,
+	).Scan(
+		&secondProviderTransactionID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"reload second provider transaction ID: %v",
+			err,
+		)
+	}
+
+	if secondProviderTransactionID == nil ||
+		*secondProviderTransactionID != providerTransactionID {
 
 		t.Fatalf(
-			"expected PostgreSQL unique violation for provider transaction ID, got %v",
-			err,
+			"shared provider transaction ID got %v want %q",
+			secondProviderTransactionID,
+			providerTransactionID,
 		)
 	}
 }

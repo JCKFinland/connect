@@ -92,6 +92,13 @@ func mapStripeEvent(
 			paymenttransaction.StatusProcessing,
 		)
 
+	case "payment_intent.amount_capturable_updated":
+		return verifiedPaymentIntentCallback(
+			event,
+			rawBody,
+			paymenttransaction.StatusSuccess,
+		)
+
 	case "payment_intent.succeeded":
 		return verifiedPaymentIntentCallback(
 			event,
@@ -140,9 +147,38 @@ func verifiedPaymentIntentCallback(
 		)
 	}
 
-	if strings.TrimSpace(paymentIntent.ID) == "" {
+	providerTransactionID :=
+		strings.TrimSpace(
+			paymentIntent.ID,
+		)
+
+	if providerTransactionID == "" {
 		return nil, fmt.Errorf(
 			"%w: Stripe PaymentIntent ID is required",
+			paymentcallback.ErrInvalidCallback,
+		)
+	}
+
+	transactionID :=
+		strings.TrimSpace(
+			paymentIntent.Metadata["connect_transaction_id"],
+		)
+
+	if transactionID == "" {
+		return nil, fmt.Errorf(
+			"%w: Stripe connect_transaction_id metadata is required",
+			paymentcallback.ErrInvalidCallback,
+		)
+	}
+
+	paymentID :=
+		strings.TrimSpace(
+			paymentIntent.Metadata["connect_payment_id"],
+		)
+
+	if paymentID == "" {
+		return nil, fmt.Errorf(
+			"%w: Stripe connect_payment_id metadata is required",
 			paymentcallback.ErrInvalidCallback,
 		)
 	}
@@ -150,7 +186,11 @@ func verifiedPaymentIntentCallback(
 	return &paymentcallback.VerifiedCallback{
 		Provider: ProviderName,
 
-		ProviderTransactionID: paymentIntent.ID,
+		TransactionID: transactionID,
+
+		PaymentID: paymentID,
+
+		ProviderTransactionID: providerTransactionID,
 
 		ProviderStatus: status,
 

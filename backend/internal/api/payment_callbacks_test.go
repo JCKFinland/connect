@@ -12,6 +12,7 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/services/paymentcallback"
+	"github.com/JCKFinland/connect/backend/internal/services/paymenttransaction"
 )
 
 type fakePaymentCallbackService struct {
@@ -181,9 +182,15 @@ func TestPaymentCallbackVerifiedRequestIsForwarded(
 				return &paymentcallback.VerifiedCallback{
 					Provider: "TEST_PROVIDER",
 
-					ProviderTransactionID: "provider-123",
+					TransactionID: "transaction-123",
 
-					ProviderStatus: "SUCCESS",
+					PaymentID: "payment-123",
+
+					ProviderTransactionID: "provider-transaction-123",
+
+					ProviderStatus: paymenttransaction.StatusSuccess,
+
+					RawPayload: append([]byte(nil), rawBody...),
 				}, nil
 			},
 		},
@@ -224,8 +231,26 @@ func TestPaymentCallbackVerifiedRequestIsForwarded(
 					)
 				}
 
+				if req.TransactionID !=
+					"transaction-123" {
+
+					t.Fatalf(
+						"unexpected transaction ID %q",
+						req.TransactionID,
+					)
+				}
+
+				if req.PaymentID !=
+					"payment-123" {
+
+					t.Fatalf(
+						"unexpected payment ID %q",
+						req.PaymentID,
+					)
+				}
+
 				if req.ProviderTransactionID !=
-					"provider-123" {
+					"provider-transaction-123" {
 
 					t.Fatalf(
 						"unexpected provider transaction ID %q",
@@ -233,7 +258,9 @@ func TestPaymentCallbackVerifiedRequestIsForwarded(
 					)
 				}
 
-				if req.ProviderStatus != "SUCCESS" {
+				if req.ProviderStatus !=
+					paymenttransaction.StatusSuccess {
+
 					t.Fatalf(
 						"unexpected provider status %q",
 						req.ProviderStatus,
@@ -252,7 +279,11 @@ func TestPaymentCallbackVerifiedRequestIsForwarded(
 						ID: "transaction-123",
 					},
 
-					Status: "SUCCESS",
+					PaymentID: "payment-123",
+
+					Provider: "TEST_PROVIDER",
+
+					Status: paymenttransaction.StatusSuccess,
 				}, nil
 			},
 		},
