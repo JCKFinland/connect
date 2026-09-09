@@ -455,6 +455,35 @@ func (e *executor) cancelPaymentIntent(
 	transaction *models.PaymentTransaction,
 	parentProviderTransactionID string,
 ) (*ExecuteResult, error) {
+	paymentIntentID :=
+		strings.TrimSpace(
+			parentProviderTransactionID,
+		)
+
+	updateParams :=
+		&stripego.PaymentIntentUpdateParams{
+			Metadata: map[string]string{
+				"connect_payment_id": transaction.PaymentID,
+
+				"connect_transaction_id": transaction.ID,
+
+				"connect_transaction_reference": transaction.TransactionReference,
+
+				"connect_transaction_type": transaction.TransactionType,
+			},
+		}
+
+	if _, err := e.paymentIntents.Update(
+		ctx,
+		paymentIntentID,
+		updateParams,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"update Stripe PaymentIntent VOID metadata: %w",
+			err,
+		)
+	}
+
 	params :=
 		&stripego.PaymentIntentCancelParams{}
 
@@ -467,9 +496,7 @@ func (e *executor) cancelPaymentIntent(
 	intent, err :=
 		e.paymentIntents.Cancel(
 			ctx,
-			strings.TrimSpace(
-				parentProviderTransactionID,
-			),
+			paymentIntentID,
 			params,
 		)
 	if err != nil {

@@ -16,6 +16,12 @@ type recordingPaymentIntentClient struct {
 		params *stripego.PaymentIntentCreateParams,
 	) (*stripego.PaymentIntent, error)
 
+	update func(
+		ctx context.Context,
+		id string,
+		params *stripego.PaymentIntentUpdateParams,
+	) (*stripego.PaymentIntent, error)
+
 	capture func(
 		ctx context.Context,
 		id string,
@@ -41,6 +47,24 @@ func (c *recordingPaymentIntentClient) Create(
 
 	return c.create(
 		ctx,
+		params,
+	)
+}
+
+func (c *recordingPaymentIntentClient) Update(
+	ctx context.Context,
+	id string,
+	params *stripego.PaymentIntentUpdateParams,
+) (*stripego.PaymentIntent, error) {
+	if c.update == nil {
+		panic(
+			"unexpected PaymentIntent Update call",
+		)
+	}
+
+	return c.update(
+		ctx,
+		id,
 		params,
 	)
 }
@@ -472,13 +496,88 @@ func TestExecutorVoidsAuthorizedPaymentIntent(
 
 	const parentProviderTransactionID = "pi_authorize_void_parent_123"
 
+	updateCalled := false
+	cancelCalled := false
+
 	client :=
 		&recordingPaymentIntentClient{
+			update: func(
+				_ context.Context,
+				id string,
+				params *stripego.PaymentIntentUpdateParams,
+			) (*stripego.PaymentIntent, error) {
+				updateCalled = true
+
+				if cancelCalled {
+					t.Fatal(
+						"PaymentIntent metadata must be updated before cancellation",
+					)
+				}
+
+				if id != parentProviderTransactionID {
+					t.Fatalf(
+						"update PaymentIntent ID got %q want %q",
+						id,
+						parentProviderTransactionID,
+					)
+				}
+
+				if params == nil {
+					t.Fatal(
+						"expected PaymentIntent update params",
+					)
+				}
+
+				if params.Metadata["connect_payment_id"] !=
+					transaction.PaymentID {
+
+					t.Fatal(
+						"CONNECT payment ID metadata missing",
+					)
+				}
+
+				if params.Metadata["connect_transaction_id"] !=
+					transaction.ID {
+
+					t.Fatal(
+						"CONNECT transaction ID metadata missing",
+					)
+				}
+
+				if params.Metadata["connect_transaction_reference"] !=
+					transaction.TransactionReference {
+
+					t.Fatal(
+						"CONNECT transaction reference metadata missing",
+					)
+				}
+
+				if params.Metadata["connect_transaction_type"] !=
+					transaction.TransactionType {
+
+					t.Fatal(
+						"CONNECT transaction type metadata missing",
+					)
+				}
+
+				return &stripego.PaymentIntent{
+					ID: id,
+				}, nil
+			},
+
 			cancel: func(
 				_ context.Context,
 				id string,
 				params *stripego.PaymentIntentCancelParams,
 			) (*stripego.PaymentIntent, error) {
+				cancelCalled = true
+
+				if !updateCalled {
+					t.Fatal(
+						"PaymentIntent cancel called before metadata update",
+					)
+				}
+
 				if id != parentProviderTransactionID {
 					t.Fatalf(
 						"cancel PaymentIntent ID got %q want %q",
@@ -529,6 +628,18 @@ func TestExecutorVoidsAuthorizedPaymentIntent(
 		t.Fatalf(
 			"execute Stripe VOID: %v",
 			err,
+		)
+	}
+
+	if !updateCalled {
+		t.Fatal(
+			"expected PaymentIntent metadata update",
+		)
+	}
+
+	if !cancelCalled {
+		t.Fatal(
+			"expected PaymentIntent cancellation",
 		)
 	}
 

@@ -22,6 +22,20 @@ func (fakePaymentIntentClient) Create(
 	)
 }
 
+func (fakePaymentIntentClient) Update(
+	_ context.Context,
+	id string,
+	_ *stripego.PaymentIntentUpdateParams,
+) (*stripego.PaymentIntent, error) {
+	// This generic fake is used primarily by validation tests.
+	// Returning a harmless PaymentIntent allows it to satisfy the
+	// expanded paymentIntentClient interface without changing the
+	// intent of the existing tests.
+	return &stripego.PaymentIntent{
+		ID: id,
+	}, nil
+}
+
 func (fakePaymentIntentClient) Capture(
 	context.Context,
 	string,

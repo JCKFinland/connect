@@ -153,19 +153,17 @@ func (s *paymentTransactionService) ApplyResult(
 				// payment. This makes reconciliation repairable if an
 				// earlier attempt updated the provider transaction but
 				// did not complete aggregate state reconciliation.
-				if updated.Status == StatusSuccess {
-					if err := reconcileSuccessfulPaymentOperation(
-						ctx,
-						payments,
-						transactions,
-						currentPayment,
-						updated,
-					); err != nil {
-						return fmt.Errorf(
-							"reconcile successful payment operation: %w",
-							err,
-						)
-					}
+				if err := reconcilePaymentOperationResult(
+					ctx,
+					payments,
+					transactions,
+					currentPayment,
+					updated,
+				); err != nil {
+					return fmt.Errorf(
+						"reconcile payment operation result: %w",
+						err,
+					)
 				}
 
 				return nil
@@ -221,7 +219,7 @@ func (s *paymentTransactionService) ApplyResult(
 			// authoritative aggregate payment inside this same
 			// PostgreSQL transaction.
 			if updated.Status == StatusSuccess {
-				if err := reconcileSuccessfulPaymentOperation(
+				if err := reconcilePaymentOperationResult(
 					ctx,
 					payments,
 					transactions,

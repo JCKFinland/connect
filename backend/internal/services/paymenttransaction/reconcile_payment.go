@@ -10,14 +10,26 @@ import (
 	paymentservice "github.com/JCKFinland/connect/backend/internal/services/payment"
 )
 
-func reconcileSuccessfulPaymentOperation(
+func reconcilePaymentOperationResult(
 	ctx context.Context,
 	payments *postgresrepo.PaymentRepository,
 	transactions *postgresrepo.PaymentTransactionRepository,
 	currentPayment *models.Payment,
 	currentTransaction *models.PaymentTransaction,
 ) error {
-	if currentTransaction.Status != StatusSuccess {
+	// Most aggregate-payment reconciliation is driven by a successful
+	// provider operation.
+	//
+	// VOID is the exception: providers such as Stripe report cancellation
+	// of an uncaptured authorization as CANCELLED rather than SUCCESS.
+	isSuccessful :=
+		currentTransaction.Status == StatusSuccess
+
+	isCancelledVoid :=
+		currentTransaction.TransactionType == TypeVoid &&
+			currentTransaction.Status == StatusCancelled
+
+	if !isSuccessful && !isCancelledVoid {
 		return nil
 	}
 
