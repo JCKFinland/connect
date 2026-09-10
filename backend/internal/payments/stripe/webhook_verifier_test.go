@@ -61,6 +61,227 @@ func signedStripePayload(
 	return signed.Payload, signed.Header
 }
 
+func signedStripeRefundPayload(
+	t *testing.T,
+	eventType string,
+	refundID string,
+	refundStatus string,
+) ([]byte, string) {
+	t.Helper()
+
+	payload := []byte(
+		fmt.Sprintf(
+			`{
+				"id": "evt_test_refund_connect",
+				"object": "event",
+				"api_version": "2026-08-26.dahlia",
+				"type": %q,
+				"data": {
+					"object": {
+						"id": %q,
+						"object": "refund",
+						"status": %q,
+						"amount": 628,
+						"currency": "eur",
+						"metadata": {
+							"connect_transaction_id": "transaction_refund_test_connect",
+							"connect_payment_id": "payment_refund_test_connect",
+							"connect_transaction_reference": "txn_refund_test_connect",
+							"connect_transaction_type": "REFUND"
+						}
+					}
+				}
+			}`,
+			eventType,
+			refundID,
+			refundStatus,
+		),
+	)
+
+	signed :=
+		webhook.GenerateTestSignedPayload(
+			&webhook.UnsignedPayload{
+				Payload: payload,
+				Secret:  testWebhookSecret,
+			},
+		)
+
+	return signed.Payload, signed.Header
+}
+
+func TestWebhookVerifierAcceptsSignedRefundEvents(
+	t *testing.T,
+) {
+	tests := []struct {
+		name         string
+		eventType    string
+		refundStatus string
+		wantStatus   string
+	}{
+		{
+			name:         "created succeeded",
+			eventType:    "refund.created",
+			refundStatus: "succeeded",
+			wantStatus:   paymenttransaction.StatusSuccess,
+		},
+		{
+			name:         "updated pending",
+			eventType:    "refund.updated",
+			refundStatus: "pending",
+			wantStatus:   paymenttransaction.StatusProcessing,
+		},
+		{
+			name:         "failed",
+			eventType:    "refund.failed",
+			refundStatus: "failed",
+			wantStatus:   paymenttransaction.StatusFailed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(
+			tt.name,
+			func(t *testing.T) {
+				verifier, err :=
+					NewWebhookVerifier(
+						testWebhookSecret,
+					)
+				if err != nil {
+					t.Fatalf(
+						"create verifier: %v",
+						err,
+					)
+				}
+
+				rawBody, signature :=
+					signedStripeRefundPayload(
+						t,
+						tt.eventType,
+						"re_test_connect",
+						tt.refundStatus,
+					)
+
+				headers := make(http.Header)
+
+				headers.Set(
+					"Stripe-Signature",
+					signature,
+				)
+
+				result, err :=
+					verifier.Verify(
+						context.Background(),
+						headers,
+						rawBody,
+					)
+				if err != nil {
+					t.Fatalf(
+						"verify Stripe refund callback: %v",
+						err,
+					)
+				}
+
+				if result.Provider != ProviderName {
+					t.Fatalf(
+						"expected provider %s, got %s",
+						ProviderName,
+						result.Provider,
+					)
+				}
+
+				if result.ProviderTransactionID !=
+					"re_test_connect" {
+
+					t.Fatalf(
+						"expected Refund ID re_test_connect, got %s",
+						result.ProviderTransactionID,
+					)
+				}
+
+				if result.TransactionID !=
+					"transaction_refund_test_connect" {
+
+					t.Fatalf(
+						"unexpected CONNECT transaction ID %s",
+						result.TransactionID,
+					)
+				}
+
+				if result.PaymentID !=
+					"payment_refund_test_connect" {
+
+					t.Fatalf(
+						"unexpected CONNECT payment ID %s",
+						result.PaymentID,
+					)
+				}
+
+				if result.ProviderStatus != tt.wantStatus {
+					t.Fatalf(
+						"expected status %s, got %s",
+						tt.wantStatus,
+						result.ProviderStatus,
+					)
+				}
+
+				if string(result.RawPayload) !=
+					string(rawBody) {
+
+					t.Fatal(
+						"verified callback raw payload changed",
+					)
+				}
+			},
+		)
+	}
+}
+
+func TestWebhookVerifierRejectsChargeRefundedEvent(
+	t *testing.T,
+) {
+	verifier, err :=
+		NewWebhookVerifier(
+			testWebhookSecret,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create verifier: %v",
+			err,
+		)
+	}
+
+	rawBody, signature :=
+		signedStripePayload(
+			t,
+			"charge.refunded",
+			"ch_test_connect",
+		)
+
+	headers := make(http.Header)
+
+	headers.Set(
+		"Stripe-Signature",
+		signature,
+	)
+
+	_, err =
+		verifier.Verify(
+			context.Background(),
+			headers,
+			rawBody,
+		)
+
+	if !errors.Is(
+		err,
+		paymentcallback.ErrInvalidCallback,
+	) {
+		t.Fatalf(
+			"expected ErrInvalidCallback, got %v",
+			err,
+		)
+	}
+}
+
 func TestWebhookVerifierAcceptsSignedPaymentIntentEvents(
 	t *testing.T,
 ) {

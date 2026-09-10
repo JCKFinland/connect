@@ -120,6 +120,15 @@ func mapStripeEvent(
 			paymenttransaction.StatusCancelled,
 		)
 
+	case "refund.created",
+		"refund.updated",
+		"refund.failed":
+
+		return verifiedRefundCallback(
+			event,
+			rawBody,
+		)
+
 	default:
 		return nil, fmt.Errorf(
 			"%w: unsupported Stripe event type %s",
@@ -180,6 +189,103 @@ func verifiedPaymentIntentCallback(
 		return nil, fmt.Errorf(
 			"%w: Stripe connect_payment_id metadata is required",
 			paymentcallback.ErrInvalidCallback,
+		)
+	}
+
+	return &paymentcallback.VerifiedCallback{
+		Provider: ProviderName,
+
+		TransactionID: transactionID,
+
+		PaymentID: paymentID,
+
+		ProviderTransactionID: providerTransactionID,
+
+		ProviderStatus: status,
+
+		RawPayload: append(
+			[]byte(nil),
+			rawBody...,
+		),
+	}, nil
+}
+
+func verifiedRefundCallback(
+	event stripego.Event,
+	rawBody []byte,
+) (*paymentcallback.VerifiedCallback, error) {
+	var refund stripego.Refund
+
+	if err := json.Unmarshal(
+		event.Data.Raw,
+		&refund,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"%w: decode Stripe Refund: %v",
+			paymentcallback.ErrInvalidCallback,
+			err,
+		)
+	}
+
+	providerTransactionID :=
+		strings.TrimSpace(
+			refund.ID,
+		)
+
+	if providerTransactionID == "" {
+		return nil, fmt.Errorf(
+			"%w: Stripe Refund ID is required",
+			paymentcallback.ErrInvalidCallback,
+		)
+	}
+
+	transactionID :=
+		strings.TrimSpace(
+			refund.Metadata["connect_transaction_id"],
+		)
+
+	if transactionID == "" {
+		return nil, fmt.Errorf(
+			"%w: Stripe connect_transaction_id metadata is required",
+			paymentcallback.ErrInvalidCallback,
+		)
+	}
+
+	paymentID :=
+		strings.TrimSpace(
+			refund.Metadata["connect_payment_id"],
+		)
+
+	if paymentID == "" {
+		return nil, fmt.Errorf(
+			"%w: Stripe connect_payment_id metadata is required",
+			paymentcallback.ErrInvalidCallback,
+		)
+	}
+
+	transactionType :=
+		strings.TrimSpace(
+			refund.Metadata["connect_transaction_type"],
+		)
+
+	if transactionType != paymenttransaction.TypeRefund {
+		return nil, fmt.Errorf(
+			"%w: Stripe connect_transaction_type must be %s",
+			paymentcallback.ErrInvalidCallback,
+			paymenttransaction.TypeRefund,
+		)
+	}
+
+	status, _, err :=
+		mapRefundStatus(
+			refund.Status,
+		)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"%w: map Stripe Refund status %q: %v",
+			paymentcallback.ErrInvalidCallback,
+			refund.Status,
+			err,
 		)
 	}
 
