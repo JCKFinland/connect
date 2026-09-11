@@ -19,7 +19,7 @@ const (
 	StatusExpired   = "EXPIRED"
 	StatusCancelled = "CANCELLED"
 
-	defaultOfferTimeout = 30 * time.Second
+	defaultOfferTimeout = 2 * time.Minute
 )
 
 type Service struct {

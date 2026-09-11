@@ -21,7 +21,7 @@ const (
 
 	dispatchOfferStatusPending = "PENDING"
 
-	defaultDispatchOfferTimeout = 30 * time.Second
+	defaultDispatchOfferTimeout = 2 * time.Minute
 )
 
 var ErrRideRequestExpired = errors.New(
