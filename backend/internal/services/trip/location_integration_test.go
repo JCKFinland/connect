@@ -68,53 +68,38 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	defer db.Close()
 
 	// ---------------------------------------------------------
-	// 3. Serialize John's shared integration fixture.
+	// 3. Create an isolated driver fixture.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
 	if err != nil {
 		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			context.Background(),
 		); err != nil {
 			t.Logf(
-				"release John dispatch fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// 4. Controlled fixture identities.
-	//
-	// trips.driver_id and trip_locations.driver_id use users.id.
-	// ---------------------------------------------------------
-
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
-
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
-	)
+	driverUserID := driverFixture.UserID
 
 	// ---------------------------------------------------------
-	// 5. Ensure John has DRIVER authorization.
+	// 4. Ensure the isolated user has DRIVER authorization.
 	// ---------------------------------------------------------
 
 	var driverRoleID string
@@ -122,10 +107,11 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	err = db.QueryRow(
 		ctx,
 		`
-			SELECT id
-			FROM roles
-			WHERE name = 'DRIVER'
-		`,
+		SELECT id
+		FROM roles
+		WHERE name = 'DRIVER'
+		LIMIT 1
+	`,
 	).Scan(
 		&driverRoleID,
 	)
@@ -136,78 +122,42 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 		)
 	}
 
-	commandTag, err := db.Exec(
+	_, err = db.Exec(
 		ctx,
 		`
-			INSERT INTO user_roles (
-				user_id,
-				role_id
-			)
-			VALUES ($1, $2)
-			ON CONFLICT (user_id, role_id) DO NOTHING
-		`,
-		johnUserID,
+		INSERT INTO user_roles
+		(
+			user_id,
+			role_id
+		)
+		VALUES
+		(
+			$1,
+			$2
+		)
+		ON CONFLICT DO NOTHING
+	`,
+		driverUserID,
 		driverRoleID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"ensure John DRIVER role: %v",
-			err,
-		)
-	}
-
-	driverRoleAddedByTest :=
-		commandTag.RowsAffected() == 1
-
-	if driverRoleAddedByTest {
-		defer func() {
-			if _, cleanupErr := db.Exec(
-				context.Background(),
-				`
-					DELETE FROM user_roles
-					WHERE user_id = $1
-					  AND role_id = $2
-				`,
-				johnUserID,
-				driverRoleID,
-			); cleanupErr != nil {
-				t.Logf(
-					"cleanup temporary DRIVER role: %v",
-					cleanupErr,
-				)
-			}
-		}()
-	}
-
-	// ---------------------------------------------------------
-	// 6. Resolve John's current active vehicle assignment.
-	// ---------------------------------------------------------
-
-	var vehicleID string
-
-	err = db.QueryRow(
-		ctx,
-		`
-			SELECT vehicle_id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND unassigned_at IS NULL
-			ORDER BY assigned_at DESC
-			LIMIT 1
-		`,
-		johnUserID,
-	).Scan(
-		&vehicleID,
-	)
-	if err != nil {
-		t.Fatalf(
-			"resolve John's active vehicle assignment: %v",
+			"grant DRIVER role to isolated user: %v",
 			err,
 		)
 	}
 
 	// ---------------------------------------------------------
-	// 7. Avoid colliding with another active John trip.
+	// 5. Use the isolated driver's assignment hierarchy.
+	// ---------------------------------------------------------
+
+	vehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
+
+	// ---------------------------------------------------------
+	// 6. Assert the isolated driver starts without an active trip.
 	// ---------------------------------------------------------
 
 	var existingActiveTripCount int
@@ -215,35 +165,35 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	err = db.QueryRow(
 		ctx,
 		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
-			  )
-		`,
-		johnUserID,
+		SELECT COUNT(*)
+		FROM trips
+		WHERE driver_id = $1
+		  AND is_active = TRUE
+		  AND deleted_at IS NULL
+		  AND status NOT IN (
+			'COMPLETED',
+			'CANCELLED',
+			'NO_DRIVER_AVAILABLE',
+			'EXPIRED'
+		  )
+	`,
+		driverUserID,
 	).Scan(
 		&existingActiveTripCount,
 	)
 	if err != nil {
 		t.Fatalf(
-			"check John's existing active trips: %v",
+			"check isolated driver's active trips: %v",
 			err,
 		)
 	}
 
 	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
+		t.Fatalf(
+			"isolated driver unexpectedly has %d active trip(s)",
+			existingActiveTripCount,
 		)
 	}
-
 	// ---------------------------------------------------------
 	// 8. Create disposable ride request and IN_PROGRESS trip.
 	// ---------------------------------------------------------
@@ -364,7 +314,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 		tripID,
 		rideRequestID,
 		customerID,
-		johnUserID,
+		driverUserID,
 		vehicleID,
 		companyID,
 		branchID,
@@ -420,7 +370,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	)
 
 	// ---------------------------------------------------------
-	// 10. Submit GPS evidence as authenticated John.
+	// 10. Submit GPS evidence as the authenticated isolated driver.
 	// ---------------------------------------------------------
 
 	accuracy := 5.0
@@ -434,7 +384,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	location, err := service.RecordTripLocation(
 		ctx,
 		tripID,
-		johnUserID,
+		driverUserID,
 		RecordLocationRequest{
 			Latitude:       60.1708,
 			Longitude:      24.9375,
@@ -476,10 +426,10 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 		)
 	}
 
-	if location.DriverID != johnUserID {
+	if location.DriverID != driverUserID {
 		t.Fatalf(
 			"expected returned driver ID %s, got %s",
-			johnUserID,
+			driverUserID,
 			location.DriverID,
 		)
 	}
@@ -554,10 +504,10 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 		)
 	}
 
-	if persistedDriverID != johnUserID {
+	if persistedDriverID != driverUserID {
 		t.Fatalf(
 			"expected persisted authenticated driver ID %s, got %s",
-			johnUserID,
+			driverUserID,
 			persistedDriverID,
 		)
 	}
@@ -731,7 +681,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	_, err = service.RecordTripLocation(
 		ctx,
 		tripID,
-		johnUserID,
+		driverUserID,
 		RecordLocationRequest{
 			Latitude:       60.1710,
 			Longitude:      24.9377,
@@ -758,12 +708,12 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 			SET driver_id = $1
 			WHERE id = $2
 		`,
-		johnUserID,
+		driverUserID,
 		tripID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"restore John as trip driver: %v",
+			"restore isolated driver as trip driver: %v",
 			err,
 		)
 	}
@@ -793,7 +743,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	_, err = service.RecordTripLocation(
 		ctx,
 		tripID,
-		johnUserID,
+		driverUserID,
 		RecordLocationRequest{
 			Latitude:       60.1711,
 			Longitude:      24.9378,
@@ -890,53 +840,39 @@ func TestRecordTripLocationSerializesAgainstTripCompletion(
 		)
 	}
 	defer db.Close()
-
 	// ---------------------------------------------------------
-	// 3. Serialize John's shared integration fixture.
+	// 3. Create an isolated driver fixture.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
 	if err != nil {
 		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			context.Background(),
 		); err != nil {
 			t.Logf(
-				"release John dispatch fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// 4. Controlled fixture identities.
-	// ---------------------------------------------------------
-
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
-
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
-	)
+	driverUserID := driverFixture.UserID
 
 	// ---------------------------------------------------------
-	// 5. Ensure John has DRIVER authorization.
+	// 4. Ensure the isolated user has DRIVER authorization.
 	// ---------------------------------------------------------
 
 	var driverRoleID string
@@ -947,6 +883,7 @@ func TestRecordTripLocationSerializesAgainstTripCompletion(
 			SELECT id
 			FROM roles
 			WHERE name = 'DRIVER'
+			LIMIT 1
 		`,
 	).Scan(
 		&driverRoleID,
@@ -958,78 +895,42 @@ func TestRecordTripLocationSerializesAgainstTripCompletion(
 		)
 	}
 
-	commandTag, err := db.Exec(
+	_, err = db.Exec(
 		ctx,
 		`
-			INSERT INTO user_roles (
+			INSERT INTO user_roles
+			(
 				user_id,
 				role_id
 			)
-			VALUES ($1, $2)
-			ON CONFLICT (user_id, role_id) DO NOTHING
+			VALUES
+			(
+				$1,
+				$2
+			)
+			ON CONFLICT DO NOTHING
 		`,
-		johnUserID,
+		driverUserID,
 		driverRoleID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"ensure John DRIVER role: %v",
-			err,
-		)
-	}
-
-	driverRoleAddedByTest :=
-		commandTag.RowsAffected() == 1
-
-	if driverRoleAddedByTest {
-		defer func() {
-			if _, cleanupErr := db.Exec(
-				context.Background(),
-				`
-					DELETE FROM user_roles
-					WHERE user_id = $1
-					  AND role_id = $2
-				`,
-				johnUserID,
-				driverRoleID,
-			); cleanupErr != nil {
-				t.Logf(
-					"cleanup temporary DRIVER role: %v",
-					cleanupErr,
-				)
-			}
-		}()
-	}
-
-	// ---------------------------------------------------------
-	// 6. Resolve John's active vehicle.
-	// ---------------------------------------------------------
-
-	var vehicleID string
-
-	err = db.QueryRow(
-		ctx,
-		`
-			SELECT vehicle_id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND unassigned_at IS NULL
-			ORDER BY assigned_at DESC
-			LIMIT 1
-		`,
-		johnUserID,
-	).Scan(
-		&vehicleID,
-	)
-	if err != nil {
-		t.Fatalf(
-			"resolve John's active vehicle assignment: %v",
+			"grant DRIVER role to isolated user: %v",
 			err,
 		)
 	}
 
 	// ---------------------------------------------------------
-	// 7. Avoid colliding with another active John trip.
+	// 5. Use the isolated driver's assignment hierarchy.
+	// ---------------------------------------------------------
+
+	vehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
+
+	// ---------------------------------------------------------
+	// 6. Assert the isolated driver starts without an active trip.
 	// ---------------------------------------------------------
 
 	var existingActiveTripCount int
@@ -1049,20 +950,21 @@ func TestRecordTripLocationSerializesAgainstTripCompletion(
 				'EXPIRED'
 			  )
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&existingActiveTripCount,
 	)
 	if err != nil {
 		t.Fatalf(
-			"check John's existing active trips: %v",
+			"check isolated driver's active trips: %v",
 			err,
 		)
 	}
 
 	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
+		t.Fatalf(
+			"isolated driver unexpectedly has %d active trip(s)",
+			existingActiveTripCount,
 		)
 	}
 
@@ -1186,7 +1088,7 @@ func TestRecordTripLocationSerializesAgainstTripCompletion(
 		tripID,
 		rideRequestID,
 		customerID,
-		johnUserID,
+		driverUserID,
 		vehicleID,
 		companyID,
 		branchID,
@@ -1318,7 +1220,7 @@ func TestRecordTripLocationSerializesAgainstTripCompletion(
 			service.RecordTripLocation(
 				context.Background(),
 				tripID,
-				johnUserID,
+				driverUserID,
 				RecordLocationRequest{
 					Latitude:       60.1708,
 					Longitude:      24.9375,

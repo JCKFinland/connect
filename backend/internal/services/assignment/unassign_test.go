@@ -88,11 +88,32 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	driverID := driverFixture.UserID
 
 	assignmentRepo :=
 		postgresrepo.NewDriverAssignmentRepository(db)
@@ -100,12 +121,11 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 	activeAssignment, err :=
 		assignmentRepo.GetActiveByDriver(
 			ctx,
-			johnUserID,
+			driverID,
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"load John's active assignment: %v",
+			"load isolated active assignment: %v",
 			err,
 		)
 	}
@@ -115,9 +135,62 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 		activeAssignment.VehicleID == "" {
 
 		t.Fatal(
-			"John fixture requires an active vehicle assignment",
+			"isolated fixture requires an active vehicle assignment",
 		)
 	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO driver_presence (
+			driver_id,
+			company_id,
+			branch_id,
+			vehicle_id,
+			assignment_id,
+			is_online,
+			availability_status,
+			last_heartbeat_at
+		)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			TRUE,
+			'AVAILABLE',
+			NOW()
+		)
+	`,
+		driverID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`
+			DELETE FROM driver_presence
+			WHERE driver_id = $1
+		`,
+			driverID,
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver presence: %v",
+				err,
+			)
+		}
+	}()
 
 	// ---------------------------------------------------------
 	// 3. Avoid interfering with an existing real active trip.
@@ -140,7 +213,7 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 				'EXPIRED'
 			  )
 		`,
-		johnUserID,
+		driverID,
 	).Scan(
 		&existingActiveTripCount,
 	); err != nil {
@@ -180,7 +253,7 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverID,
 	).Scan(
 		&originalAssignmentID,
 		&originalVehicleID,
@@ -248,7 +321,7 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 					updated_at = NOW()
 				WHERE driver_id = $1
 			`,
-			johnUserID,
+			driverID,
 			originalAssignmentID,
 			originalVehicleID,
 			originalIsOnline,
@@ -277,7 +350,7 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 				updated_at = NOW()
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverID,
 	); err != nil {
 		t.Fatalf(
 			"prepare BUSY driver presence: %v",
@@ -392,7 +465,7 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 		tripID,
 		rideRequestID,
 		customerID,
-		johnUserID,
+		driverID,
 		activeAssignment.VehicleID,
 		activeAssignment.CompanyID,
 		activeAssignment.BranchID,
@@ -457,7 +530,7 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 	err = service.Unassign(
 		ctx,
 		UnassignDriverRequest{
-			DriverID: johnUserID,
+			DriverID: driverID,
 		},
 	)
 
@@ -523,7 +596,7 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverID,
 	).Scan(
 		&persistedAssignmentID,
 		&persistedVehicleID,
@@ -643,11 +716,32 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	driverID := driverFixture.UserID
 
 	assignmentRepo :=
 		postgresrepo.NewDriverAssignmentRepository(db)
@@ -655,12 +749,11 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 	originalAssignment, err :=
 		assignmentRepo.GetActiveByDriver(
 			ctx,
-			johnUserID,
+			driverID,
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"load John's active assignment: %v",
+			"load isolated active assignment: %v",
 			err,
 		)
 	}
@@ -670,7 +763,44 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 		originalAssignment.VehicleID == "" {
 
 		t.Fatal(
-			"John fixture requires an active vehicle assignment",
+			"isolated fixture requires an active vehicle assignment",
+		)
+	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO driver_presence (
+			driver_id,
+			company_id,
+			branch_id,
+			vehicle_id,
+			assignment_id,
+			is_online,
+			availability_status,
+			last_heartbeat_at
+		)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			TRUE,
+			'AVAILABLE',
+			NOW()
+		)
+	`,
+		driverID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver presence: %v",
+			err,
 		)
 	}
 
@@ -695,7 +825,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 				'EXPIRED'
 			  )
 		`,
-		johnUserID,
+		driverID,
 	).Scan(
 		&existingActiveTripCount,
 	); err != nil {
@@ -735,7 +865,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverID,
 	).Scan(
 		&originalPresenceAssignmentID,
 		&originalPresenceVehicleID,
@@ -802,7 +932,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 					updated_at = NOW()
 				WHERE driver_id = $1
 			`,
-			johnUserID,
+			driverID,
 			originalPresenceAssignmentID,
 			originalPresenceVehicleID,
 			originalIsOnline,
@@ -859,7 +989,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 				updated_at = NOW()
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverID,
 	); err != nil {
 		t.Fatalf(
 			"prepare BUSY driver presence: %v",
@@ -974,7 +1104,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 		tripID,
 		rideRequestID,
 		customerID,
-		johnUserID,
+		driverID,
 		originalAssignment.VehicleID,
 		originalAssignment.CompanyID,
 		originalAssignment.BranchID,
@@ -1035,7 +1165,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 			FROM driver_assignments
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverID,
 	).Scan(
 		&assignmentCountBefore,
 	); err != nil {
@@ -1071,7 +1201,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 			CompanyID: originalAssignment.CompanyID,
 			BranchID:  originalAssignment.BranchID,
 			FleetID:   originalAssignment.FleetID,
-			DriverID:  johnUserID,
+			DriverID:  driverID,
 			VehicleID: originalAssignment.VehicleID,
 			Notes:     "must roll back because driver has active trip",
 		},
@@ -1107,7 +1237,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 			FROM driver_assignments
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverID,
 	).Scan(
 		&assignmentCountAfter,
 	); err != nil {
@@ -1139,7 +1269,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 			WHERE driver_id = $1
 			  AND unassigned_at IS NULL
 		`,
-		johnUserID,
+		driverID,
 	).Scan(
 		&activeAssignmentCount,
 	); err != nil {
@@ -1179,7 +1309,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverID,
 	).Scan(
 		&persistedAssignmentID,
 		&persistedVehicleID,

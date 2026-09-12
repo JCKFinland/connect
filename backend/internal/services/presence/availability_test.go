@@ -61,48 +61,32 @@ func TestGoOnlineRejectsBusyDriverWithActiveTrip(t *testing.T) {
 	}
 	defer db.Close()
 
-	// ---------------------------------------------------------
-	// 3. Serialize access to John's shared fixture.
-	// ---------------------------------------------------------
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			context.Background(),
 		); err != nil {
 			t.Logf(
-				"release John dispatch fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// 4. Existing controlled fixture IDs.
-	// ---------------------------------------------------------
-
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	// ---------------------------------------------------------
-	// 5. Load John's active vehicle assignment.
-	// ---------------------------------------------------------
+	driverUserID := driverFixture.UserID
 
 	assignmentRepo :=
 		postgresrepo.NewDriverAssignmentRepository(db)
@@ -110,12 +94,12 @@ func TestGoOnlineRejectsBusyDriverWithActiveTrip(t *testing.T) {
 	activeAssignment, err :=
 		assignmentRepo.GetActiveByDriver(
 			ctx,
-			johnUserID,
+			driverUserID,
 		)
 
 	if err != nil {
 		t.Fatalf(
-			"load John's active assignment: %v",
+			"load isolated active assignment: %v",
 			err,
 		)
 	}
@@ -125,155 +109,62 @@ func TestGoOnlineRejectsBusyDriverWithActiveTrip(t *testing.T) {
 		activeAssignment.VehicleID == "" {
 
 		t.Fatal(
-			"John fixture requires an active vehicle assignment",
+			"isolated fixture requires an active vehicle assignment",
 		)
 	}
 
-	// ---------------------------------------------------------
-	// 6. Avoid interfering with a legitimate active trip.
-	// ---------------------------------------------------------
-
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
+	_, err = db.Exec(
 		ctx,
 		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active trip: %v",
-			err,
+		INSERT INTO driver_presence (
+			driver_id,
+			company_id,
+			branch_id,
+			vehicle_id,
+			assignment_id,
+			is_online,
+			availability_status,
+			last_heartbeat_at
 		)
-	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			TRUE,
+			'BUSY',
+			NOW()
 		)
-	}
-
-	// ---------------------------------------------------------
-	// 7. Preserve John's complete presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalAssignmentID       *string
-		originalVehicleID          *string
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalHeartbeat          *time.Time
+	`,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
 	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				assignment_id,
-				vehicle_id,
-				is_online,
-				availability_status,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalAssignmentID,
-		&originalVehicleID,
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalHeartbeat,
-	); err != nil {
+	if err != nil {
 		t.Fatalf(
-			"load original driver presence: %v",
+			"create isolated BUSY driver presence: %v",
 			err,
 		)
 	}
-
-	if originalAssignmentID == nil ||
-		*originalAssignmentID != activeAssignment.ID {
-
-		t.Fatal(
-			"John presence must reference his active assignment",
-		)
-	}
-
-	if originalVehicleID == nil ||
-		*originalVehicleID != activeAssignment.VehicleID {
-
-		t.Fatal(
-			"John presence must reference his assigned vehicle",
-		)
-	}
-
-	// ---------------------------------------------------------
-	// 8. Restore shared presence state when test finishes.
-	// ---------------------------------------------------------
 
 	defer func() {
-		if _, restoreErr := db.Exec(
+		if _, err := db.Exec(
 			context.Background(),
 			`
-				UPDATE driver_presence
-				SET
-					assignment_id = $2,
-					vehicle_id = $3,
-					is_online = $4,
-					availability_status = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalAssignmentID,
-			originalVehicleID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		); restoreErr != nil {
+			DELETE FROM driver_presence
+			WHERE driver_id = $1
+		`,
+			driverUserID,
+		); err != nil {
 			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
+				"cleanup isolated driver presence: %v",
+				err,
 			)
 		}
 	}()
-
-	// ---------------------------------------------------------
-	// 9. Put John into BUSY operational state.
-	// ---------------------------------------------------------
-
-	if _, err := db.Exec(
-		ctx,
-		`
-			UPDATE driver_presence
-			SET
-				is_online = TRUE,
-				availability_status = 'BUSY',
-				last_heartbeat_at = NOW(),
-				updated_at = NOW()
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	); err != nil {
-		t.Fatalf(
-			"prepare BUSY driver presence: %v",
-			err,
-		)
-	}
 
 	// ---------------------------------------------------------
 	// 10. Create disposable ACCEPTED ride request.
@@ -382,7 +273,7 @@ func TestGoOnlineRejectsBusyDriverWithActiveTrip(t *testing.T) {
 		tripID,
 		rideRequestID,
 		customerID,
-		johnUserID,
+		driverUserID,
 		activeAssignment.VehicleID,
 		activeAssignment.CompanyID,
 		activeAssignment.BranchID,
@@ -458,7 +349,7 @@ func TestGoOnlineRejectsBusyDriverWithActiveTrip(t *testing.T) {
 	err = service.GoOnline(
 		ctx,
 		GoOnlineRequest{
-			UserID: johnUserID,
+			UserID: driverUserID,
 		},
 	)
 
@@ -495,7 +386,7 @@ func TestGoOnlineRejectsBusyDriverWithActiveTrip(t *testing.T) {
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&persistedAssignmentID,
 		&persistedVehicleID,
@@ -590,7 +481,7 @@ func TestGoOnlineRejectsBusyDriverWithActiveTrip(t *testing.T) {
 			  AND deleted_at IS NULL
 		`,
 		tripID,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&activeTripCount,
 	); err != nil {
@@ -655,40 +546,30 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 	}
 	defer db.Close()
 
-	// ---------------------------------------------------------
-	// 3. Serialize access to John's shared fixture.
-	// ---------------------------------------------------------
-
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			context.Background(),
 		); err != nil {
 			t.Logf(
-				"release John dispatch fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-	// ---------------------------------------------------------
-	// 4. Load John's authoritative active assignment.
-	// ---------------------------------------------------------
+	driverUserID := driverFixture.UserID
 
 	assignmentRepo :=
 		postgresrepo.NewDriverAssignmentRepository(db)
@@ -696,12 +577,11 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 	activeAssignment, err :=
 		assignmentRepo.GetActiveByDriver(
 			ctx,
-			johnUserID,
+			driverUserID,
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"load John's active assignment: %v",
+			"load isolated active assignment: %v",
 			err,
 		)
 	}
@@ -711,9 +591,59 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 		activeAssignment.VehicleID == "" {
 
 		t.Fatal(
-			"John fixture requires an active vehicle assignment",
+			"isolated fixture requires an active vehicle assignment",
 		)
 	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO driver_presence (
+			driver_id,
+			company_id,
+			branch_id,
+			vehicle_id,
+			assignment_id,
+			is_online,
+			availability_status,
+			last_heartbeat_at
+		)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			TRUE,
+			'AVAILABLE',
+			NOW()
+		)
+	`,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`DELETE FROM driver_presence WHERE driver_id = $1`,
+			driverUserID,
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver presence: %v",
+				err,
+			)
+		}
+	}()
 
 	// ---------------------------------------------------------
 	// 5. GoOnline is only valid when no active trip exists.
@@ -736,7 +666,7 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 				'EXPIRED'
 			  )
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&existingActiveTripCount,
 	); err != nil {
@@ -751,86 +681,6 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 			"John already has an active trip",
 		)
 	}
-
-	// ---------------------------------------------------------
-	// 6. Preserve John's complete presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalCompanyID          string
-		originalBranchID           *string
-		originalAssignmentID       *string
-		originalVehicleID          *string
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				company_id,
-				branch_id,
-				assignment_id,
-				vehicle_id,
-				is_online,
-				availability_status,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalCompanyID,
-		&originalBranchID,
-		&originalAssignmentID,
-		&originalVehicleID,
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence: %v",
-			err,
-		)
-	}
-
-	// ---------------------------------------------------------
-	// 7. Restore John's presence after the test.
-	// ---------------------------------------------------------
-
-	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					company_id = $2,
-					branch_id = $3,
-					assignment_id = $4,
-					vehicle_id = $5,
-					is_online = $6,
-					availability_status = $7,
-					last_heartbeat_at = $8,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalCompanyID,
-			originalBranchID,
-			originalAssignmentID,
-			originalVehicleID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
-		}
-	}()
 
 	// ---------------------------------------------------------
 	// 8. Deliberately make presence stale.
@@ -851,7 +701,7 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 				updated_at = NOW()
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	); err != nil {
 		t.Fatalf(
 			"prepare stale OFFLINE presence: %v",
@@ -882,7 +732,7 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 	err = service.GoOnline(
 		ctx,
 		GoOnlineRequest{
-			UserID: johnUserID,
+			UserID: driverUserID,
 		},
 	)
 
@@ -919,7 +769,7 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&persistedCompanyID,
 		&persistedBranchID,
@@ -1897,41 +1747,30 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 		)
 	}
 	defer db.Close()
-
-	// ---------------------------------------------------------
-	// 3. Serialize access to John's shared fixture.
-	// ---------------------------------------------------------
-
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			context.Background(),
 		); err != nil {
 			t.Logf(
-				"release John dispatch fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-	// ---------------------------------------------------------
-	// 4. Load John's current active assignment.
-	// ---------------------------------------------------------
+	driverUserID := driverFixture.UserID
 
 	assignmentRepo :=
 		postgresrepo.NewDriverAssignmentRepository(db)
@@ -1939,24 +1778,77 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 	activeAssignment, err :=
 		assignmentRepo.GetActiveByDriver(
 			ctx,
-			johnUserID,
+			driverUserID,
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"load John's active assignment: %v",
+			"load isolated active assignment: %v",
 			err,
 		)
 	}
 
 	if activeAssignment == nil ||
-		activeAssignment.ID == "" {
+		activeAssignment.ID == "" ||
+		activeAssignment.VehicleID == "" {
 
 		t.Fatal(
-			"John fixture requires an active assignment",
+			"isolated fixture requires an active vehicle assignment",
 		)
 	}
 
+	// ---------------------------------------------------------
+	// 4. Create isolated driver presence.
+	// ---------------------------------------------------------
+
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO driver_presence (
+			driver_id,
+			company_id,
+			branch_id,
+			vehicle_id,
+			assignment_id,
+			is_online,
+			availability_status,
+			last_heartbeat_at
+		)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			TRUE,
+			'AVAILABLE',
+			NOW()
+		)
+	`,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`DELETE FROM driver_presence WHERE driver_id = $1`,
+			driverUserID,
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver presence: %v",
+				err,
+			)
+		}
+	}()
 	// ---------------------------------------------------------
 	// 5. Do not interfere with an existing active trip.
 	// ---------------------------------------------------------
@@ -1978,7 +1870,7 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 				'EXPIRED'
 			  )
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&existingActiveTripCount,
 	); err != nil {
@@ -1989,13 +1881,14 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 	}
 
 	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
+		t.Fatalf(
+			"isolated driver unexpectedly has %d active trip(s)",
+			existingActiveTripCount,
 		)
 	}
 
 	// ---------------------------------------------------------
-	// 6. Preserve John's presence state.
+	// 6. Preserve isolated driver's presence state.
 	// ---------------------------------------------------------
 
 	var (
@@ -2018,7 +1911,7 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&originalAssignmentID,
 		&originalVehicleID,
@@ -2042,23 +1935,6 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 		if _, restoreErr := db.Exec(
 			restoreCtx,
 			`
-				UPDATE driver_assignments
-				SET
-					unassigned_at = NULL,
-					updated_at = NOW()
-				WHERE id = $1
-			`,
-			activeAssignment.ID,
-		); restoreErr != nil {
-			t.Logf(
-				"restore active assignment: %v",
-				restoreErr,
-			)
-		}
-
-		if _, restoreErr := db.Exec(
-			restoreCtx,
-			`
 				UPDATE driver_presence
 				SET
 					assignment_id = $2,
@@ -2069,7 +1945,7 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 					updated_at = NOW()
 				WHERE driver_id = $1
 			`,
-			johnUserID,
+			driverUserID,
 			originalAssignmentID,
 			originalVehicleID,
 			originalIsOnline,
@@ -2084,7 +1960,7 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 	}()
 
 	// ---------------------------------------------------------
-	// 8. Close John's assignment.
+	// 8. Close the isolated driver's assignment.
 	//
 	// Presence deliberately remains unchanged so we prove that
 	// a stale presence assignment cannot authorize GoOnline().
@@ -2122,7 +1998,7 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 				updated_at = NOW()
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	); err != nil {
 		t.Fatalf(
 			"prepare OFFLINE presence: %v",
@@ -2153,7 +2029,7 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 	err = service.GoOnline(
 		ctx,
 		GoOnlineRequest{
-			UserID: johnUserID,
+			UserID: driverUserID,
 		},
 	)
 
@@ -2189,7 +2065,7 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&persistedAssignmentID,
 		&persistedVehicleID,
@@ -2332,41 +2208,39 @@ func TestGoOnlineRejectsMissingPresenceRow(t *testing.T) {
 	defer db.Close()
 
 	// ---------------------------------------------------------
-	// 3. Serialize access to John's shared fixture.
+	// 3. Create isolated driver fixture.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			context.Background(),
 		); err != nil {
 			t.Logf(
-				"release John dispatch fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+	driverUserID := driverFixture.UserID
 
 	// ---------------------------------------------------------
-	// 4. Confirm John still has an active assignment.
+	// 4. Confirm isolated driver has an active assignment.
 	//
-	// This proves the failure is specifically caused by missing
-	// presence, not by missing assignment.
+	// This proves GoOnline fails because presence is missing,
+	// not because the assignment is missing.
 	// ---------------------------------------------------------
 
 	assignmentRepo :=
@@ -2375,208 +2249,83 @@ func TestGoOnlineRejectsMissingPresenceRow(t *testing.T) {
 	activeAssignment, err :=
 		assignmentRepo.GetActiveByDriver(
 			ctx,
-			johnUserID,
+			driverUserID,
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"load John's active assignment: %v",
+			"load isolated active assignment: %v",
 			err,
 		)
 	}
 
 	if activeAssignment == nil ||
-		activeAssignment.ID == "" {
+		activeAssignment.ID == "" ||
+		activeAssignment.VehicleID == "" {
 
 		t.Fatal(
-			"John fixture requires an active assignment",
+			"isolated fixture requires an active vehicle assignment",
 		)
 	}
 
 	// ---------------------------------------------------------
-	// 5. Avoid interfering with a legitimate active trip.
-	// ---------------------------------------------------------
-
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active trip: %v",
-			err,
-		)
-	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
-		)
-	}
-
-	// ---------------------------------------------------------
-	// 6. Preserve the COMPLETE driver_presence row.
+	// 5. Create an isolated presence row.
 	//
-	// We save every column because this test temporarily deletes
-	// the shared fixture row and must restore it exactly.
+	// The test will deliberately delete this row before calling
+	// GoOnline.
 	// ---------------------------------------------------------
 
-	var (
-		originalDriverID           string
-		originalCompanyID          string
-		originalBranchID           *string
-		originalVehicleID          *string
-		originalAssignmentID       *string
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeading            *float64
-		originalSpeed              *float64
-		originalAccuracy           *float64
-		originalHeartbeat          *time.Time
-		originalCreatedAt          time.Time
-		originalUpdatedAt          time.Time
-	)
-
-	if err := db.QueryRow(
+	_, err = db.Exec(
 		ctx,
 		`
-			SELECT
-				driver_id,
-				company_id,
-				branch_id,
-				vehicle_id,
-				assignment_id,
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				heading,
-				speed,
-				accuracy,
-				last_heartbeat_at,
-				created_at,
-				updated_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalDriverID,
-		&originalCompanyID,
-		&originalBranchID,
-		&originalVehicleID,
-		&originalAssignmentID,
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeading,
-		&originalSpeed,
-		&originalAccuracy,
-		&originalHeartbeat,
-		&originalCreatedAt,
-		&originalUpdatedAt,
-	); err != nil {
+		INSERT INTO driver_presence (
+			driver_id,
+			company_id,
+			branch_id,
+			vehicle_id,
+			assignment_id,
+			is_online,
+			availability_status,
+			last_heartbeat_at
+		)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			TRUE,
+			'AVAILABLE',
+			NOW()
+		)
+	`,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
+	)
+	if err != nil {
 		t.Fatalf(
-			"load original driver presence row: %v",
+			"create isolated driver presence: %v",
 			err,
 		)
 	}
-
-	// ---------------------------------------------------------
-	// 7. Always restore the deleted presence row.
-	// ---------------------------------------------------------
 
 	defer func() {
-		restoreCtx := context.Background()
-
-		if _, restoreErr := db.Exec(
-			restoreCtx,
-			`
-				INSERT INTO driver_presence
-				(
-					driver_id,
-					company_id,
-					branch_id,
-					vehicle_id,
-					assignment_id,
-					is_online,
-					availability_status,
-					latitude,
-					longitude,
-					heading,
-					speed,
-					accuracy,
-					last_heartbeat_at,
-					created_at,
-					updated_at
-				)
-				VALUES
-				(
-					$1,$2,$3,$4,$5,
-					$6,$7,$8,$9,$10,
-					$11,$12,$13,$14,$15
-				)
-				ON CONFLICT (driver_id)
-				DO UPDATE SET
-					company_id = EXCLUDED.company_id,
-					branch_id = EXCLUDED.branch_id,
-					vehicle_id = EXCLUDED.vehicle_id,
-					assignment_id = EXCLUDED.assignment_id,
-					is_online = EXCLUDED.is_online,
-					availability_status = EXCLUDED.availability_status,
-					latitude = EXCLUDED.latitude,
-					longitude = EXCLUDED.longitude,
-					heading = EXCLUDED.heading,
-					speed = EXCLUDED.speed,
-					accuracy = EXCLUDED.accuracy,
-					last_heartbeat_at = EXCLUDED.last_heartbeat_at,
-					created_at = EXCLUDED.created_at,
-					updated_at = EXCLUDED.updated_at
-			`,
-			originalDriverID,
-			originalCompanyID,
-			originalBranchID,
-			originalVehicleID,
-			originalAssignmentID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeading,
-			originalSpeed,
-			originalAccuracy,
-			originalHeartbeat,
-			originalCreatedAt,
-			originalUpdatedAt,
-		); restoreErr != nil {
+		if _, err := db.Exec(
+			context.Background(),
+			`DELETE FROM driver_presence WHERE driver_id = $1`,
+			driverUserID,
+		); err != nil {
 			t.Logf(
-				"restore deleted driver presence row: %v",
-				restoreErr,
+				"cleanup isolated driver presence: %v",
+				err,
 			)
 		}
 	}()
 
 	// ---------------------------------------------------------
-	// 8. Temporarily delete John's presence row.
+	// 6. Delete the isolated driver's presence row.
 	// ---------------------------------------------------------
 
 	result, err := db.Exec(
@@ -2585,7 +2334,7 @@ func TestGoOnlineRejectsMissingPresenceRow(t *testing.T) {
 			DELETE FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	)
 
 	if err != nil {
@@ -2625,7 +2374,7 @@ func TestGoOnlineRejectsMissingPresenceRow(t *testing.T) {
 	err = service.GoOnline(
 		ctx,
 		GoOnlineRequest{
-			UserID: johnUserID,
+			UserID: driverUserID,
 		},
 	)
 
@@ -2652,7 +2401,7 @@ func TestGoOnlineRejectsMissingPresenceRow(t *testing.T) {
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&presenceCount,
 	); err != nil {

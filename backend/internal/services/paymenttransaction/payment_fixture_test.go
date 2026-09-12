@@ -55,62 +55,27 @@ func newPaymentTransactionTestFixture(
 		t.Fatalf("connect database: %v", err)
 	}
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
 	if err != nil {
 		db.Close()
 
 		t.Fatalf(
-			"acquire fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-		driverID   = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	var (
-		companyID string
-		branchID  string
-		fleetID   string
-		vehicleID string
-	)
-
-	err = db.QueryRow(
-		ctx,
-		`
-			SELECT
-				company_id,
-				branch_id,
-				fleet_id,
-				vehicle_id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND unassigned_at IS NULL
-			LIMIT 1
-		`,
-		driverID,
-	).Scan(
-		&companyID,
-		&branchID,
-		&fleetID,
-		&vehicleID,
-	)
-	if err != nil {
-		_ = releaseFixtureLock(ctx)
-		db.Close()
-
-		t.Fatalf(
-			"resolve active driver assignment: %v",
-			err,
-		)
-	}
+	driverID := driverFixture.UserID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
+	vehicleID := driverFixture.VehicleID
 
 	now := time.Now().UTC()
 
@@ -161,7 +126,7 @@ func newPaymentTransactionTestFixture(
 		now.Add(30*time.Minute),
 	)
 	if err != nil {
-		_ = releaseFixtureLock(ctx)
+		_ = cleanupDriverFixture(ctx)
 		db.Close()
 
 		t.Fatalf(
@@ -221,7 +186,7 @@ func newPaymentTransactionTestFixture(
 		now,
 	)
 	if err != nil {
-		_ = releaseFixtureLock(ctx)
+		_ = cleanupDriverFixture(ctx)
 		db.Close()
 
 		t.Fatalf(
@@ -256,7 +221,7 @@ func newPaymentTransactionTestFixture(
 		now,
 	)
 	if err != nil {
-		_ = releaseFixtureLock(ctx)
+		_ = cleanupDriverFixture(ctx)
 		db.Close()
 
 		t.Fatalf(
@@ -275,7 +240,7 @@ func newPaymentTransactionTestFixture(
 			"CARD",
 		)
 	if err != nil {
-		_ = releaseFixtureLock(ctx)
+		_ = cleanupDriverFixture(ctx)
 		db.Close()
 
 		t.Fatalf(
@@ -330,11 +295,11 @@ func newPaymentTransactionTestFixture(
 			)
 		}
 
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			cleanupCtx,
 		); err != nil {
 			t.Logf(
-				"release payment operation fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}

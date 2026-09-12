@@ -50,69 +50,36 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 	// Build a self-contained completed-trip, fare, and payment fixture.
 	// The test verifies transactional reconciliation between the provider
 	// transaction and the authoritative aggregate payment.
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
-
 	if err != nil {
 		t.Fatalf(
-			"acquire fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			context.Background(),
 		); err != nil {
 			t.Logf(
-				"release fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-		driverID   = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	var (
-		companyID string
-		branchID  string
-		fleetID   string
-		vehicleID string
-	)
-
-	err = db.QueryRow(
-		ctx,
-		`
-			SELECT
-				company_id,
-				branch_id,
-				fleet_id,
-				vehicle_id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND unassigned_at IS NULL
-			LIMIT 1
-		`,
-		driverID,
-	).Scan(
-		&companyID,
-		&branchID,
-		&fleetID,
-		&vehicleID,
-	)
-	if err != nil {
-		t.Fatalf(
-			"resolve active driver assignment: %v",
-			err,
-		)
-	}
+	driverID := driverFixture.UserID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
+	vehicleID := driverFixture.VehicleID
 
 	now := time.Now().UTC()
 

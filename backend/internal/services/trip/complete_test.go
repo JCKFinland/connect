@@ -68,48 +68,41 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	defer db.Close()
 
 	// ---------------------------------------------------------
-	// 3. Serialize John's shared integration fixture.
+	// 3. Create an isolated driver fixture.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
 	if err != nil {
 		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			context.Background(),
 		); err != nil {
 			t.Logf(
-				"release John dispatch fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// 4. Controlled fixture IDs.
-	//
-	// trips.driver_id and driver_presence.driver_id use users.id.
-	// ---------------------------------------------------------
+	driverUserID := driverFixture.UserID
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
+	userRoleRepo :=
+		repository.NewUserRoleRepository(db)
 
 	// ---------------------------------------------------------
-	// 5. Add the role only when missing and remove only the
-	// assignment created by this test during cleanup.
+	// 5. Ensure the isolated user has the DRIVER role.
 	// ---------------------------------------------------------
 
 	var driverRoleID string
@@ -117,10 +110,11 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	err = db.QueryRow(
 		ctx,
 		`
-		SELECT id
-		FROM roles
-		WHERE name = 'DRIVER'
-	`,
+				SELECT id
+				FROM roles
+				WHERE name = 'DRIVER'
+				LIMIT 1
+			`,
 	).Scan(
 		&driverRoleID,
 	)
@@ -131,60 +125,30 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 		)
 	}
 
-	commandTag, err := db.Exec(
+	_, err = db.Exec(
 		ctx,
 		`
-		INSERT INTO user_roles (
-			user_id,
-			role_id
-		)
-		VALUES ($1, $2)
-		ON CONFLICT (user_id, role_id) DO NOTHING
-	`,
-		johnUserID,
+				INSERT INTO user_roles
+				(
+					user_id,
+					role_id
+				)
+				VALUES
+				(
+					$1,
+					$2
+				)
+				ON CONFLICT DO NOTHING
+			`,
+		driverUserID,
 		driverRoleID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"ensure John DRIVER role: %v",
+			"grant DRIVER role to isolated user: %v",
 			err,
 		)
 	}
-
-	driverRoleAddedByTest :=
-		commandTag.RowsAffected() == 1
-
-	if driverRoleAddedByTest {
-		defer func() {
-			cleanupCtx := context.Background()
-
-			if _, cleanupErr := db.Exec(
-				cleanupCtx,
-				`
-				DELETE FROM user_roles
-				WHERE user_id = $1
-				  AND role_id = $2
-			`,
-				johnUserID,
-				driverRoleID,
-			); cleanupErr != nil {
-				t.Logf(
-					"cleanup temporary DRIVER role: %v",
-					cleanupErr,
-				)
-			}
-		}()
-	}
-
-	userRoleRepo :=
-		repository.NewUserRoleRepository(db)
-
-	// ---------------------------------------------------------
-	// 6. Resolve John's current active assignment.
-	//
-	// Do not hardcode vehicle/fleet ownership because other
-	// integration tests may legitimately evolve the fixture.
-	// ---------------------------------------------------------
 
 	var (
 		vehicleID string
@@ -207,7 +171,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 			ORDER BY assigned_at DESC
 			LIMIT 1
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&vehicleID,
 		&companyID,
@@ -216,13 +180,13 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	)
 	if err != nil {
 		t.Fatalf(
-			"resolve John's active assignment: %v",
+			"resolve isolated driver's active assignment: %v",
 			err,
 		)
 	}
 
 	// ---------------------------------------------------------
-	// 7. Avoid interfering with a genuine active trip.
+	// 6. Assert the isolated driver starts without an active trip.
 	// ---------------------------------------------------------
 
 	var existingActiveTripCount int
@@ -242,106 +206,77 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 				'EXPIRED'
 			  )
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&existingActiveTripCount,
 	)
 	if err != nil {
 		t.Fatalf(
-			"check existing active trip: %v",
+			"check isolated driver's active trips: %v",
 			err,
 		)
 	}
 
 	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
-		)
-	}
-
-	// ---------------------------------------------------------
-	// 8. Preserve John's presence.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalHeartbeat          *time.Time
-	)
-
-	err = db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalHeartbeat,
-	)
-	if err != nil {
 		t.Fatalf(
-			"load original driver presence: %v",
-			err,
+			"isolated driver unexpectedly has %d active trip(s)",
+			existingActiveTripCount,
 		)
 	}
 
-	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					last_heartbeat_at = $4,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
-		}
-	}()
-
 	// ---------------------------------------------------------
-	// 9. Put John into the BUSY state expected during a trip.
+	// 7. Create BUSY online presence for the isolated driver.
 	// ---------------------------------------------------------
 
 	_, err = db.Exec(
 		ctx,
 		`
-			UPDATE driver_presence
-			SET
-				is_online = TRUE,
-				availability_status = 'BUSY',
-				last_heartbeat_at = NOW(),
-				updated_at = NOW()
-			WHERE driver_id = $1
+			INSERT INTO driver_presence
+			(
+				driver_id,
+				company_id,
+				branch_id,
+				vehicle_id,
+				assignment_id,
+				is_online,
+				availability_status,
+				last_heartbeat_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1, $2, $3, $4, $5,
+				TRUE, 'BUSY', NOW(), NOW(), NOW()
+			)
 		`,
-		johnUserID,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"prepare BUSY driver presence: %v",
+			"create isolated BUSY driver presence: %v",
 			err,
 		)
 	}
 
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`DELETE FROM driver_presence WHERE driver_id = $1`,
+			driverUserID,
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver presence: %v",
+				err,
+			)
+		}
+	}()
 	// ---------------------------------------------------------
-	// 10. Create disposable pricing authority, ride, and trip.
+	// 8. Create disposable pricing authority, ride, and trip.
 	// ---------------------------------------------------------
 
 	serviceCategoryID := uuid.NewString()
@@ -552,7 +487,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 		tripID,
 		rideRequestID,
 		customerID,
-		johnUserID,
+		driverUserID,
 		vehicleID,
 		companyID,
 		branchID,
@@ -597,7 +532,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	`,
 		uuid.NewString(),
 		tripID,
-		johnUserID,
+		driverUserID,
 		60.1700,
 		24.9300,
 		5.0,
@@ -755,7 +690,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	completedFare, err := service.CompleteTrip(
 		ctx,
 		tripID,
-		johnUserID,
+		driverUserID,
 	)
 
 	if err == nil {
@@ -905,7 +840,7 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&isOnline,
 		&availabilityStatus,
@@ -1045,47 +980,39 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 	defer db.Close()
-
 	// ---------------------------------------------------------
-	// 3. Serialize John's shared integration fixture.
+	// 3. Create an isolated driver fixture.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
 			ctx,
 			db,
-			"dispatch-fixture:john",
 		)
 	if err != nil {
 		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupDriverFixture(
 			context.Background(),
 		); err != nil {
 			t.Logf(
-				"release John dispatch fixture lock: %v",
+				"cleanup isolated driver fixture: %v",
 				err,
 			)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
+	driverUserID := driverFixture.UserID
 
 	// ---------------------------------------------------------
-	// 4. Ensure John has DRIVER authorization for this test.
-	//
-	// The shared fixture may not permanently have DRIVER.
-	// Add the role only when missing and remove only the
-	// assignment created by this test during cleanup.
+	// 4. Ensure the isolated user has DRIVER authorization.
 	// ---------------------------------------------------------
 
 	var driverRoleID string
@@ -1093,10 +1020,11 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	err = db.QueryRow(
 		ctx,
 		`
-		SELECT id
-		FROM roles
-		WHERE name = 'DRIVER'
-	`,
+			SELECT id
+			FROM roles
+			WHERE name = 'DRIVER'
+			LIMIT 1
+		`,
 	).Scan(
 		&driverRoleID,
 	)
@@ -1107,56 +1035,36 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
-	commandTag, err := db.Exec(
+	_, err = db.Exec(
 		ctx,
 		`
-		INSERT INTO user_roles (
-			user_id,
-			role_id
-		)
-		VALUES ($1, $2)
-		ON CONFLICT (user_id, role_id) DO NOTHING
-	`,
-		johnUserID,
+			INSERT INTO user_roles
+			(
+				user_id,
+				role_id
+			)
+			VALUES
+			(
+				$1,
+				$2
+			)
+			ON CONFLICT DO NOTHING
+		`,
+		driverUserID,
 		driverRoleID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"ensure John DRIVER role: %v",
+			"grant DRIVER role to isolated user: %v",
 			err,
 		)
-	}
-
-	driverRoleAddedByTest :=
-		commandTag.RowsAffected() == 1
-
-	if driverRoleAddedByTest {
-		defer func() {
-			cleanupCtx := context.Background()
-
-			if _, cleanupErr := db.Exec(
-				cleanupCtx,
-				`
-				DELETE FROM user_roles
-				WHERE user_id = $1
-				  AND role_id = $2
-			`,
-				johnUserID,
-				driverRoleID,
-			); cleanupErr != nil {
-				t.Logf(
-					"cleanup temporary DRIVER role: %v",
-					cleanupErr,
-				)
-			}
-		}()
 	}
 
 	userRoleRepo :=
 		repository.NewUserRoleRepository(db)
 
 	// ---------------------------------------------------------
-	// 5. Resolve current active assignment.
+	// 5. Resolve the isolated driver's active assignment.
 	// ---------------------------------------------------------
 
 	var (
@@ -1169,18 +1077,18 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	err = db.QueryRow(
 		ctx,
 		`
-		SELECT
-        vehicle_id,
-        company_id,
-        branch_id,
-        fleet_id
-        FROM driver_assignments
-        WHERE driver_id = $1
-        AND unassigned_at IS NULL
-        ORDER BY assigned_at DESC
-        LIMIT 1
+			SELECT
+				vehicle_id,
+				company_id,
+				branch_id,
+				fleet_id
+			FROM driver_assignments
+			WHERE driver_id = $1
+			  AND unassigned_at IS NULL
+			ORDER BY assigned_at DESC
+			LIMIT 1
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&vehicleID,
 		&companyID,
@@ -1189,13 +1097,13 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	)
 	if err != nil {
 		t.Fatalf(
-			"resolve John's active assignment: %v",
+			"resolve isolated driver's active assignment: %v",
 			err,
 		)
 	}
 
 	// ---------------------------------------------------------
-	// 6. Do not interfere with a genuine active trip.
+	// 6. Assert the isolated driver starts without an active trip.
 	// ---------------------------------------------------------
 
 	var existingActiveTripCount int
@@ -1215,104 +1123,75 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 				'EXPIRED'
 			  )
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&existingActiveTripCount,
 	)
 	if err != nil {
 		t.Fatalf(
-			"check existing active trip: %v",
+			"check isolated driver's active trips: %v",
 			err,
 		)
 	}
 
 	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
-		)
-	}
-
-	// ---------------------------------------------------------
-	// 7. Preserve presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalHeartbeat          *time.Time
-	)
-
-	err = db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalHeartbeat,
-	)
-	if err != nil {
 		t.Fatalf(
-			"load original driver presence: %v",
-			err,
+			"isolated driver unexpectedly has %d active trip(s)",
+			existingActiveTripCount,
 		)
 	}
 
-	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					last_heartbeat_at = $4,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
-		}
-	}()
-
 	// ---------------------------------------------------------
-	// 8. Driver is BUSY while carrying the passenger.
+	// 7. Create BUSY online presence for the isolated driver.
 	// ---------------------------------------------------------
 
 	_, err = db.Exec(
 		ctx,
 		`
-			UPDATE driver_presence
-			SET
-				is_online = TRUE,
-				availability_status = 'BUSY',
-				last_heartbeat_at = NOW(),
-				updated_at = NOW()
-			WHERE driver_id = $1
+			INSERT INTO driver_presence
+			(
+				driver_id,
+				company_id,
+				branch_id,
+				vehicle_id,
+				assignment_id,
+				is_online,
+				availability_status,
+				last_heartbeat_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1, $2, $3, $4, $5,
+				TRUE, 'BUSY', NOW(), NOW(), NOW()
+			)
 		`,
-		johnUserID,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
 	)
 	if err != nil {
 		t.Fatalf(
-			"prepare BUSY driver presence: %v",
+			"create isolated BUSY driver presence: %v",
 			err,
 		)
 	}
 
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`DELETE FROM driver_presence WHERE driver_id = $1`,
+			driverUserID,
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver presence: %v",
+				err,
+			)
+		}
+	}()
 	// ---------------------------------------------------------
 	// 9. Create disposable pricing authority, ride, and trip.
 	// ---------------------------------------------------------
@@ -1520,7 +1399,7 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		tripID,
 		rideRequestID,
 		customerID,
-		johnUserID,
+		driverUserID,
 		vehicleID,
 		companyID,
 		branchID,
@@ -1568,7 +1447,7 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	`,
 		uuid.NewString(),
 		tripID,
-		johnUserID,
+		driverUserID,
 		60.170000,
 		24.930000,
 		5.0,
@@ -1679,7 +1558,7 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	completedFare, err := service.CompleteTrip(
 		ctx,
 		tripID,
-		johnUserID,
+		driverUserID,
 	)
 	if err != nil {
 		t.Fatalf(
@@ -2138,7 +2017,7 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
-		johnUserID,
+		driverUserID,
 	).Scan(
 		&isOnline,
 		&availabilityStatus,

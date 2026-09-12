@@ -93,59 +93,41 @@ func TestTripMeterMeasurementRepositoryCreateAndGetByTripID(
 	}()
 
 	// ---------------------------------------------------------
-	// 4. Controlled shared fixture IDs.
+	// 4. Create an isolated driver fixture.
 	//
 	// trips.driver_id references users.id.
 	// ---------------------------------------------------------
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	// ---------------------------------------------------------
-	// 5. Resolve John's current active assignment.
-	//
-	// Do not hardcode vehicle/company/branch/fleet because the
-	// shared integration fixture may legitimately evolve.
-	// ---------------------------------------------------------
-
-	var (
-		vehicleID string
-		companyID string
-		branchID  string
-		fleetID   string
-	)
-
-	err = db.QueryRow(
-		ctx,
-		`
-			SELECT
-				vehicle_id,
-				company_id,
-				branch_id,
-				fleet_id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND unassigned_at IS NULL
-			ORDER BY assigned_at DESC
-			LIMIT 1
-		`,
-		johnUserID,
-	).Scan(
-		&vehicleID,
-		&companyID,
-		&branchID,
-		&fleetID,
-	)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
 	if err != nil {
 		t.Fatalf(
-			"resolve John's active assignment: %v",
+			"create isolated driver fixture: %v",
 			err,
 		)
 	}
 
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	driverID := driverFixture.UserID
+	vehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
 	// ---------------------------------------------------------
 	// 6. Create disposable service category and pricing profile.
 	// ---------------------------------------------------------
@@ -355,7 +337,7 @@ func TestTripMeterMeasurementRepositoryCreateAndGetByTripID(
 		tripID,
 		rideRequestID,
 		customerID,
-		johnUserID,
+		driverID,
 		vehicleID,
 		companyID,
 		branchID,
