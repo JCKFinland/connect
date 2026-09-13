@@ -10,16 +10,30 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/realtime"
 	"github.com/JCKFinland/connect/backend/internal/services/trip"
 )
 
 type TripHandler struct {
 	service trip.Service
+	broker  *realtime.Broker
 }
 
-func NewTripHandler(service trip.Service) *TripHandler {
+func NewTripHandler(
+	service trip.Service,
+) *TripHandler {
 	return &TripHandler{
 		service: service,
+	}
+}
+
+func NewTripHandlerWithRealtime(
+	service trip.Service,
+	broker *realtime.Broker,
+) *TripHandler {
+	return &TripHandler{
+		service: service,
+		broker:  broker,
 	}
 }
 

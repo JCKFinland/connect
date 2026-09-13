@@ -25,6 +25,7 @@ func RegisterRoutes(
 	driverHandler *DriverHandler,
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 	tripHandler *TripHandler,
+	tripStreamHandler *TripStreamHandler,
 	paymentHandler *PaymentHandler,
 	paymentTransactionHandler *PaymentTransactionHandler,
 	paymentExecutionHandler *PaymentExecutionHandler,
@@ -251,6 +252,11 @@ func RegisterRoutes(
 			trips.GET(
 				"/:id/locations",
 				tripHandler.ListTripLocations,
+			)
+
+			trips.GET(
+				"/:id/stream",
+				tripStreamHandler.Stream,
 			)
 
 			trips.POST(

@@ -14,6 +14,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/middleware"
+	"github.com/JCKFinland/connect/backend/internal/realtime"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
@@ -410,7 +411,18 @@ func main() {
 		api.NewDriverVehicleAssignmentHandler(
 			driverVehicleAssignmentService,
 		)
-	tripHandler := api.NewTripHandler(tripService)
+
+	realtimeBroker := realtime.NewBroker()
+
+	tripStreamHandler := api.NewTripStreamHandler(
+		tripService,
+		realtimeBroker,
+	)
+	tripHandler := api.NewTripHandlerWithRealtime(
+		tripService,
+		realtimeBroker,
+	)
+
 	paymentHandler := api.NewPaymentHandler(paymentService)
 
 	rideRequestHandler := api.NewRideRequestHandler(
@@ -442,6 +454,7 @@ func main() {
 		driverHandler,
 		driverVehicleAssignmentHandler,
 		tripHandler,
+		tripStreamHandler,
 		paymentHandler,
 		paymentTransactionHandler,
 		paymentExecutionHandler,

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/JCKFinland/connect/backend/internal/middleware"
+	"github.com/JCKFinland/connect/backend/internal/realtime"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	"github.com/JCKFinland/connect/backend/internal/services/trip"
 )
@@ -25,9 +26,9 @@ type recordTripLocationRequest struct {
 
 // RecordTripLocation handles POST /api/v1/trips/:id/locations.
 func (h *TripHandler) RecordTripLocation(c *gin.Context) {
-	id := c.Param("id")
+	tripID := c.Param("id")
 
-	if id == "" {
+	if tripID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": "Trip ID is required",
@@ -55,11 +56,10 @@ func (h *TripHandler) RecordTripLocation(c *gin.Context) {
 		return
 	}
 
-	// Latitude and longitude are pointers here deliberately.
+	// Latitude and longitude are pointers deliberately.
 	//
-	// A value of 0 is a valid coordinate, so the HTTP layer must
-	// distinguish a missing JSON field from an explicitly supplied
-	// zero value.
+	// Zero is a valid coordinate, so the HTTP layer must distinguish
+	// an omitted JSON field from an explicitly supplied zero value.
 	if req.Latitude == nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -94,7 +94,7 @@ func (h *TripHandler) RecordTripLocation(c *gin.Context) {
 
 	location, err := h.service.RecordTripLocation(
 		c.Request.Context(),
-		id,
+		tripID,
 		user.ID,
 		trip.RecordLocationRequest{
 			Latitude:       *req.Latitude,
@@ -168,6 +168,23 @@ func (h *TripHandler) RecordTripLocation(c *gin.Context) {
 		}
 	}
 
+	// Realtime notification is deliberately published only after the
+	// trip service has returned successfully. RecordTripLocation returns
+	// only after its database transaction has committed, so customers
+	// cannot receive a GPS event that was never durably persisted.
+	//
+	// Realtime delivery is best-effort. PostgreSQL remains CONNECT's
+	// authoritative source of trip-location evidence.
+	if h.broker != nil {
+		h.broker.Publish(
+			"trip:"+tripID,
+			realtime.Event{
+				Type: "trip.location",
+				Data: location,
+			},
+		)
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"message": "Trip location recorded successfully",
@@ -202,34 +219,35 @@ func (h *TripHandler) ListTripLocations(c *gin.Context) {
 		user.ID,
 	)
 	if err != nil {
-		if errors.Is(
+		switch {
+		case errors.Is(
 			err,
 			trip.ErrTripAccessDenied,
-		) {
+		):
 			c.JSON(http.StatusForbidden, gin.H{
 				"success": false,
 				"message": "You are not authorized to view locations for this trip",
 			})
 			return
-		}
 
-		if errors.Is(
+		case errors.Is(
 			err,
 			repository.ErrNotFound,
-		) {
+		):
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
 				"message": "Trip not found",
 			})
 			return
-		}
 
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to retrieve trip locations",
-			"error":   err.Error(),
-		})
-		return
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "Failed to retrieve trip locations",
+				"error":   err.Error(),
+			})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
