@@ -195,10 +195,17 @@ func RegisterRoutes(
 
 			drivers.DELETE("/:id", driverHandler.Delete)
 
+			// Returns the authenticated driver's current pending dispatch offer.
+			drivers.GET(
+				"/dispatch-offers/pending",
+				dispatchHandler.GetPendingOffer,
+			)
+
 			drivers.POST(
 				"/dispatch-offers/:offer_id/accept",
 				dispatchHandler.AcceptOffer,
 			)
+
 			drivers.POST(
 				"/dispatch-offers/:offer_id/reject",
 				dispatchHandler.RejectOffer,

@@ -168,8 +168,10 @@ func (r *DispatchOfferRepository) GetPendingByDriver(
 			updated_at
 		FROM dispatch_offers
 		WHERE driver_id = $1
-		  AND status = 'PENDING'
-		LIMIT 1
+          AND status = 'PENDING'
+          AND expires_at > NOW()
+        ORDER BY offered_at DESC
+        LIMIT 1
 	`
 
 	return r.getOne(

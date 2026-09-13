@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/JCKFinland/connect/backend/internal/middleware"
@@ -70,6 +71,61 @@ func (h *DispatchHandler) DispatchRide(
 	response.OK(
 		c,
 		"Ride offer created successfully",
+		offer,
+	)
+}
+
+// GetPendingOffer returns the authenticated driver's
+// currently active PENDING dispatch offer.
+func (h *DispatchHandler) GetPendingOffer(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(
+			c,
+			"authenticated user not found",
+		)
+		return
+	}
+
+	offer, err := h.service.GetPendingOfferAuthorized(
+		c.Request.Context(),
+		user.ID,
+	)
+	if err != nil {
+		if errors.Is(
+			err,
+			dispatch.ErrDispatchOfferAccessDenied,
+		) {
+			response.Forbidden(
+				c,
+				"You are not authorized to access driver dispatch offers",
+			)
+			return
+		}
+
+		if errors.Is(
+			err,
+			dispatch.ErrPendingDispatchOfferNotFound,
+		) {
+			response.NotFound(
+				c,
+				"No pending dispatch offer found",
+			)
+			return
+		}
+
+		response.BadRequest(
+			c,
+			err.Error(),
+		)
+		return
+	}
+
+	response.OK(
+		c,
+		"Pending dispatch offer retrieved successfully",
 		offer,
 	)
 }
