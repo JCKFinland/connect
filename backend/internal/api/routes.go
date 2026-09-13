@@ -247,12 +247,27 @@ func RegisterRoutes(
 			trips.POST("/:id/complete", tripHandler.Complete)
 			trips.POST("/:id/assign", tripHandler.AssignDriver)
 			trips.GET("/:id/events", tripHandler.ListTripEvents)
-			trips.POST("/:id/locations", tripHandler.RecordTripLocation)
 
-			trips.POST("/:id/payments", paymentHandler.CreateForCompletedTrip)
-			trips.GET("/:id/payment", paymentHandler.GetTripPayment)
+			trips.GET(
+				"/:id/locations",
+				tripHandler.ListTripLocations,
+			)
+
+			trips.POST(
+				"/:id/locations",
+				tripHandler.RecordTripLocation,
+			)
+
+			trips.POST(
+				"/:id/payments",
+				paymentHandler.CreateForCompletedTrip,
+			)
+
+			trips.GET(
+				"/:id/payment",
+				paymentHandler.GetTripPayment,
+			)
 		}
-
 		// ---------------------------------------------------
 		// Payment Routes (/api/v1/payments/*)
 		// ---------------------------------------------------

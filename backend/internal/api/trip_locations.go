@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/JCKFinland/connect/backend/internal/middleware"
+	"github.com/JCKFinland/connect/backend/internal/repository"
 	"github.com/JCKFinland/connect/backend/internal/services/trip"
 )
 
@@ -171,5 +172,68 @@ func (h *TripHandler) RecordTripLocation(c *gin.Context) {
 		"success": true,
 		"message": "Trip location recorded successfully",
 		"data":    location,
+	})
+}
+
+// ListTripLocations handles GET /api/v1/trips/:id/locations.
+func (h *TripHandler) ListTripLocations(c *gin.Context) {
+	tripID := c.Param("id")
+
+	if tripID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Trip ID is required",
+		})
+		return
+	}
+
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
+	locations, err := h.service.ListTripLocations(
+		c.Request.Context(),
+		tripID,
+		user.ID,
+	)
+	if err != nil {
+		if errors.Is(
+			err,
+			trip.ErrTripAccessDenied,
+		) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to view locations for this trip",
+			})
+			return
+		}
+
+		if errors.Is(
+			err,
+			repository.ErrNotFound,
+		) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "Trip not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "Failed to retrieve trip locations",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    locations,
 	})
 }

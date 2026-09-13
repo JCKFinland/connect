@@ -118,6 +118,12 @@ type Service interface {
 		actorUserID string,
 		req RecordLocationRequest,
 	) (*models.TripLocation, error)
+
+	ListTripLocations(
+		ctx context.Context,
+		tripID string,
+		userID string,
+	) ([]*models.TripLocation, error)
 }
 
 // Dependencies contains the resources required by the trip service.
