@@ -2,27 +2,77 @@ package api
 
 import (
 	"errors"
+	"net/http"
+	"time"
 
 	// Uses the Gin web framework to process HTTP contexts, headers, and payloads.
 	"github.com/gin-gonic/gin"
 
 	// Imports database core error types to translate database outcomes into client codes.
+	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	authservice "github.com/JCKFinland/connect/backend/internal/services/auth"
 	"github.com/JCKFinland/connect/backend/pkg/response"
 )
 
+const (
+	refreshTokenCookieName = "connect_refresh_token"
+	refreshTokenCookiePath = "/api/v1/auth"
+)
+
 // AuthHandler bundles the endpoints required to securely log users and drivers in or out.
 type AuthHandler struct {
-	// Points directly to the business logic layer responsible for crypto and data handling.
 	service *authservice.AuthService
+	cfg     *config.Config
 }
 
 // NewAuthHandler acts as the constructor function invoked inside main.go.
-func NewAuthHandler(service *authservice.AuthService) *AuthHandler {
+func NewAuthHandler(
+	service *authservice.AuthService,
+	cfg *config.Config,
+) *AuthHandler {
 	return &AuthHandler{
 		service: service,
+		cfg:     cfg,
 	}
+}
+
+func (h *AuthHandler) refreshCookieSecure() bool {
+	return h.cfg != nil &&
+		h.cfg.App.Env != "development"
+}
+
+func (h *AuthHandler) setRefreshTokenCookie(
+	c *gin.Context,
+	token string,
+) {
+	duration := h.cfg.JWT.RefreshTokenDuration
+
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     refreshTokenCookieName,
+		Value:    token,
+		Path:     refreshTokenCookiePath,
+		MaxAge:   int(duration.Seconds()),
+		Expires:  time.Now().UTC().Add(duration),
+		HttpOnly: true,
+		Secure:   h.refreshCookieSecure(),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *AuthHandler) clearRefreshTokenCookie(
+	c *gin.Context,
+) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     refreshTokenCookieName,
+		Value:    "",
+		Path:     refreshTokenCookiePath,
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0).UTC(),
+		HttpOnly: true,
+		Secure:   h.refreshCookieSecure(),
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 // Register processes requests from new passengers or drivers trying to sign up.
@@ -95,22 +145,34 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// Returns an HTTP 200 OK code along with the fresh Access Token and Refresh Token.
+	h.setRefreshTokenCookie(
+		c,
+		result.RefreshToken,
+	)
+
 	response.OK(
 		c,
 		"Login successful",
-		result,
+		result.Public(),
 	)
 }
 
 // Refresh handles token rotation when the user's short-lived Access Token expires.
 func (h *AuthHandler) Refresh(c *gin.Context) {
 
-	var req authservice.RefreshTokenRequest
-
-	// Captures the current active refresh token from the request body.
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body")
+	refreshToken, err := c.Cookie(
+		refreshTokenCookieName,
+	)
+	if err != nil {
+		response.Unauthorized(
+			c,
+			"Refresh token is required",
+		)
 		return
+	}
+
+	req := authservice.RefreshTokenRequest{
+		RefreshToken: refreshToken,
 	}
 
 	// Validates the old refresh token and generates a brand new token set.
@@ -135,29 +197,51 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	}
 
 	// Returns an HTTP 200 OK status containing the new rotated credentials.
+	h.setRefreshTokenCookie(
+		c,
+		result.RefreshToken,
+	)
+
 	response.OK(
 		c,
 		"Token refreshed successfully",
-		result,
+		result.Public(),
 	)
 }
 
 // Logout terminates user sessions safely.
 func (h *AuthHandler) Logout(c *gin.Context) {
 
-	var req authservice.RefreshTokenRequest
+	refreshToken, err := c.Cookie(
+		refreshTokenCookieName,
+	)
+	if err != nil {
+		h.clearRefreshTokenCookie(c)
 
-	// Captures the targeted refresh token to terminate it.
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body")
+		response.OK(
+			c,
+			"Logout successful",
+			nil,
+		)
+
 		return
+	}
+
+	req := authservice.RefreshTokenRequest{
+		RefreshToken: refreshToken,
 	}
 
 	// Drops or invalidates the token record from the persistent database.
-	if err := h.service.Logout(c.Request.Context(), req); err != nil {
+	if err := h.service.Logout(
+		c.Request.Context(),
+		req,
+	); err != nil {
 		response.InternalServerError(c)
 		return
 	}
+
+	// Clear the browser refresh-token cookie after revocation.
+	h.clearRefreshTokenCookie(c)
 
 	// Returns an HTTP 200 OK status confirming complete session destruction.
 	response.OK(

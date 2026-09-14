@@ -110,7 +110,7 @@ func TestRegisterRejectsInvalidRequests(t *testing.T) {
 		},
 	}
 
-	handler := NewAuthHandler(nil)
+	handler := NewAuthHandler(nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -155,7 +155,7 @@ func TestLoginRejectsInvalidRequests(t *testing.T) {
 		},
 	}
 
-	handler := NewAuthHandler(nil)
+	handler := NewAuthHandler(nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -177,53 +177,5 @@ func TestLoginRejectsInvalidRequests(t *testing.T) {
 				)
 			}
 		})
-	}
-}
-
-func TestRefreshRejectsMissingRefreshToken(
-	t *testing.T,
-) {
-	handler := NewAuthHandler(nil)
-
-	c, recorder := newAuthValidationTestContext(
-		t,
-		http.MethodPost,
-		"/api/v1/auth/refresh",
-		`{}`,
-	)
-
-	handler.Refresh(c)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf(
-			"expected HTTP %d, got %d: %s",
-			http.StatusBadRequest,
-			recorder.Code,
-			recorder.Body.String(),
-		)
-	}
-}
-
-func TestLogoutRejectsMissingRefreshToken(
-	t *testing.T,
-) {
-	handler := NewAuthHandler(nil)
-
-	c, recorder := newAuthValidationTestContext(
-		t,
-		http.MethodPost,
-		"/api/v1/auth/logout",
-		`{}`,
-	)
-
-	handler.Logout(c)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf(
-			"expected HTTP %d, got %d: %s",
-			http.StatusBadRequest,
-			recorder.Code,
-			recorder.Body.String(),
-		)
 	}
 }

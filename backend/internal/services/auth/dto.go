@@ -36,6 +36,25 @@ type AuthResponse struct {
 	ExpiresIn int64 `json:"expires_in"`
 }
 
+// PublicAuthResponse contains authentication data safe to expose
+// to browser JavaScript.
+type PublicAuthResponse struct {
+	AccessToken string `json:"access_token"`
+
+	TokenType string `json:"token_type"`
+
+	ExpiresIn int64 `json:"expires_in"`
+}
+
+// Public returns the browser-safe representation of AuthResponse.
+func (r *AuthResponse) Public() PublicAuthResponse {
+	return PublicAuthResponse{
+		AccessToken: r.AccessToken,
+		TokenType:   r.TokenType,
+		ExpiresIn:   r.ExpiresIn,
+	}
+}
+
 // UserResponse is a safe representation of a user.
 type UserResponse struct {
 	ID string `json:"id"`
