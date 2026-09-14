@@ -43,14 +43,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		// Switches status code safely depending on the core failure type.
 		switch {
 
-		// Returns an HTTP 409 Conflict error if the email is already in use.
 		case errors.Is(err, repository.ErrEmailAlreadyUsed):
 			response.Conflict(c, err.Error())
 
 		// Defaults to an HTTP 500 Internal Server Error for unhandled exceptions.
 		default:
 			response.InternalServerError(c)
-			println("Refresh error:", err.Error())
 		}
 
 		return

@@ -2,27 +2,33 @@ package auth
 
 // RegisterRequest represents a user registration request.
 type RegisterRequest struct {
-	Email     string `json:"email" validate:"required,email,max=255"`
-	Password  string `json:"password" validate:"required,min=8,max=72"`
-	FirstName string `json:"first_name" validate:"required,max=100"`
-	LastName  string `json:"last_name" validate:"required,max=100"`
-	Phone     string `json:"phone" validate:"required,max=30"`
+	Email string `json:"email" binding:"required,email,max=255"`
+
+	Password string `json:"password" binding:"required,min=8,max=72"`
+
+	FirstName string `json:"first_name" binding:"required,max=100"`
+
+	LastName string `json:"last_name" binding:"required,max=100"`
+
+	Phone string `json:"phone" binding:"required,max=30"`
 }
 
 // LoginRequest represents a login request.
 type LoginRequest struct {
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required"`
+	Email string `json:"email" binding:"required,email"`
+
+	Password string `json:"password" binding:"required"`
 }
 
 // RefreshTokenRequest represents a refresh token request.
 type RefreshTokenRequest struct {
-	RefreshToken string `json:"refresh_token" validate:"required"`
+	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
 // AuthResponse is returned after a successful login.
 type AuthResponse struct {
-	AccessToken  string `json:"access_token"`
+	AccessToken string `json:"access_token"`
+
 	RefreshToken string `json:"refresh_token"`
 
 	TokenType string `json:"token_type"`
