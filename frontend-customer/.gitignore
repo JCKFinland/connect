@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Safe CONNECT frontend environment templates/config
+!.env.example
+!.env.development
