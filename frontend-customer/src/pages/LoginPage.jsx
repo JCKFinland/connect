@@ -49,6 +49,10 @@ export default function LoginPage() {
     <section>
       <h2>Login</h2>
 
+      {location.state?.registrationSuccess ? (
+        <p role="status">Account created successfully. Please log in.</p>
+      ) : null}
+
       <form onSubmit={handleSubmit}>
         <div>
           <label htmlFor="email">Email</label>
