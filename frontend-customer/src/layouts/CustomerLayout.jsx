@@ -1,10 +1,47 @@
-import { Outlet } from "react-router";
+import { Link, Outlet, useNavigate } from "react-router";
 
-function CustomerLayout() {
+import { useAuth } from "../auth/AuthContext";
+
+export default function CustomerLayout() {
+  const { user, isAuthenticated, isBootstrapping, logout } = useAuth();
+
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    try {
+      await logout();
+    } finally {
+      navigate("/login", {
+        replace: true,
+      });
+    }
+  }
+
   return (
     <div>
       <header>
-        <h1>CONNECT</h1>
+        <h1>
+          <Link to="/">CONNECT</Link>
+        </h1>
+
+        {!isBootstrapping ? (
+          <nav>
+            {isAuthenticated ? (
+              <>
+                <span>{user?.first_name ?? user?.email}</span>
+
+                <button type="button" onClick={handleLogout}>
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <Link to="/login">Login</Link>{" "}
+                <Link to="/register">Create account</Link>
+              </>
+            )}
+          </nav>
+        ) : null}
       </header>
 
       <main>
@@ -13,5 +50,3 @@ function CustomerLayout() {
     </div>
   );
 }
-
-export default CustomerLayout;

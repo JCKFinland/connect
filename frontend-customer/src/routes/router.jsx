@@ -1,16 +1,15 @@
-import {
-  createBrowserRouter,
-} from 'react-router'
+import { createBrowserRouter } from "react-router";
 
-import CustomerLayout from '../layouts/CustomerLayout'
-import HomePage from '../pages/HomePage'
-import LoginPage from '../pages/LoginPage'
-import RegisterPage from '../pages/RegisterPage'
-import TripPage from '../pages/TripPage'
+import CustomerLayout from "../layouts/CustomerLayout";
+import HomePage from "../pages/HomePage";
+import LoginPage from "../pages/LoginPage";
+import RegisterPage from "../pages/RegisterPage";
+import TripPage from "../pages/TripPage";
+import ProtectedRoute from "./ProtectedRoute";
 
 export const router = createBrowserRouter([
   {
-    path: '/',
+    path: "/",
     Component: CustomerLayout,
     children: [
       {
@@ -18,17 +17,22 @@ export const router = createBrowserRouter([
         Component: HomePage,
       },
       {
-        path: 'login',
+        path: "login",
         Component: LoginPage,
       },
       {
-        path: 'register',
+        path: "register",
         Component: RegisterPage,
       },
       {
-        path: 'trips/:tripId',
-        Component: TripPage,
+        Component: ProtectedRoute,
+        children: [
+          {
+            path: "trips/:tripId",
+            Component: TripPage,
+          },
+        ],
       },
     ],
   },
-])
+]);
