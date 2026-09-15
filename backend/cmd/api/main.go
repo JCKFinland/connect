@@ -411,12 +411,13 @@ func main() {
 		api.NewDriverVehicleAssignmentHandler(
 			driverVehicleAssignmentService,
 		)
-
 	realtimeBroker := realtime.NewBroker()
+	realtimeShutdown := make(chan struct{})
 
 	tripStreamHandler := api.NewTripStreamHandler(
 		tripService,
 		realtimeBroker,
+		realtimeShutdown,
 	)
 	tripHandler := api.NewTripHandlerWithRealtime(
 		tripService,
@@ -514,6 +515,10 @@ func main() {
 	<-quit
 
 	log.Info("Shutdown signal received")
+
+	// Signal long-lived realtime streams to terminate before
+	// waiting for the HTTP server to shut down.
+	close(realtimeShutdown)
 
 	// Stop background dispatch processing before shutting down the HTTP server.
 	cancelRedispatch()

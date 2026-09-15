@@ -16,17 +16,26 @@ import (
 const tripStreamHeartbeatInterval = 15 * time.Second
 
 type TripStreamHandler struct {
-	trips  trip.Service
-	broker *realtime.Broker
+	trips    trip.Service
+	broker   *realtime.Broker
+	shutdown <-chan struct{}
 }
 
 func NewTripStreamHandler(
 	trips trip.Service,
 	broker *realtime.Broker,
+	shutdown ...<-chan struct{},
 ) *TripStreamHandler {
+	var shutdownCh <-chan struct{}
+
+	if len(shutdown) > 0 {
+		shutdownCh = shutdown[0]
+	}
+
 	return &TripStreamHandler{
-		trips:  trips,
-		broker: broker,
+		trips:    trips,
+		broker:   broker,
+		shutdown: shutdownCh,
 	}
 }
 
@@ -153,6 +162,9 @@ func (h *TripStreamHandler) Stream(c *gin.Context) {
 
 	for {
 		select {
+		case <-h.shutdown:
+			return
+
 		case <-c.Request.Context().Done():
 			return
 
