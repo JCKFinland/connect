@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { getTripLocationsRequest, openTripStream } from "../api/tripTracking";
 import { consumeSSE } from "../services/sse";
 
+const INITIAL_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 10000;
+
 function mergeLocations(existingLocations, incomingLocations) {
   const byID = new Map();
 
@@ -25,6 +28,21 @@ function mergeLocations(existingLocations, incomingLocations) {
   );
 }
 
+function wait(delay, signal) {
+  return new Promise((resolve) => {
+    const timeoutID = setTimeout(resolve, delay);
+
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeoutID);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
 export default function useTripTracking(tripId) {
   const [locations, setLocations] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -40,57 +58,6 @@ export default function useTripTracking(tripId) {
 
     let cancelled = false;
 
-    async function startTracking() {
-      try {
-        setError("");
-
-        const stream = await openTripStream(tripId, {
-          signal: controller.signal,
-        });
-
-        let historyRequested = false;
-
-        await consumeSSE(stream, {
-          signal: controller.signal,
-
-          onEvent(event) {
-            if (cancelled) {
-              return;
-            }
-
-            if (event.type === "connected") {
-              setIsConnected(true);
-
-              if (!historyRequested) {
-                historyRequested = true;
-
-                void loadHistory();
-              }
-
-              return;
-            }
-
-            if (event.type === "trip.location" && event.data?.id) {
-              setLocations((current) => mergeLocations(current, [event.data]));
-            }
-          },
-        });
-
-        if (!cancelled && !controller.signal.aborted) {
-          setIsConnected(false);
-          setError("Live trip connection ended");
-        }
-      } catch (requestError) {
-        if (cancelled || controller.signal.aborted) {
-          return;
-        }
-
-        setIsConnected(false);
-        setError(requestError?.message ?? "Unable to track trip");
-        setIsLoading(false);
-      }
-    }
-
     async function loadHistory() {
       try {
         const response = await getTripLocationsRequest(tripId, {
@@ -101,6 +68,7 @@ export default function useTripTracking(tripId) {
 
         if (!cancelled) {
           setLocations((current) => mergeLocations(current, history));
+          setError("");
         }
       } catch (requestError) {
         if (cancelled || controller.signal.aborted) {
@@ -112,6 +80,66 @@ export default function useTripTracking(tripId) {
         if (!cancelled) {
           setIsLoading(false);
         }
+      }
+    }
+
+    async function startTracking() {
+      let reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+      let initialHistoryLoaded = false;
+
+      while (!cancelled && !controller.signal.aborted) {
+        try {
+          const stream = await openTripStream(tripId, {
+            signal: controller.signal,
+          });
+
+          await consumeSSE(stream, {
+            signal: controller.signal,
+
+            onEvent(event) {
+              if (cancelled) {
+                return;
+              }
+
+              if (event.type === "connected") {
+                setIsConnected(true);
+                setError("");
+
+                reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+
+                if (!initialHistoryLoaded) {
+                  initialHistoryLoaded = true;
+                }
+
+                void loadHistory();
+
+                return;
+              }
+
+              if (event.type === "trip.location" && event.data?.id) {
+                setLocations((current) =>
+                  mergeLocations(current, [event.data]),
+                );
+              }
+            },
+          });
+        } catch (requestError) {
+          if (cancelled || controller.signal.aborted) {
+            return;
+          }
+
+          setError(requestError?.message ?? "Live trip connection interrupted");
+        }
+
+        if (cancelled || controller.signal.aborted) {
+          return;
+        }
+
+        setIsConnected(false);
+
+        await wait(reconnectDelay, controller.signal);
+
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
       }
     }
 
