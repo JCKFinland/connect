@@ -1,5 +1,6 @@
 import { useParams } from "react-router";
 
+import TripPayment from "../components/TripPayment";
 import useTripTracking from "../hooks/useTripTracking";
 
 export default function TripPage() {
@@ -40,6 +41,7 @@ export default function TripPage() {
       ) : !isLoading ? (
         <p>No driver location has been recorded yet.</p>
       ) : null}
+      <TripPayment tripId={tripId} />
     </section>
   );
 }
