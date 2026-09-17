@@ -29,6 +29,9 @@ export default function StripePaymentForm({
     const { error: stripeError } =
       await stripe.confirmPayment({
         elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/trips/${payment.trip_id}`,
+        },
         redirect: "if_required",
       });
 

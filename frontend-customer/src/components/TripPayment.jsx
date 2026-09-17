@@ -45,7 +45,35 @@ export default function TripPayment({ tripId }) {
           },
         );
 
-        setPayment(response.data);
+        const loadedPayment = response.data;
+        setPayment(loadedPayment);
+
+        if (loadedPayment.status === "PENDING") {
+          const idempotencyKey =
+            `customer-sale-${loadedPayment.id}`;
+
+          const transactionResponse =
+            await initiateSaleTransactionRequest(
+              loadedPayment.id,
+              idempotencyKey,
+            );
+
+          const executionResponse =
+            await executePaymentTransactionRequest(
+              loadedPayment.id,
+              transactionResponse.data.id,
+            );
+
+          if (!executionResponse.data.client_secret) {
+            throw new Error(
+              "Stripe client secret was not returned",
+            );
+          }
+
+          setClientSecret(
+            executionResponse.data.client_secret,
+          );
+        }
       } catch (requestError) {
         if (controller.signal.aborted) {
           return;
