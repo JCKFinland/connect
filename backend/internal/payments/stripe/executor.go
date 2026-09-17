@@ -262,6 +262,84 @@ func (e *executor) createPaymentIntent(
 			transaction.Amount,
 			transaction.Currency,
 		)
+
+	if transaction.ProviderTransactionID != nil {
+		providerTransactionID :=
+			strings.TrimSpace(
+				*transaction.ProviderTransactionID,
+			)
+
+		if providerTransactionID != "" {
+			intent, err :=
+				e.paymentIntents.Retrieve(
+					ctx,
+					providerTransactionID,
+					&stripego.PaymentIntentRetrieveParams{},
+				)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"retrieve Stripe PaymentIntent: %w",
+					err,
+				)
+			}
+
+			if intent == nil {
+				return nil, errors.New(
+					"Stripe PaymentIntent retrieve returned nil result",
+				)
+			}
+
+			if strings.TrimSpace(intent.ID) == "" {
+				return nil, errors.New(
+					"Stripe PaymentIntent retrieve returned empty ID",
+				)
+			}
+
+			expectedMetadata := map[string]string{
+				"connect_payment_id": transaction.PaymentID,
+
+				"connect_transaction_id": transaction.ID,
+
+				"connect_transaction_reference": transaction.TransactionReference,
+
+				"connect_transaction_type": transaction.TransactionType,
+			}
+
+			for key, expected := range expectedMetadata {
+				actual :=
+					strings.TrimSpace(
+						intent.Metadata[key],
+					)
+
+				if actual != expected {
+					return nil, fmt.Errorf(
+						"Stripe PaymentIntent identity mismatch: metadata %s got %q want %q",
+						key,
+						actual,
+						expected,
+					)
+				}
+			}
+
+			status, requiresCustomerAction, err :=
+				mapPaymentIntentStatus(
+					transaction.TransactionType,
+					intent.Status,
+				)
+
+			if err != nil {
+				return nil, err
+			}
+
+			return &ExecuteResult{
+				ProviderTransactionID:  intent.ID,
+				Status:                 status,
+				ClientSecret:           intent.ClientSecret,
+				RequiresCustomerAction: requiresCustomerAction,
+			}, nil
+		}
+	}
+
 	if err != nil {
 		return nil, err
 	}

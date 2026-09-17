@@ -22,6 +22,16 @@ func (fakePaymentIntentClient) Create(
 	)
 }
 
+func (fakePaymentIntentClient) Retrieve(
+	_ context.Context,
+	id string,
+	_ *stripego.PaymentIntentRetrieveParams,
+) (*stripego.PaymentIntent, error) {
+	return &stripego.PaymentIntent{
+		ID: id,
+	}, nil
+}
+
 func (fakePaymentIntentClient) Update(
 	_ context.Context,
 	id string,

@@ -16,6 +16,12 @@ type recordingPaymentIntentClient struct {
 		params *stripego.PaymentIntentCreateParams,
 	) (*stripego.PaymentIntent, error)
 
+	retrieve func(
+		ctx context.Context,
+		id string,
+		params *stripego.PaymentIntentRetrieveParams,
+	) (*stripego.PaymentIntent, error)
+
 	update func(
 		ctx context.Context,
 		id string,
@@ -47,6 +53,24 @@ func (c *recordingPaymentIntentClient) Create(
 
 	return c.create(
 		ctx,
+		params,
+	)
+}
+
+func (c *recordingPaymentIntentClient) Retrieve(
+	ctx context.Context,
+	id string,
+	params *stripego.PaymentIntentRetrieveParams,
+) (*stripego.PaymentIntent, error) {
+	if c.retrieve == nil {
+		panic(
+			"unexpected PaymentIntent Retrieve call",
+		)
+	}
+
+	return c.retrieve(
+		ctx,
+		id,
 		params,
 	)
 }
@@ -231,6 +255,205 @@ func TestExecutorCreatesSalePaymentIntent(
 	if !result.RequiresCustomerAction {
 		t.Fatal(
 			"expected SALE to require customer continuation",
+		)
+	}
+}
+
+func TestExecutorRetrievesExistingSalePaymentIntent(
+	t *testing.T,
+) {
+	idempotencyKey :=
+		"connect-sale-recovery-idempotency"
+
+	providerTransactionID :=
+		"pi_sale_recovery_123"
+
+	transaction :=
+		&models.PaymentTransaction{
+			BaseModel: models.BaseModel{
+				ID: "transaction-sale-recovery-123",
+			},
+
+			PaymentID: "payment-sale-recovery-123",
+
+			TransactionReference: "txn_sale_recovery_123",
+
+			Provider: ProviderName,
+
+			IdempotencyKey: &idempotencyKey,
+
+			TransactionType: paymenttransaction.TypeSale,
+
+			Amount: "23.45",
+
+			Currency: "EUR",
+
+			ProviderTransactionID: &providerTransactionID,
+		}
+
+	client :=
+		&recordingPaymentIntentClient{
+			retrieve: func(
+				_ context.Context,
+				id string,
+				_ *stripego.PaymentIntentRetrieveParams,
+			) (*stripego.PaymentIntent, error) {
+				if id != "pi_sale_recovery_123" {
+					t.Fatalf(
+						"retrieve PaymentIntent ID got %q",
+						id,
+					)
+				}
+
+				return &stripego.PaymentIntent{
+					ID: "pi_sale_recovery_123",
+
+					ClientSecret: "pi_sale_recovery_123_secret_test",
+
+					Status: stripego.PaymentIntentStatusRequiresPaymentMethod,
+
+					CaptureMethod: stripego.PaymentIntentCaptureMethodAutomatic,
+
+					Metadata: map[string]string{
+						"connect_payment_id": transaction.PaymentID,
+
+						"connect_transaction_id": transaction.ID,
+
+						"connect_transaction_reference": transaction.TransactionReference,
+
+						"connect_transaction_type": transaction.TransactionType,
+					},
+				}, nil
+			},
+		}
+
+	executor :=
+		newExecutorWithPaymentIntents(
+			client,
+		)
+
+	result, err :=
+		executor.Execute(
+			context.Background(),
+			ExecuteRequest{
+				Transaction: transaction,
+			},
+		)
+	if err != nil {
+		t.Fatalf(
+			"recover Stripe SALE: %v",
+			err,
+		)
+	}
+
+	if result.ProviderTransactionID !=
+		"pi_sale_recovery_123" {
+
+		t.Fatalf(
+			"provider transaction ID got %q",
+			result.ProviderTransactionID,
+		)
+	}
+
+	if result.Status !=
+		paymenttransaction.StatusProcessing {
+
+		t.Fatalf(
+			"status got %q want %q",
+			result.Status,
+			paymenttransaction.StatusProcessing,
+		)
+	}
+
+	if result.ClientSecret !=
+		"pi_sale_recovery_123_secret_test" {
+
+		t.Fatalf(
+			"client secret got %q",
+			result.ClientSecret,
+		)
+	}
+
+	if !result.RequiresCustomerAction {
+		t.Fatal(
+			"expected recovered SALE to require customer continuation",
+		)
+	}
+}
+
+func TestExecutorRejectsRetrievedSalePaymentIntentIdentityMismatch(
+	t *testing.T,
+) {
+	idempotencyKey :=
+		"connect-sale-recovery-mismatch-idempotency"
+
+	providerTransactionID :=
+		"pi_sale_recovery_mismatch_123"
+
+	transaction :=
+		&models.PaymentTransaction{
+			BaseModel: models.BaseModel{
+				ID: "transaction-sale-recovery-mismatch-123",
+			},
+
+			PaymentID: "payment-sale-recovery-mismatch-123",
+
+			TransactionReference: "txn_sale_recovery_mismatch_123",
+
+			Provider: ProviderName,
+
+			IdempotencyKey: &idempotencyKey,
+
+			TransactionType: paymenttransaction.TypeSale,
+
+			Amount: "23.45",
+
+			Currency: "EUR",
+
+			ProviderTransactionID: &providerTransactionID,
+		}
+
+	client :=
+		&recordingPaymentIntentClient{
+			retrieve: func(
+				_ context.Context,
+				id string,
+				_ *stripego.PaymentIntentRetrieveParams,
+			) (*stripego.PaymentIntent, error) {
+				return &stripego.PaymentIntent{
+					ID: id,
+
+					Status: stripego.PaymentIntentStatusRequiresPaymentMethod,
+
+					Metadata: map[string]string{
+						"connect_payment_id": "different-payment",
+
+						"connect_transaction_id": transaction.ID,
+
+						"connect_transaction_reference": transaction.TransactionReference,
+
+						"connect_transaction_type": transaction.TransactionType,
+					},
+				}, nil
+			},
+		}
+
+	executor :=
+		newExecutorWithPaymentIntents(
+			client,
+		)
+
+	_, err :=
+		executor.Execute(
+			context.Background(),
+			ExecuteRequest{
+				Transaction: transaction,
+			},
+		)
+
+	if err == nil {
+		t.Fatal(
+			"expected retrieved PaymentIntent identity mismatch error",
 		)
 	}
 }

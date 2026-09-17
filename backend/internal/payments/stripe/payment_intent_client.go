@@ -12,6 +12,12 @@ type paymentIntentClient interface {
 		params *stripego.PaymentIntentCreateParams,
 	) (*stripego.PaymentIntent, error)
 
+	Retrieve(
+		ctx context.Context,
+		id string,
+		params *stripego.PaymentIntentRetrieveParams,
+	) (*stripego.PaymentIntent, error)
+
 	Update(
 		ctx context.Context,
 		id string,
