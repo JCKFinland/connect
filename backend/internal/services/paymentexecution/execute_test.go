@@ -346,6 +346,139 @@ func TestExecuteStripeSaleDoesNotResolveParent(
 	}
 }
 
+func TestExecuteStripeSaleSuccessRemainsWebhookAuthoritative(
+	t *testing.T,
+) {
+	transaction :=
+		testExecutionTransaction(
+			paymenttransaction.TypeSale,
+		)
+
+	repo :=
+		&fakePaymentTransactionRepository{
+			getByID: func(
+				_ context.Context,
+				id string,
+			) (*models.PaymentTransaction, error) {
+				if id != transaction.ID {
+					t.Fatalf(
+						"unexpected transaction ID %q",
+						id,
+					)
+				}
+
+				return transaction, nil
+			},
+
+			getLatestSuccessfulByPaymentAndTypes: func(
+				context.Context,
+				string,
+				string,
+				[]string,
+			) (*models.PaymentTransaction, error) {
+				t.Fatal(
+					"SALE must not resolve a parent provider transaction",
+				)
+
+				return nil, nil
+			},
+		}
+
+	stripeExecutor :=
+		&fakeStripeExecutor{
+			execute: func(
+				_ context.Context,
+				req stripepayment.ExecuteRequest,
+			) (*stripepayment.ExecuteResult, error) {
+				return &stripepayment.ExecuteResult{
+					ProviderTransactionID: "pi_sale_succeeded",
+
+					Status: paymenttransaction.StatusSuccess,
+
+					ClientSecret: "pi_sale_succeeded_secret_test",
+
+					RequiresCustomerAction: false,
+				}, nil
+			},
+		}
+
+	transactionService :=
+		&fakePaymentTransactionService{
+			applyResult: func(
+				_ context.Context,
+				transactionID string,
+				req paymenttransaction.ApplyResultRequest,
+			) (*models.PaymentTransaction, error) {
+				if transactionID != transaction.ID {
+					t.Fatalf(
+						"unexpected ApplyResult transaction ID %q",
+						transactionID,
+					)
+				}
+
+				if req.ProviderTransactionID == nil ||
+					*req.ProviderTransactionID !=
+						"pi_sale_succeeded" {
+
+					t.Fatal(
+						"Stripe provider identity was not forwarded",
+					)
+				}
+
+				if req.Status !=
+					paymenttransaction.StatusProcessing {
+
+					t.Fatalf(
+						"SALE execution must remain PROCESSING until webhook, got %s",
+						req.Status,
+					)
+				}
+
+				return &models.PaymentTransaction{
+					BaseModel: models.BaseModel{
+						ID: transaction.ID,
+					},
+
+					Status: req.Status,
+
+					ProviderTransactionID: req.ProviderTransactionID,
+				}, nil
+			},
+		}
+
+	service :=
+		NewService(
+			Dependencies{
+				Transactions: repo,
+
+				PaymentTransactions: transactionService,
+
+				Stripe: stripeExecutor,
+			},
+		)
+
+	result, err :=
+		service.Execute(
+			context.Background(),
+			transaction.ID,
+		)
+	if err != nil {
+		t.Fatalf(
+			"execute recovered Stripe SALE: %v",
+			err,
+		)
+	}
+
+	if result.Transaction.Status !=
+		paymenttransaction.StatusProcessing {
+
+		t.Fatalf(
+			"expected webhook-authoritative PROCESSING, got %s",
+			result.Transaction.Status,
+		)
+	}
+}
+
 func TestExecuteStripeAuthorizeDoesNotResolveParent(
 	t *testing.T,
 ) {

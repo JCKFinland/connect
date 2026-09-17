@@ -133,12 +133,24 @@ func (s *service) executeStripe(
 	providerTransactionID :=
 		result.ProviderTransactionID
 
+	executionStatus := result.Status
+
+	// Stripe SALE completion is webhook-authoritative.
+	// Execution/recovery may observe an already-succeeded PaymentIntent,
+	// but it must not reconcile the CONNECT payment to PAID.
+	// The verified payment_intent.succeeded webhook owns that transition.
+	if transaction.TransactionType == paymenttransaction.TypeSale &&
+		executionStatus == paymenttransaction.StatusSuccess {
+
+		executionStatus = paymenttransaction.StatusProcessing
+	}
+
 	updated, err :=
 		s.paymentTransactions.ApplyResult(
 			ctx,
 			transaction.ID,
 			paymenttransaction.ApplyResultRequest{
-				Status: result.Status,
+				Status: executionStatus,
 
 				ProviderTransactionID: &providerTransactionID,
 			},
