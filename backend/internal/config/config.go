@@ -47,6 +47,7 @@ type Config struct {
 	JWT         JWTConfig
 	Presence    PresenceConfig
 	RideRequest RideRequestConfig
+	Booking     BookingConfig
 	Stripe      StripeConfig
 	Log         LogConfig
 }
@@ -61,7 +62,11 @@ type RideRequestConfig struct {
 	DefaultMatchingLifetime time.Duration
 }
 
-// Load loads the application configuration.
+// BookingConfig contains customer booking configuration.
+type BookingConfig struct {
+	CompanyID string
+}
+
 // Load loads the application configuration.
 func Load() (*Config, error) {
 
@@ -130,6 +135,13 @@ func Load() (*Config, error) {
 
 		RideRequest: RideRequestConfig{
 			DefaultMatchingLifetime: defaultMatchingLifetime,
+		},
+
+		Booking: BookingConfig{
+			CompanyID: GetEnv(
+				"BOOKING_COMPANY_ID",
+				"",
+			),
 		},
 
 		Stripe: StripeConfig{

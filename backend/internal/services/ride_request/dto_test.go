@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/go-playground/validator/v10"
+	"github.com/gin-gonic/gin/binding"
 )
 
 func TestCreateRideRequestRequestAllowsMissingCustomerID(t *testing.T) {
@@ -25,9 +25,7 @@ func TestCreateRideRequestRequestAllowsMissingCustomerID(t *testing.T) {
 		t.Fatalf("unmarshal request: %v", err)
 	}
 
-	validate := validator.New()
-
-	if err := validate.Struct(req); err != nil {
+	if err := binding.Validator.ValidateStruct(req); err != nil {
 		t.Fatalf(
 			"expected request without customer_id to pass binding validation, got %v",
 			err,
