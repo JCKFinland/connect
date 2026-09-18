@@ -28,8 +28,8 @@ export default function CustomerLayout() {
           <nav>
             {isAuthenticated ? (
               <>
-                <span>{user?.first_name ?? user?.email}</span>
-
+                <span>{user?.first_name ?? user?.email}</span>{" "}
+                <Link to="/book">Book a ride</Link>{" "}
                 <button type="button" onClick={handleLogout}>
                   Logout
                 </button>
