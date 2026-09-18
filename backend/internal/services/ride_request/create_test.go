@@ -491,3 +491,154 @@ func TestCreateRejectsInactiveServiceCategory(t *testing.T) {
 		)
 	}
 }
+
+type createUserRoleTestRepository struct {
+	roles []string
+	err   error
+}
+
+func (r *createUserRoleTestRepository) AssignRole(
+	context.Context,
+	string,
+	string,
+) error {
+	return nil
+}
+
+func (r *createUserRoleTestRepository) RemoveRole(
+	context.Context,
+	string,
+	string,
+) error {
+	return nil
+}
+
+func (r *createUserRoleTestRepository) UserHasRole(
+	context.Context,
+	string,
+	string,
+) (bool, error) {
+	return false, nil
+}
+
+func (r *createUserRoleTestRepository) GetUserRoles(
+	context.Context,
+	string,
+) ([]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+
+	return r.roles, nil
+}
+
+func TestCreateAuthorizedCustomerDerivesCustomerIDFromAuthenticatedUser(
+	t *testing.T,
+) {
+	repo := &createRideRequestTestRepository{}
+
+	service := NewService(
+		Dependencies{
+			Config: &config.Config{
+				RideRequest: config.RideRequestConfig{
+					DefaultMatchingLifetime: 10 * time.Minute,
+				},
+			},
+			RideRequests: repo,
+			UserRoles: &createUserRoleTestRepository{
+				roles: []string{"CUSTOMER"},
+			},
+			ServiceCategories: &createServiceCategoryTestRepository{
+				category: validServiceCategory(),
+			},
+		},
+	)
+
+	const authenticatedUserID = "22222222-2222-4222-8222-222222222222"
+
+	req := validCreateRideRequest()
+	req.CustomerID = ""
+
+	request, err := service.CreateAuthorized(
+		context.Background(),
+		req,
+		authenticatedUserID,
+	)
+	if err != nil {
+		t.Fatalf("create authorized ride request: %v", err)
+	}
+
+	if request == nil {
+		t.Fatal("expected created ride request")
+	}
+
+	if request.CustomerID != authenticatedUserID {
+		t.Fatalf(
+			"expected customer ID %q, got %q",
+			authenticatedUserID,
+			request.CustomerID,
+		)
+	}
+
+	if repo.created == nil {
+		t.Fatal("expected ride request to be persisted")
+	}
+
+	if repo.created.CustomerID != authenticatedUserID {
+		t.Fatalf(
+			"expected persisted customer ID %q, got %q",
+			authenticatedUserID,
+			repo.created.CustomerID,
+		)
+	}
+}
+
+func TestCreateAuthorizedPrivilegedUserRequiresCustomerID(
+	t *testing.T,
+) {
+	repo := &createRideRequestTestRepository{}
+
+	service := NewService(
+		Dependencies{
+			Config: &config.Config{
+				RideRequest: config.RideRequestConfig{
+					DefaultMatchingLifetime: 10 * time.Minute,
+				},
+			},
+			RideRequests: repo,
+			UserRoles: &createUserRoleTestRepository{
+				roles: []string{"DISPATCHER"},
+			},
+			ServiceCategories: &createServiceCategoryTestRepository{
+				category: validServiceCategory(),
+			},
+		},
+	)
+
+	req := validCreateRideRequest()
+	req.CustomerID = ""
+
+	request, err := service.CreateAuthorized(
+		context.Background(),
+		req,
+		"33333333-3333-4333-8333-333333333333",
+	)
+
+	if err == nil {
+		t.Fatal("expected missing customer ID error")
+	}
+
+	if request != nil {
+		t.Fatalf(
+			"expected no created request, got %+v",
+			request,
+		)
+	}
+
+	if repo.created != nil {
+		t.Fatalf(
+			"expected ride request not to be persisted, got %+v",
+			repo.created,
+		)
+	}
+}

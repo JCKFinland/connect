@@ -35,6 +35,7 @@ func NewRouter(
 	paymentExecutionHandler *PaymentExecutionHandler,
 	paymentCallbackHandler *PaymentCallbackHandler,
 	rideRequestHandler *RideRequestHandler,
+	serviceCategoryHandler *ServiceCategoryHandler,
 	dispatchHandler *DispatchHandler,
 ) *gin.Engine {
 
@@ -88,6 +89,7 @@ func NewRouter(
 		paymentExecutionHandler,
 		paymentCallbackHandler,
 		rideRequestHandler,
+		serviceCategoryHandler,
 		dispatchHandler,
 	)
 

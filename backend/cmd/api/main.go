@@ -430,6 +430,10 @@ func main() {
 		rideRequestService,
 	)
 
+	serviceCategoryHandler := api.NewServiceCategoryHandler(
+		serviceCategoryRepo,
+	)
+
 	dispatchHandler := api.NewDispatchHandler(
 		dispatchService,
 	)
@@ -461,6 +465,7 @@ func main() {
 		paymentExecutionHandler,
 		paymentCallbackHandler,
 		rideRequestHandler,
+		serviceCategoryHandler,
 		dispatchHandler,
 	)
 	// ----------------------------------------------------------------------

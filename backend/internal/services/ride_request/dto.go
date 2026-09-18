@@ -4,7 +4,7 @@ import "time"
 
 // CreateRideRequestRequest contains the data required to create a ride request.
 type CreateRideRequestRequest struct {
-	CustomerID string `json:"customer_id" binding:"required"`
+	CustomerID string `json:"customer_id"`
 
 	PickupAddress   string  `json:"pickup_address" binding:"required"`
 	PickupLatitude  float64 `json:"pickup_latitude" binding:"required"`

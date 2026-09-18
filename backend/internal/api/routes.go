@@ -31,6 +31,7 @@ func RegisterRoutes(
 	paymentExecutionHandler *PaymentExecutionHandler,
 	paymentCallbackHandler *PaymentCallbackHandler,
 	rideRequestHandler *RideRequestHandler,
+	serviceCategoryHandler *ServiceCategoryHandler,
 	dispatchHandler *DispatchHandler,
 ) {
 
@@ -301,6 +302,21 @@ func RegisterRoutes(
 			authMiddleware,
 			paymentExecutionHandler,
 		)
+
+		// ---------------------------------------------------
+		// Service Category Routes (/api/v1/service-categories)
+		// ---------------------------------------------------
+
+		serviceCategories := v1.Group("/service-categories")
+
+		serviceCategories.Use(authMiddleware.RequireAuth())
+
+		{
+			serviceCategories.GET(
+				"",
+				serviceCategoryHandler.ListActive,
+			)
+		}
 
 		// ---------------------------------------------------
 		// Ride Request Routes (/api/v1/ride-requests/*)
