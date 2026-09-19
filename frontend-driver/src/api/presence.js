@@ -21,3 +21,23 @@ export function goOffline() {
     body: {},
   });
 }
+
+export function sendHeartbeat({
+  latitude,
+  longitude,
+  heading,
+  speed,
+  accuracy,
+}) {
+  return apiRequest("/driver/heartbeat", {
+    method: "POST",
+    authenticated: true,
+    body: {
+      latitude,
+      longitude,
+      heading,
+      speed,
+      accuracy,
+    },
+  });
+}

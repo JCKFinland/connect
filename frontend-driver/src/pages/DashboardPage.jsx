@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { getCurrentPresence, goOffline, goOnline } from "../api/presence";
+import { useDriverHeartbeat } from "../hooks/useDriverHeartbeat";
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -9,6 +10,8 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
+
+  useDriverHeartbeat(presence?.is_online === true);
 
   async function loadPresence() {
     try {
