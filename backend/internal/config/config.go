@@ -47,6 +47,8 @@ type Config struct {
 	JWT         JWTConfig
 	Presence    PresenceConfig
 	RideRequest RideRequestConfig
+	Booking     BookingConfig
+	Routing     RoutingConfig
 	Stripe      StripeConfig
 	Log         LogConfig
 }
@@ -61,7 +63,16 @@ type RideRequestConfig struct {
 	DefaultMatchingLifetime time.Duration
 }
 
-// Load loads the application configuration.
+// BookingConfig contains customer booking configuration.
+type BookingConfig struct {
+	CompanyID string
+}
+
+// RoutingConfig contains road-routing provider configuration.
+type RoutingConfig struct {
+	BaseURL string
+}
+
 // Load loads the application configuration.
 func Load() (*Config, error) {
 
@@ -130,6 +141,20 @@ func Load() (*Config, error) {
 
 		RideRequest: RideRequestConfig{
 			DefaultMatchingLifetime: defaultMatchingLifetime,
+		},
+
+		Booking: BookingConfig{
+			CompanyID: GetEnv(
+				"BOOKING_COMPANY_ID",
+				"",
+			),
+		},
+
+		Routing: RoutingConfig{
+			BaseURL: GetEnv(
+				"ROUTING_BASE_URL",
+				"https://router.project-osrm.org",
+			),
 		},
 
 		Stripe: StripeConfig{

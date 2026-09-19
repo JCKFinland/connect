@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
+import { getFareEstimate } from "../api/fareEstimates";
 import { createRideRequest, getServiceCategories } from "../api/rideRequests";
 
 export default function BookRidePage() {
@@ -20,6 +21,9 @@ export default function BookRidePage() {
   const [serviceCategoryId, setServiceCategoryId] = useState("");
   const [passengerCount, setPassengerCount] = useState(1);
   const [notes, setNotes] = useState("");
+
+  const [fareEstimate, setFareEstimate] = useState(null);
+  const [isEstimating, setIsEstimating] = useState(false);
 
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -57,8 +61,39 @@ export default function BookRidePage() {
     };
   }, []);
 
+  function invalidateFareEstimate() {
+    setFareEstimate(null);
+  }
+
+  async function handleFareEstimate() {
+    setError("");
+    setFareEstimate(null);
+    setIsEstimating(true);
+
+    try {
+      const estimate = await getFareEstimate({
+        pickupLatitude: Number(pickupLatitude),
+        pickupLongitude: Number(pickupLongitude),
+        destinationLatitude: Number(destinationLatitude),
+        destinationLongitude: Number(destinationLongitude),
+        serviceCategoryId,
+      });
+
+      setFareEstimate(estimate);
+    } catch (requestError) {
+      setError(requestError?.message ?? "Unable to calculate fare estimate");
+    } finally {
+      setIsEstimating(false);
+    }
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
+
+    if (!fareEstimate) {
+      setError("Calculate a fare estimate before booking your ride.");
+      return;
+    }
 
     setError("");
     setIsSubmitting(true);
@@ -97,7 +132,7 @@ export default function BookRidePage() {
       <p>Enter your pickup and destination details.</p>
 
       <form onSubmit={handleSubmit}>
-        <fieldset>
+        <fieldset disabled={isSubmitting}>
           <legend>Pickup</legend>
 
           <div>
@@ -123,7 +158,10 @@ export default function BookRidePage() {
               max="90"
               required
               value={pickupLatitude}
-              onChange={(event) => setPickupLatitude(event.target.value)}
+              onChange={(event) => {
+                setPickupLatitude(event.target.value);
+                invalidateFareEstimate();
+              }}
             />
           </div>
 
@@ -138,12 +176,15 @@ export default function BookRidePage() {
               max="180"
               required
               value={pickupLongitude}
-              onChange={(event) => setPickupLongitude(event.target.value)}
+              onChange={(event) => {
+                setPickupLongitude(event.target.value);
+                invalidateFareEstimate();
+              }}
             />
           </div>
         </fieldset>
 
-        <fieldset>
+        <fieldset disabled={isSubmitting}>
           <legend>Destination</legend>
 
           <div>
@@ -169,7 +210,10 @@ export default function BookRidePage() {
               max="90"
               required
               value={destinationLatitude}
-              onChange={(event) => setDestinationLatitude(event.target.value)}
+              onChange={(event) => {
+                setDestinationLatitude(event.target.value);
+                invalidateFareEstimate();
+              }}
             />
           </div>
 
@@ -184,7 +228,10 @@ export default function BookRidePage() {
               max="180"
               required
               value={destinationLongitude}
-              onChange={(event) => setDestinationLongitude(event.target.value)}
+              onChange={(event) => {
+                setDestinationLongitude(event.target.value);
+                invalidateFareEstimate();
+              }}
             />
           </div>
         </fieldset>
@@ -195,9 +242,12 @@ export default function BookRidePage() {
           <select
             id="serviceCategory"
             required
-            disabled={isLoadingCategories}
+            disabled={isLoadingCategories || isSubmitting}
             value={serviceCategoryId}
-            onChange={(event) => setServiceCategoryId(event.target.value)}
+            onChange={(event) => {
+              setServiceCategoryId(event.target.value);
+              invalidateFareEstimate();
+            }}
           >
             {isLoadingCategories ? <option value="">Loading...</option> : null}
 
@@ -222,6 +272,7 @@ export default function BookRidePage() {
             min="1"
             max="20"
             required
+            disabled={isSubmitting}
             value={passengerCount}
             onChange={(event) => setPassengerCount(event.target.value)}
           />
@@ -232,16 +283,70 @@ export default function BookRidePage() {
 
           <textarea
             id="notes"
+            disabled={isSubmitting}
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
           />
         </div>
 
+        <div>
+          <button
+            type="button"
+            onClick={handleFareEstimate}
+            disabled={
+              isEstimating ||
+              isSubmitting ||
+              isLoadingCategories ||
+              !pickupLatitude ||
+              !pickupLongitude ||
+              !destinationLatitude ||
+              !destinationLongitude ||
+              !serviceCategoryId
+            }
+          >
+            {isEstimating ? "Calculating estimate..." : "Get fare estimate"}
+          </button>
+        </div>
+
+        {fareEstimate ? (
+          <section aria-live="polite">
+            <h3>Fare estimate</h3>
+
+            <p>
+              Estimated fare:{" "}
+              <strong>
+                {fareEstimate.total_amount.toFixed(2)} {fareEstimate.currency}
+              </strong>
+            </p>
+
+            <p>
+              Distance: {(fareEstimate.distance_meters / 1000).toFixed(1)} km
+            </p>
+
+            <p>
+              Estimated duration:{" "}
+              {Math.max(1, Math.round(fareEstimate.duration_seconds / 60))}{" "}
+              minutes
+            </p>
+
+            <p>
+              This is an estimate. The final fare may vary based on the actual
+              trip.
+            </p>
+          </section>
+        ) : null}
+
         {error ? <p role="alert">{error}</p> : null}
 
         <button
           type="submit"
-          disabled={isSubmitting || isLoadingCategories || !serviceCategoryId}
+          disabled={
+            isSubmitting ||
+            isEstimating ||
+            isLoadingCategories ||
+            !serviceCategoryId ||
+            !fareEstimate
+          }
         >
           {isSubmitting ? "Booking ride..." : "Book ride"}
         </button>

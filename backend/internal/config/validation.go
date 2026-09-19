@@ -57,6 +57,13 @@ func Validate(cfg *Config) error {
 			"ride request default matching lifetime must be greater than zero",
 		)
 	}
+	if cfg.Booking.CompanyID == "" {
+		return fmt.Errorf("BOOKING_COMPANY_ID is required")
+	}
+
+	if cfg.Routing.BaseURL == "" {
+		return fmt.Errorf("ROUTING_BASE_URL is required")
+	}
 
 	return nil
 }

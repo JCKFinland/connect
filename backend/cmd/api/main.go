@@ -18,10 +18,12 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/repository"
 
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/JCKFinland/connect/backend/internal/security"
 	driverservice "github.com/JCKFinland/connect/backend/internal/services/driver"
 	fareservice "github.com/JCKFinland/connect/backend/internal/services/fare"
-
-	"github.com/JCKFinland/connect/backend/internal/security"
+	fareestimateservice "github.com/JCKFinland/connect/backend/internal/services/fare_estimate"
+	pricingservice "github.com/JCKFinland/connect/backend/internal/services/pricing"
+	routingservice "github.com/JCKFinland/connect/backend/internal/services/routing"
 
 	authservice "github.com/JCKFinland/connect/backend/internal/services/auth"
 
@@ -110,6 +112,7 @@ func main() {
 	refreshTokenRepo := repository.NewRefreshTokenRepository(db)
 
 	// Mounts taxi-specific operational storage modules mapping to PostgreSQL.
+
 	driverPresenceRepo := postgresrepo.NewDriverPresenceRepository(db)
 	driverAssignmentRepo := postgresrepo.NewDriverAssignmentRepository(db)
 	companyRepo := postgresrepo.NewCompanyRepository(db)
@@ -117,11 +120,11 @@ func main() {
 	fleetRepository := postgresrepo.NewFleetRepository(db)
 	vehicleRepo := postgresrepo.NewVehicleRepository(db)
 	driverRepo := postgresrepo.NewDriverRepository(db)
-	driverVehicleAssignmentRepo :=
-		postgresrepo.NewDriverVehicleAssignmentRepository(db)
+	driverVehicleAssignmentRepo := postgresrepo.NewDriverVehicleAssignmentRepository(db)
 	tripRepo := postgresrepo.NewTripRepository(db)
 	rideRequestRepo := postgresrepo.NewRideRequestRepository(db)
 	serviceCategoryRepo := postgresrepo.NewServiceCategoryRepository(db)
+	farePricingProfileRepo := postgresrepo.NewFarePricingProfileRepository(db)
 	tripEventRepo := postgresrepo.NewTripEventRepository(db)
 	dispatchOfferRepo := postgresrepo.NewDispatchOfferRepository(db)
 	tripLocationRepo := postgresrepo.NewTripLocationRepository(db)
@@ -308,6 +311,28 @@ func main() {
 		},
 	)
 
+	routingService := routingservice.NewOSRMService(
+		cfg.Routing.BaseURL,
+		nil,
+	)
+
+	pricingService := pricingservice.NewService(
+		pricingservice.Dependencies{
+			FarePricingProfiles: farePricingProfileRepo,
+		},
+	)
+
+	fareEstimateService :=
+		fareestimateservice.NewService(
+			fareestimateservice.Dependencies{
+				Routing: routingService,
+				Pricing: pricingService,
+				Fare:    fareservice.NewService(),
+
+				BookingCompanyID: cfg.Booking.CompanyID,
+			},
+		)
+
 	dispatchOfferService := dispatchofferservice.NewService(
 		dispatchofferservice.Dependencies{
 			DB:     db,
@@ -434,6 +459,10 @@ func main() {
 		serviceCategoryRepo,
 	)
 
+	fareEstimateHandler := api.NewFareEstimateHandler(
+		fareEstimateService,
+	)
+
 	dispatchHandler := api.NewDispatchHandler(
 		dispatchService,
 	)
@@ -466,6 +495,7 @@ func main() {
 		paymentCallbackHandler,
 		rideRequestHandler,
 		serviceCategoryHandler,
+		fareEstimateHandler,
 		dispatchHandler,
 	)
 	// ----------------------------------------------------------------------
