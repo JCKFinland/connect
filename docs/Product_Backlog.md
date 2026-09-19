@@ -100,11 +100,11 @@ The backlog is a living document and will evolve throughout the lifecycle of the
 | -------- | --------------------- | -------- | ----------- |
 | CUST-001 | Customer registration | Critical | Completed   |
 | CUST-002 | Customer profile      | High     | Not Started |
-| CUST-003 | Book immediate ride   | Critical | In Progress |
+| CUST-003 | Book immediate ride   | Critical | Completed   |
 | CUST-004 | Schedule ride         | High     | Not Started |
 | CUST-005 | Ride history          | Medium   | Not Started |
 | CUST-006 | Favourite locations   | Medium   | Not Started |
-| CUST-007 | Fare estimate         | Critical | In Progress |
+| CUST-007 | Fare estimate         | Critical | Completed   |
 | CUST-008 | Driver tracking       | Critical | Completed   |
 | CUST-009 | Digital receipts      | High     | Not Started |
 | CUST-010 | Emergency SOS         | High     | Not Started |
