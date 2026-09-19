@@ -424,7 +424,7 @@ func main() {
 
 	// Maps standard HTTP endpoints to specific application business logic.
 	authHandler := api.NewAuthHandler(authService, cfg)
-	userHandler := api.NewUserHandler()
+	userHandler := api.NewUserHandler(userRoleRepo)
 	driverPresenceHandler := api.NewDriverPresenceHandler(presenceService)
 	companyHandler := api.NewCompanyHandler(companyService)
 	branchHandler := api.NewBranchHandler(branchService)
