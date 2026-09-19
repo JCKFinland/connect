@@ -310,3 +310,27 @@ func (h *DriverPresenceHandler) ListAvailable(
 		drivers,
 	)
 }
+
+// GetCurrent returns the authenticated driver's current presence state.
+func (h *DriverPresenceHandler) GetCurrent(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "authenticated user not found")
+		return
+	}
+
+	current, err := h.service.GetCurrent(
+		c.Request.Context(),
+		user.ID,
+	)
+	if err != nil {
+		handlePresenceError(c, err)
+		return
+	}
+
+	response.OK(
+		c,
+		"Driver presence retrieved successfully",
+		current,
+	)
+}
