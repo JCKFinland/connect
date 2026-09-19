@@ -27,6 +27,9 @@ func validTestConfig() *Config {
 		Booking: BookingConfig{
 			CompanyID: "345c5e3e-b07a-4e16-837d-e5d32254d6f3",
 		},
+		Routing: RoutingConfig{
+			BaseURL: "https://router.example.test",
+		},
 		Log: LogConfig{
 			Level: "info",
 		},
@@ -55,6 +58,24 @@ func TestValidateRejectsMissingBookingCompanyID(t *testing.T) {
 			"Validate() error = %q, want %q",
 			err.Error(),
 			"BOOKING_COMPANY_ID is required",
+		)
+	}
+}
+
+func TestValidateRejectsMissingRoutingBaseURL(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Routing.BaseURL = ""
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("Validate() expected error")
+	}
+
+	if err.Error() != "ROUTING_BASE_URL is required" {
+		t.Fatalf(
+			"Validate() error = %q, want %q",
+			err.Error(),
+			"ROUTING_BASE_URL is required",
 		)
 	}
 }

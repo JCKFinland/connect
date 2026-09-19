@@ -32,6 +32,7 @@ func RegisterRoutes(
 	paymentCallbackHandler *PaymentCallbackHandler,
 	rideRequestHandler *RideRequestHandler,
 	serviceCategoryHandler *ServiceCategoryHandler,
+	fareEstimateHandler *FareEstimateHandler,
 	dispatchHandler *DispatchHandler,
 ) {
 
@@ -315,6 +316,20 @@ func RegisterRoutes(
 			serviceCategories.GET(
 				"",
 				serviceCategoryHandler.ListActive,
+			)
+		}
+
+		// ---------------------------------------------------
+		// Fare Estimate Routes (/api/v1/fare-estimates)
+		// ---------------------------------------------------
+
+		fareEstimates := v1.Group("/fare-estimates")
+
+		fareEstimates.Use(authMiddleware.RequireAuth())
+		{
+			fareEstimates.POST(
+				"",
+				fareEstimateHandler.Estimate,
 			)
 		}
 

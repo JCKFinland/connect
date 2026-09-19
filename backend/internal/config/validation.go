@@ -61,5 +61,9 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("BOOKING_COMPANY_ID is required")
 	}
 
+	if cfg.Routing.BaseURL == "" {
+		return fmt.Errorf("ROUTING_BASE_URL is required")
+	}
+
 	return nil
 }

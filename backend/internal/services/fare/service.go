@@ -9,6 +9,10 @@ type Service interface {
 	Calculate(
 		input CalculationInput,
 	) (*models.TripFare, error)
+
+	Estimate(
+		input EstimateInput,
+	) (*CalculationResult, error)
 }
 
 type fareService struct{}

@@ -36,6 +36,7 @@ func NewRouter(
 	paymentCallbackHandler *PaymentCallbackHandler,
 	rideRequestHandler *RideRequestHandler,
 	serviceCategoryHandler *ServiceCategoryHandler,
+	fareEstimateHandler *FareEstimateHandler,
 	dispatchHandler *DispatchHandler,
 ) *gin.Engine {
 
@@ -90,6 +91,7 @@ func NewRouter(
 		paymentCallbackHandler,
 		rideRequestHandler,
 		serviceCategoryHandler,
+		fareEstimateHandler,
 		dispatchHandler,
 	)
 
