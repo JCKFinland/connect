@@ -435,7 +435,76 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	}
 
 	// ---------------------------------------------------------
-	// 12. Verify immutable persisted GPS evidence.
+	// 12. Replaying the same physical GPS observation must be
+	//     idempotent.
+	// ---------------------------------------------------------
+
+	duplicateLocation, err := service.RecordTripLocation(
+		ctx,
+		tripID,
+		driverUserID,
+		RecordLocationRequest{
+			Latitude:       60.1708,
+			Longitude:      24.9375,
+			Altitude:       &altitude,
+			SpeedKMH:       &speed,
+			Heading:        &heading,
+			AccuracyMeters: &accuracy,
+			RecordedAt:     recordedAt,
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"replay duplicate trip location: %v",
+			err,
+		)
+	}
+
+	if duplicateLocation == nil {
+		t.Fatal(
+			"expected persisted location for duplicate observation",
+		)
+	}
+
+	if duplicateLocation.ID != location.ID {
+		t.Fatalf(
+			"expected duplicate observation to return persisted location %s, got %s",
+			location.ID,
+			duplicateLocation.ID,
+		)
+	}
+
+	var duplicateObservationCount int
+
+	err = db.QueryRow(
+		ctx,
+		`
+		SELECT COUNT(*)
+		FROM trip_locations
+		WHERE trip_id = $1
+		  AND driver_id = $2
+		  AND recorded_at = $3
+	`,
+		tripID,
+		driverUserID,
+		recordedAt,
+	).Scan(&duplicateObservationCount)
+	if err != nil {
+		t.Fatalf(
+			"count duplicate trip location observations: %v",
+			err,
+		)
+	}
+
+	if duplicateObservationCount != 1 {
+		t.Fatalf(
+			"expected exactly 1 persisted observation after duplicate replay, got %d",
+			duplicateObservationCount,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 13. Verify immutable persisted GPS evidence.
 	// ---------------------------------------------------------
 
 	var (
@@ -571,7 +640,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	}
 
 	// ---------------------------------------------------------
-	// 13. Exactly one evidence row must exist for this test trip.
+	// 14. Exactly one evidence row must exist for this test trip.
 	// ---------------------------------------------------------
 
 	var locationCount int
@@ -602,7 +671,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	}
 
 	// ---------------------------------------------------------
-	// 14. A non-DRIVER actor must not record GPS evidence.
+	// 15. A non-DRIVER actor must not record GPS evidence.
 	// ---------------------------------------------------------
 
 	customerRoles, err := userRoleRepo.GetUserRoles(
@@ -654,7 +723,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	}
 
 	// ---------------------------------------------------------
-	// 15. A DRIVER must not record evidence for another user's
+	// 16. A DRIVER must not record evidence for another user's
 	//     trip.
 	//
 	// This disposable trip is temporarily assigned to the
@@ -719,7 +788,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	}
 
 	// ---------------------------------------------------------
-	// 16. GPS evidence must only be accepted while the trip is
+	// 17. GPS evidence must only be accepted while the trip is
 	//     IN_PROGRESS.
 	// ---------------------------------------------------------
 
@@ -763,7 +832,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 	}
 
 	// ---------------------------------------------------------
-	// 17. Rejected attempts must not create additional evidence.
+	// 18. Rejected attempts must not create additional evidence.
 	// ---------------------------------------------------------
 
 	err = db.QueryRow(

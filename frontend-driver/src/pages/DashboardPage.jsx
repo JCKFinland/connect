@@ -15,6 +15,7 @@ import { useAuth } from "../auth/AuthContext";
 import { ActiveTripCard } from "../components/ActiveTripCard";
 import { DispatchOfferCard } from "../components/DispatchOfferCard";
 import { useDriverHeartbeat } from "../hooks/useDriverHeartbeat";
+import { useTripLocationTracking } from "../hooks/useTripLocationTracking";
 
 const OFFER_POLL_INTERVAL_MS = 5000;
 
@@ -35,6 +36,8 @@ export function DashboardPage() {
   const [tripError, setTripError] = useState("");
 
   useDriverHeartbeat(presence?.is_online === true);
+
+  const { locationError } = useTripLocationTracking(activeTrip);
 
   async function loadPresence() {
     try {
@@ -326,6 +329,10 @@ export function DashboardPage() {
         <>
           {offerError && <p className="error-message">{offerError}</p>}
           {tripError && <p className="error-message">{tripError}</p>}
+
+          {activeTrip?.status === "IN_PROGRESS" && locationError && (
+            <p className="error-message">Trip location: {locationError}</p>
+          )}
 
           <ActiveTripCard
             trip={activeTrip}

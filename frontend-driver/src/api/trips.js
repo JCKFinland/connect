@@ -23,3 +23,11 @@ export function completeTrip(tripId) {
     body: {},
   });
 }
+
+export function recordTripLocation(tripId, location) {
+  return apiRequest(`/trips/${tripId}/locations`, {
+    method: "POST",
+    authenticated: true,
+    body: location,
+  });
+}

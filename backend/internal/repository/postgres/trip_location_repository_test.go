@@ -77,6 +77,7 @@ func TestTripLocationRepositoryCreateAndListByTripID(t *testing.T) {
 			)
 		}
 	}()
+
 	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 
 	driverFixture, cleanupDriverFixture, err :=
@@ -286,6 +287,74 @@ func TestTripLocationRepositoryCreateAndListByTripID(t *testing.T) {
 		)
 	}
 
+	// The same trip, driver, and device-recorded timestamp represents the
+	// same physical GPS observation and must not be persisted twice.
+	duplicate := &models.TripLocation{
+		ID:             uuid.NewString(),
+		TripID:         location1.TripID,
+		DriverID:       location1.DriverID,
+		Latitude:       location1.Latitude,
+		Longitude:      location1.Longitude,
+		Altitude:       location1.Altitude,
+		SpeedKMH:       location1.SpeedKMH,
+		Heading:        location1.Heading,
+		AccuracyMeters: location1.AccuracyMeters,
+		RecordedAt:     location1.RecordedAt,
+	}
+
+	if err := repo.Create(ctx, duplicate); err != nil {
+		t.Fatalf(
+			"replay duplicate trip location: %v",
+			err,
+		)
+	}
+
+	// Create must return the original immutable observation rather than
+	// creating a second row or replacing the existing evidence.
+	if duplicate.ID != location1.ID {
+		t.Fatalf(
+			"expected duplicate replay to return persisted location ID %s, got %s",
+			location1.ID,
+			duplicate.ID,
+		)
+	}
+
+	if !duplicate.RecordedAt.Equal(location1.RecordedAt) {
+		t.Fatalf(
+			"expected duplicate replay recorded_at %s, got %s",
+			location1.RecordedAt.Format(time.RFC3339Nano),
+			duplicate.RecordedAt.Format(time.RFC3339Nano),
+		)
+	}
+
+	var duplicateCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trip_locations
+			WHERE trip_id = $1
+			  AND driver_id = $2
+			  AND recorded_at = $3
+		`,
+		location1.TripID,
+		location1.DriverID,
+		location1.RecordedAt,
+	).Scan(&duplicateCount); err != nil {
+		t.Fatalf(
+			"count persisted duplicate observations: %v",
+			err,
+		)
+	}
+
+	if duplicateCount != 1 {
+		t.Fatalf(
+			"expected exactly 1 persisted observation after duplicate replay, got %d",
+			duplicateCount,
+		)
+	}
+
 	if err := repo.Create(ctx, location2); err != nil {
 		t.Fatalf(
 			"create second trip location: %v",
@@ -367,7 +436,8 @@ func TestTripLocationRepositoryCreateAndListByTripID(t *testing.T) {
 		)
 	}
 
-	if got.AccuracyMeters == nil || *got.AccuracyMeters != accuracy {
+	if got.AccuracyMeters == nil ||
+		*got.AccuracyMeters != accuracy {
 		t.Fatalf(
 			"expected accuracy %f, got %v",
 			accuracy,

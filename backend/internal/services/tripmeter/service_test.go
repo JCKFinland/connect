@@ -21,6 +21,15 @@ func (r *tripLocationRepositoryStub) Create(
 	return nil
 }
 
+func (r *tripLocationRepositoryStub) GetByObservationIdentity(
+	ctx context.Context,
+	tripID string,
+	driverID string,
+	recordedAt time.Time,
+) (*models.TripLocation, error) {
+	return nil, nil
+}
+
 func (r *tripLocationRepositoryStub) ListByTripID(
 	ctx context.Context,
 	tripID string,

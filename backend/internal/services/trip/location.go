@@ -159,6 +159,9 @@ func (s *tripService) RecordTripLocation(
 				)
 			}
 
+			// Create is idempotent for the immutable observation identity
+			// (trip_id, driver_id, recorded_at). On a duplicate replay,
+			// location contains the already persisted observation.
 			recordedLocation = location
 
 			return nil
