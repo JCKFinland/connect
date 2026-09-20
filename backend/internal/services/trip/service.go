@@ -33,6 +33,11 @@ type Service interface {
 		userID string,
 	) (*models.Trip, error)
 
+	GetActiveByDriver(
+		ctx context.Context,
+		driverUserID string,
+	) (*models.Trip, error)
+
 	List(
 		ctx context.Context,
 		companyID string,

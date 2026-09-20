@@ -122,6 +122,7 @@ func RegisterRoutes(
 			driver.PATCH("/availability", driverPresenceHandler.UpdateAvailability)
 
 			driver.GET("/presence", driverPresenceHandler.GetCurrent)
+			driver.GET("/trip", tripHandler.GetActiveDriverTrip)
 		}
 
 		// ---------------------------------------------------

@@ -173,6 +173,51 @@ func (h *TripHandler) GetTrip(c *gin.Context) {
 	})
 }
 
+// GetActiveDriverTrip handles GET /api/v1/driver/trip.
+func (h *TripHandler) GetActiveDriverTrip(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authenticated user not found",
+		})
+		return
+	}
+
+	result, err := h.service.GetActiveByDriver(
+		c.Request.Context(),
+		user.ID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, trip.ErrTripAccessDenied):
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to access driver trips",
+			})
+
+		case errors.Is(err, trip.ErrActiveTripNotFound):
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "No active trip found",
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "Failed to retrieve active trip",
+			})
+		}
+
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
 // ListTrips handles GET /api/v1/trips.
 func (h *TripHandler) ListTrips(c *gin.Context) {
 	user, ok := middleware.CurrentUser(c)

@@ -6,7 +6,9 @@ import {
   rejectDispatchOffer,
 } from "../api/dispatchOffers";
 import { getCurrentPresence, goOffline, goOnline } from "../api/presence";
+import { getActiveDriverTrip } from "../api/trips";
 import { useAuth } from "../auth/AuthContext";
+import { ActiveTripCard } from "../components/ActiveTripCard";
 import { DispatchOfferCard } from "../components/DispatchOfferCard";
 import { useDriverHeartbeat } from "../hooks/useDriverHeartbeat";
 
@@ -23,6 +25,9 @@ export function DashboardPage() {
   const [pendingOffer, setPendingOffer] = useState(null);
   const [offerResponding, setOfferResponding] = useState(false);
   const [offerError, setOfferError] = useState("");
+
+  const [activeTrip, setActiveTrip] = useState(null);
+  const [tripError, setTripError] = useState("");
 
   useDriverHeartbeat(presence?.is_online === true);
 
@@ -56,6 +61,23 @@ export function DashboardPage() {
     }
   }
 
+  async function loadActiveTrip() {
+    try {
+      const response = await getActiveDriverTrip();
+
+      setActiveTrip(response?.data ?? null);
+      setTripError("");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setActiveTrip(null);
+        setTripError("");
+        return;
+      }
+
+      setTripError(err.message || "Unable to load active trip.");
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -64,7 +86,13 @@ export function DashboardPage() {
         const response = await getCurrentPresence();
 
         if (!cancelled) {
-          setPresence(response?.data ?? null);
+          const currentPresence = response?.data ?? null;
+
+          setPresence(currentPresence);
+
+          if (currentPresence?.is_online) {
+            await loadActiveTrip();
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -147,6 +175,11 @@ export function DashboardPage() {
 
     try {
       await goOffline();
+
+      setActiveTrip(null);
+      setTripError("");
+      setPendingOffer(null);
+
       await loadPresence();
     } catch (err) {
       setError(err.message || "Unable to go offline.");
@@ -163,7 +196,7 @@ export function DashboardPage() {
       await acceptDispatchOffer(offerID);
       setPendingOffer(null);
 
-      await loadPresence();
+      await Promise.all([loadPresence(), loadActiveTrip()]);
     } catch (err) {
       setOfferError(err.message || "Unable to accept ride offer.");
       await loadPendingOffer();
@@ -248,6 +281,9 @@ export function DashboardPage() {
       {presence?.is_online && (
         <>
           {offerError && <p className="error-message">{offerError}</p>}
+          {tripError && <p className="error-message">{tripError}</p>}
+
+          <ActiveTripCard trip={activeTrip} />
 
           <DispatchOfferCard
             offer={pendingOffer}
