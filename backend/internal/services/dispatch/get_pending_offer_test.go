@@ -51,6 +51,30 @@ type pendingOfferRepository struct {
 	called            bool
 }
 
+type pendingOfferRideRequestRepository struct {
+	repository.RideRequestRepository
+
+	request *models.RideRequest
+	err     error
+
+	requestedRideRequestID string
+	called                 bool
+}
+
+func (r *pendingOfferRideRequestRepository) GetByID(
+	_ context.Context,
+	id string,
+) (*models.RideRequest, error) {
+	r.called = true
+	r.requestedRideRequestID = id
+
+	if r.err != nil {
+		return nil, r.err
+	}
+
+	return r.request, nil
+}
+
 func (r *pendingOfferRepository) GetPendingByDriver(
 	_ context.Context,
 	driverID string,
@@ -69,9 +93,10 @@ func TestGetPendingOfferAuthorizedReturnsAuthenticatedDriversOffer(
 	t *testing.T,
 ) {
 	const (
-		userID   = "user-123"
-		driverID = "driver-123"
-		offerID  = "offer-123"
+		userID        = "user-123"
+		driverID      = "driver-123"
+		offerID       = "offer-123"
+		rideRequestID = "ride-request-123"
 	)
 
 	now := time.Now().UTC()
@@ -86,18 +111,35 @@ func TestGetPendingOfferAuthorizedReturnsAuthenticatedDriversOffer(
 
 	offerRepo := &pendingOfferRepository{
 		offer: &models.DispatchOffer{
-			ID:        offerID,
-			DriverID:  driverID,
-			Status:    "PENDING",
-			OfferedAt: now,
-			ExpiresAt: now.Add(30 * time.Second),
+			ID:            offerID,
+			RideRequestID: rideRequestID,
+			DriverID:      driverID,
+			Status:        "PENDING",
+			OfferedAt:     now,
+			ExpiresAt:     now.Add(30 * time.Second),
+		},
+	}
+
+	rideRepo := &pendingOfferRideRequestRepository{
+		request: &models.RideRequest{
+			PickupAddress:        "Pickup Street 1",
+			PickupLatitude:       60.2055,
+			PickupLongitude:      24.6559,
+			DestinationAddress:   "Destination Street 2",
+			DestinationLatitude:  60.1699,
+			DestinationLongitude: 24.9384,
+			RequestedVehicleType: "VAN",
+			PassengerCount:       2,
+			Notes:                "Two bags",
+			RequestedAt:          now.Add(-time.Minute),
 		},
 	}
 
 	service := NewService(
 		Dependencies{
-			Drivers: driverRepo,
-			Offers:  offerRepo,
+			Drivers:      driverRepo,
+			Offers:       offerRepo,
+			RideRequests: rideRepo,
 		},
 	)
 
@@ -123,6 +165,49 @@ func TestGetPendingOfferAuthorizedReturnsAuthenticatedDriversOffer(
 			"expected offer ID %q, got %q",
 			offerID,
 			offer.ID,
+		)
+	}
+
+	if offer.RideRequestID != rideRequestID {
+		t.Fatalf(
+			"expected ride request ID %q, got %q",
+			rideRequestID,
+			offer.RideRequestID,
+		)
+	}
+
+	if offer.Ride.PickupAddress != "Pickup Street 1" {
+		t.Fatalf(
+			"expected pickup address %q, got %q",
+			"Pickup Street 1",
+			offer.Ride.PickupAddress,
+		)
+	}
+
+	if offer.Ride.DestinationAddress != "Destination Street 2" {
+		t.Fatalf(
+			"expected destination address %q, got %q",
+			"Destination Street 2",
+			offer.Ride.DestinationAddress,
+		)
+	}
+
+	if offer.Ride.PassengerCount != 2 {
+		t.Fatalf(
+			"expected passenger count 2, got %d",
+			offer.Ride.PassengerCount,
+		)
+	}
+
+	if !rideRepo.called {
+		t.Fatal("expected ride-request repository lookup")
+	}
+
+	if rideRepo.requestedRideRequestID != rideRequestID {
+		t.Fatalf(
+			"expected ride-request lookup for %q, got %q",
+			rideRequestID,
+			rideRepo.requestedRideRequestID,
 		)
 	}
 
