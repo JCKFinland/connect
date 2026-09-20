@@ -6,7 +6,11 @@ import {
   rejectDispatchOffer,
 } from "../api/dispatchOffers";
 import { getCurrentPresence, goOffline, goOnline } from "../api/presence";
-import { getActiveDriverTrip } from "../api/trips";
+import {
+  completeTrip,
+  getActiveDriverTrip,
+  updateTripStatus,
+} from "../api/trips";
 import { useAuth } from "../auth/AuthContext";
 import { ActiveTripCard } from "../components/ActiveTripCard";
 import { DispatchOfferCard } from "../components/DispatchOfferCard";
@@ -27,6 +31,7 @@ export function DashboardPage() {
   const [offerError, setOfferError] = useState("");
 
   const [activeTrip, setActiveTrip] = useState(null);
+  const [tripUpdating, setTripUpdating] = useState(false);
   const [tripError, setTripError] = useState("");
 
   useDriverHeartbeat(presence?.is_online === true);
@@ -188,6 +193,45 @@ export function DashboardPage() {
     }
   }
 
+  async function handleTripStatusUpdate(status) {
+    if (!activeTrip?.id) {
+      return;
+    }
+
+    setTripUpdating(true);
+    setTripError("");
+
+    try {
+      await updateTripStatus(activeTrip.id, status);
+      await loadActiveTrip();
+    } catch (err) {
+      setTripError(err.message || "Unable to update trip status.");
+    } finally {
+      setTripUpdating(false);
+    }
+  }
+
+  async function handleCompleteTrip() {
+    if (!activeTrip?.id) {
+      return;
+    }
+
+    setTripUpdating(true);
+    setTripError("");
+
+    try {
+      await completeTrip(activeTrip.id);
+
+      setActiveTrip(null);
+
+      await loadPresence();
+    } catch (err) {
+      setTripError(err.message || "Unable to complete trip.");
+    } finally {
+      setTripUpdating(false);
+    }
+  }
+
   async function handleAcceptOffer(offerID) {
     setOfferResponding(true);
     setOfferError("");
@@ -283,7 +327,12 @@ export function DashboardPage() {
           {offerError && <p className="error-message">{offerError}</p>}
           {tripError && <p className="error-message">{tripError}</p>}
 
-          <ActiveTripCard trip={activeTrip} />
+          <ActiveTripCard
+            trip={activeTrip}
+            updating={tripUpdating}
+            onStatusUpdate={handleTripStatusUpdate}
+            onComplete={handleCompleteTrip}
+          />
 
           <DispatchOfferCard
             offer={pendingOffer}

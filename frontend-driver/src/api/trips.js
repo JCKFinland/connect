@@ -5,3 +5,21 @@ export function getActiveDriverTrip() {
     authenticated: true,
   });
 }
+
+export function updateTripStatus(tripId, status) {
+  return apiRequest(`/trips/${tripId}/status`, {
+    method: "PATCH",
+    authenticated: true,
+    body: {
+      status,
+    },
+  });
+}
+
+export function completeTrip(tripId) {
+  return apiRequest(`/trips/${tripId}/complete`, {
+    method: "POST",
+    authenticated: true,
+    body: {},
+  });
+}
