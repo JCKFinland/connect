@@ -1,7 +1,16 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "../auth/AuthContext";
+import { ApiError } from "../api/client";
+import {
+  acceptDispatchOffer,
+  getPendingDispatchOffer,
+  rejectDispatchOffer,
+} from "../api/dispatchOffers";
 import { getCurrentPresence, goOffline, goOnline } from "../api/presence";
+import { useAuth } from "../auth/AuthContext";
+import { DispatchOfferCard } from "../components/DispatchOfferCard";
 import { useDriverHeartbeat } from "../hooks/useDriverHeartbeat";
+
+const OFFER_POLL_INTERVAL_MS = 5000;
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -10,6 +19,10 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
+
+  const [pendingOffer, setPendingOffer] = useState(null);
+  const [offerResponding, setOfferResponding] = useState(false);
+  const [offerError, setOfferError] = useState("");
 
   useDriverHeartbeat(presence?.is_online === true);
 
@@ -23,6 +36,23 @@ export function DashboardPage() {
       setError(err.message || "Unable to load driver status.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadPendingOffer() {
+    try {
+      const response = await getPendingDispatchOffer();
+
+      setPendingOffer(response?.data ?? null);
+      setOfferError("");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setPendingOffer(null);
+        setOfferError("");
+        return;
+      }
+
+      setOfferError(err.message || "Unable to load ride offers.");
     }
   }
 
@@ -54,6 +84,49 @@ export function DashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!presence?.is_online) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function pollPendingOffer() {
+      try {
+        const response = await getPendingDispatchOffer();
+
+        if (!cancelled) {
+          setPendingOffer(response?.data ?? null);
+          setOfferError("");
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+        if (err instanceof ApiError && err.status === 404) {
+          setPendingOffer(null);
+          setOfferError("");
+          return;
+        }
+
+        setOfferError(err.message || "Unable to load ride offers.");
+      }
+    }
+
+    pollPendingOffer();
+
+    const intervalID = window.setInterval(
+      pollPendingOffer,
+      OFFER_POLL_INTERVAL_MS,
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalID);
+    };
+  }, [presence?.is_online]);
+
   async function handleOnline() {
     setUpdating(true);
     setError("");
@@ -79,6 +152,49 @@ export function DashboardPage() {
       setError(err.message || "Unable to go offline.");
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function handleAcceptOffer(offerID) {
+    setOfferResponding(true);
+    setOfferError("");
+
+    try {
+      await acceptDispatchOffer(offerID);
+      setPendingOffer(null);
+
+      await loadPresence();
+    } catch (err) {
+      setOfferError(err.message || "Unable to accept ride offer.");
+      await loadPendingOffer();
+    } finally {
+      setOfferResponding(false);
+    }
+  }
+
+  async function handleRejectOffer(offerID) {
+    const reason = window.prompt(
+      "Why are you rejecting this ride?",
+      "Driver unavailable",
+    );
+
+    if (reason === null) {
+      return;
+    }
+
+    setOfferResponding(true);
+    setOfferError("");
+
+    try {
+      await rejectDispatchOffer(offerID, reason.trim());
+      setPendingOffer(null);
+
+      await loadPendingOffer();
+    } catch (err) {
+      setOfferError(err.message || "Unable to reject ride offer.");
+      await loadPendingOffer();
+    } finally {
+      setOfferResponding(false);
     }
   }
 
@@ -128,6 +244,19 @@ export function DashboardPage() {
           </>
         )}
       </div>
+
+      {presence?.is_online && (
+        <>
+          {offerError && <p className="error-message">{offerError}</p>}
+
+          <DispatchOfferCard
+            offer={pendingOffer}
+            responding={offerResponding}
+            onAccept={handleAcceptOffer}
+            onReject={handleRejectOffer}
+          />
+        </>
+      )}
     </section>
   );
 }

@@ -37,6 +37,39 @@ button:disabled {
   opacity: 0.65;
 }
 
+.dispatch-offer-card {
+  max-width: 520px;
+  margin-top: 24px;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #dfe3e8;
+  border-radius: 12px;
+}
+
+.dispatch-offer-card h2 {
+  margin-top: 0;
+}
+
+.dispatch-offer-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.dispatch-offer-actions button {
+  border: 0;
+  border-radius: 8px;
+  padding: 11px 16px;
+  background: #172033;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.dispatch-offer-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .driver-status-card {
   max-width: 520px;
   margin-top: 28px;
