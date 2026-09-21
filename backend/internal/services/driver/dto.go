@@ -35,6 +35,23 @@ type CreateDriverRequest struct {
 	IsActive bool `json:"is_active"`
 }
 
+// RegisterDriverRequest contains the driver-supplied fields for
+// authenticated self-service driver registration.
+//
+// Account identity is derived from the authenticated user.
+// Verification and operational state are controlled by CONNECT.
+type RegisterDriverRequest struct {
+	CompanyID string `json:"company_id" binding:"required"`
+
+	BranchID string `json:"branch_id" binding:"required"`
+
+	TaxiDriverLicenseNumber string `json:"taxi_driver_license_number" binding:"required"`
+
+	DrivingLicenseNumber string `json:"driving_license_number" binding:"required"`
+
+	DrivingLicenseExpiry *time.Time `json:"driving_license_expiry" binding:"required"`
+}
+
 // UpdateDriverRequest contains mutable driver fields.
 type UpdateDriverRequest struct {
 	CompanyID string `json:"company_id"`

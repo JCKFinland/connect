@@ -1,9 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/JCKFinland/connect/backend/internal/middleware"
 
 	driverservice "github.com/JCKFinland/connect/backend/internal/services/driver"
 )
@@ -21,6 +24,62 @@ func NewDriverHandler(
 	return &DriverHandler{
 		service: service,
 	}
+}
+
+// Register creates a driver profile for the authenticated user.
+func (h *DriverHandler) Register(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authentication required",
+		})
+		return
+	}
+
+	var req driverservice.RegisterDriverRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	driver, err := h.service.Register(
+		c.Request.Context(),
+		user,
+		req,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, driverservice.ErrDriverAlreadyExists):
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"message": "driver already registered",
+			})
+
+		case errors.Is(err, driverservice.ErrInvalidDriver):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "invalid driver registration",
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "failed to register driver",
+			})
+		}
+
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    driver,
+	})
 }
 
 // Create registers a new driver.
@@ -50,7 +109,7 @@ func (h *DriverHandler) Create(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data": driver,
+		"data":    driver,
 	})
 }
 
@@ -71,7 +130,7 @@ func (h *DriverHandler) GetByID(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data": driver,
+		"data":    driver,
 	})
 }
 
@@ -91,7 +150,7 @@ func (h *DriverHandler) List(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data": drivers,
+		"data":    drivers,
 	})
 }
 

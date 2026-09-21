@@ -191,6 +191,8 @@ func RegisterRoutes(
 		drivers.Use(authMiddleware.RequireAuth())
 
 		{
+			drivers.POST("/register", driverHandler.Register)
+
 			drivers.POST("", driverHandler.Create)
 
 			drivers.GET("", driverHandler.List)

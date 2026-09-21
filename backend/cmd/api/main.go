@@ -175,7 +175,10 @@ func main() {
 	)
 
 	driverService := driverservice.NewService(
-		driverRepo,
+		driverservice.Dependencies{
+			Drivers:  driverRepo,
+			Branches: branchRepo,
+		},
 	)
 
 	driverVehicleAssignmentService := dvassignmentservice.NewService(
