@@ -150,6 +150,11 @@ func RegisterRoutes(
 				driverHandler.Register,
 			)
 
+			drivers.GET(
+				"/registration",
+				driverHandler.GetRegistration,
+			)
+
 			// ---------------------------------------------------
 			// Driver Dispatch Offer Operations
 			// ---------------------------------------------------
