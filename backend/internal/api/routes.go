@@ -103,26 +103,112 @@ func RegisterRoutes(
 
 		driver := v1.Group("/driver")
 
-		// Secures the driver dispatch system from unauthenticated requests.
+		// Secures driver operational endpoints from
+		// unauthenticated requests.
 		driver.Use(authMiddleware.RequireAuth())
+
 		{
-			// Tracks shift initialization and termination sequences.
+			// Tracks shift initialization and termination.
 			driver.POST("/online", driverPresenceHandler.GoOnline)
 			driver.POST("/offline", driverPresenceHandler.GoOffline)
 
-			// Processes periodic telemetry keep-alive updates from the active mobile map.
+			// Processes periodic driver telemetry keep-alive.
 			driver.POST("/heartbeat", driverPresenceHandler.Heartbeat)
 
-			// Links and cuts driver vehicle/dispatch alignments.
+			// Links and releases driver operational assignments.
 			driver.POST("/assign", driverAssignmentHandler.Assign)
 			driver.POST("/unassign", driverAssignmentHandler.Unassign)
 
-			// Updates operational statuses (e.g., changing from "Available" to "On Break").
+			// Driver availability and presence operations.
 			driver.GET("/available", driverPresenceHandler.ListAvailable)
 			driver.PATCH("/availability", driverPresenceHandler.UpdateAvailability)
 
 			driver.GET("/presence", driverPresenceHandler.GetCurrent)
+
+			// Recovers the authenticated driver's active trip.
 			driver.GET("/trip", tripHandler.GetActiveDriverTrip)
+		}
+
+		// ---------------------------------------------------
+		// Driver Management Routes (/api/v1/drivers/*)
+		// ---------------------------------------------------
+
+		drivers := v1.Group("/drivers")
+
+		drivers.Use(authMiddleware.RequireAuth())
+
+		{
+			// ---------------------------------------------------
+			// Driver Self-Service Registration
+			// ---------------------------------------------------
+			//
+			// Any authenticated user may submit a driver
+			// registration application. Verification and DRIVER
+			// role assignment are handled separately.
+			drivers.POST(
+				"/register",
+				driverHandler.Register,
+			)
+
+			// ---------------------------------------------------
+			// Driver Dispatch Offer Operations
+			// ---------------------------------------------------
+			//
+			// Offer ownership and driver authorization are
+			// enforced by the dispatch service.
+			drivers.GET(
+				"/dispatch-offers/pending",
+				dispatchHandler.GetPendingOffer,
+			)
+
+			drivers.POST(
+				"/dispatch-offers/:offer_id/accept",
+				dispatchHandler.AcceptOffer,
+			)
+
+			drivers.POST(
+				"/dispatch-offers/:offer_id/reject",
+				dispatchHandler.RejectOffer,
+			)
+
+			// ---------------------------------------------------
+			// Administrative Driver Management
+			// ---------------------------------------------------
+			//
+			// Creating, updating, and deleting driver records
+			// requires drivers.manage permission. Reading the
+			// administrative driver registry requires
+			// drivers.read permission.
+
+			drivers.POST(
+				"",
+				rbacMiddleware.RequirePermission("drivers.manage"),
+				driverHandler.Create,
+			)
+
+			drivers.GET(
+				"",
+				rbacMiddleware.RequirePermission("drivers.read"),
+				driverHandler.List,
+			)
+
+			drivers.GET(
+				"/:id",
+				rbacMiddleware.RequirePermission("drivers.read"),
+				driverHandler.GetByID,
+			)
+
+			drivers.PUT(
+				"/:id",
+				rbacMiddleware.RequirePermission("drivers.manage"),
+				driverHandler.Update,
+			)
+
+			drivers.DELETE(
+				"/:id",
+				rbacMiddleware.RequirePermission("drivers.manage"),
+				driverHandler.Delete,
+			)
 		}
 
 		// ---------------------------------------------------
@@ -184,40 +270,6 @@ func RegisterRoutes(
 			vehicles.PUT("/:id", vehicleHandler.Update)
 
 			vehicles.DELETE("/:id", vehicleHandler.Delete)
-		}
-
-		drivers := v1.Group("/drivers")
-
-		drivers.Use(authMiddleware.RequireAuth())
-
-		{
-			drivers.POST("/register", driverHandler.Register)
-
-			drivers.POST("", driverHandler.Create)
-
-			drivers.GET("", driverHandler.List)
-
-			drivers.GET("/:id", driverHandler.GetByID)
-
-			drivers.PUT("/:id", driverHandler.Update)
-
-			drivers.DELETE("/:id", driverHandler.Delete)
-
-			// Returns the authenticated driver's current pending dispatch offer.
-			drivers.GET(
-				"/dispatch-offers/pending",
-				dispatchHandler.GetPendingOffer,
-			)
-
-			drivers.POST(
-				"/dispatch-offers/:offer_id/accept",
-				dispatchHandler.AcceptOffer,
-			)
-
-			drivers.POST(
-				"/dispatch-offers/:offer_id/reject",
-				dispatchHandler.RejectOffer,
-			)
 		}
 
 		assignments := v1.Group("/driver-vehicle-assignments")
