@@ -155,6 +155,16 @@ func RegisterRoutes(
 				driverHandler.GetRegistration,
 			)
 
+			drivers.GET(
+				"/registration/companies",
+				driverHandler.ListRegistrationCompanies,
+			)
+
+			drivers.GET(
+				"/registration/companies/:company_id/branches",
+				driverHandler.ListRegistrationBranches,
+			)
+
 			// ---------------------------------------------------
 			// Driver Dispatch Offer Operations
 			// ---------------------------------------------------

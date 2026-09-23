@@ -127,6 +127,55 @@ func (h *DriverHandler) GetRegistration(c *gin.Context) {
 	})
 }
 
+// ListRegistrationCompanies returns active companies available for driver registration.
+func (h *DriverHandler) ListRegistrationCompanies(c *gin.Context) {
+	companies, err := h.service.ListRegistrationCompanies(
+		c.Request.Context(),
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to retrieve registration companies",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    companies,
+	})
+}
+
+// ListRegistrationBranches returns active branches for a registration company.
+func (h *DriverHandler) ListRegistrationBranches(c *gin.Context) {
+	branches, err := h.service.ListRegistrationBranches(
+		c.Request.Context(),
+		c.Param("company_id"),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, driverservice.ErrInvalidDriver):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "invalid registration company",
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "failed to retrieve registration branches",
+			})
+		}
+
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    branches,
+	})
+}
+
 // Create registers a new driver.
 func (h *DriverHandler) Create(c *gin.Context) {
 

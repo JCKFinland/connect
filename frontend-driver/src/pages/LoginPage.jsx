@@ -4,7 +4,7 @@ import { Navigate, useLocation, useNavigate } from "react-router";
 import { useAuth } from "../auth/AuthContext";
 
 export function LoginPage() {
-  const { isAuthenticated, isBootstrapping, login } = useAuth();
+  const { user, isAuthenticated, isBootstrapping, login } = useAuth();
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -19,7 +19,10 @@ export function LoginPage() {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    const hasDriverRole =
+      Array.isArray(user?.roles) && user.roles.includes("DRIVER");
+
+    return <Navigate to={hasDriverRole ? "/" : "/onboarding"} replace />;
   }
 
   async function handleSubmit(event) {
@@ -29,12 +32,20 @@ export function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      await login({
+      const currentUser = await login({
         email: email.trim(),
         password,
       });
 
-      const destination = location.state?.from?.pathname || "/";
+      const hasDriverRole =
+        Array.isArray(currentUser?.roles) &&
+        currentUser.roles.includes("DRIVER");
+
+      const requestedDestination = location.state?.from?.pathname;
+
+      const destination = hasDriverRole
+        ? requestedDestination || "/"
+        : "/onboarding";
 
       navigate(destination, { replace: true });
     } catch (loginError) {

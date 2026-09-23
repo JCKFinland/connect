@@ -176,8 +176,9 @@ func main() {
 
 	driverService := driverservice.NewService(
 		driverservice.Dependencies{
-			Drivers:  driverRepo,
-			Branches: branchRepo,
+			Drivers:   driverRepo,
+			Companies: companyRepo,
+			Branches:  branchRepo,
 		},
 	)
 

@@ -3,6 +3,8 @@ import { createBrowserRouter, Navigate } from "react-router";
 import { DriverLayout } from "../layouts/DriverLayout";
 import { DashboardPage } from "../pages/DashboardPage";
 import { LoginPage } from "../pages/LoginPage";
+import { OnboardingPage } from "../pages/OnboardingPage";
+import { DriverRoute } from "./DriverRoute";
 import { ProtectedRoute } from "./ProtectedRoute";
 
 export const router = createBrowserRouter([
@@ -17,8 +19,17 @@ export const router = createBrowserRouter([
         element: <DriverLayout />,
         children: [
           {
-            index: true,
-            element: <DashboardPage />,
+            path: "onboarding",
+            element: <OnboardingPage />,
+          },
+          {
+            element: <DriverRoute />,
+            children: [
+              {
+                index: true,
+                element: <DashboardPage />,
+              },
+            ],
           },
         ],
       },

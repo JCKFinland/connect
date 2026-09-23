@@ -26,6 +26,10 @@ type CompanyRepository interface {
 		ctx context.Context,
 	) ([]*models.Company, error)
 
+	ListActive(
+		ctx context.Context,
+	) ([]*models.Company, error)
+
 	Delete(
 		ctx context.Context,
 		id string,

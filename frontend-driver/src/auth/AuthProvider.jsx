@@ -9,12 +9,6 @@ import { clearAccessToken, setAccessToken } from "./accessTokenStore";
 import { AuthContext } from "./AuthContext";
 import { bootstrapSession } from "./bootstrapSession";
 
-const DRIVER_ROLE = "DRIVER";
-
-function hasDriverRole(user) {
-  return Array.isArray(user?.roles) && user.roles.includes(DRIVER_ROLE);
-}
-
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
@@ -24,16 +18,12 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  const loadCurrentDriver = useCallback(async () => {
+  const loadCurrentUser = useCallback(async () => {
     const response = await getCurrentUserRequest();
     const currentUser = response?.data;
 
     if (!currentUser) {
       throw new Error("Current user response did not contain user data");
-    }
-
-    if (!hasDriverRole(currentUser)) {
-      throw new Error("This account does not have driver access.");
     }
 
     setUser(currentUser);
@@ -47,10 +37,6 @@ export function AuthProvider({ children }) {
     async function restoreSession() {
       try {
         const currentUser = await bootstrapSession();
-
-        if (!hasDriverRole(currentUser)) {
-          throw new Error("This account does not have driver access.");
-        }
 
         if (!cancelled) {
           setUser(currentUser);
@@ -90,7 +76,7 @@ export function AuthProvider({ children }) {
       setAccessToken(accessToken);
 
       try {
-        return await loadCurrentDriver();
+        return await loadCurrentUser();
       } catch (error) {
         try {
           await logoutRequest();
@@ -101,7 +87,7 @@ export function AuthProvider({ children }) {
         throw error;
       }
     },
-    [clearSession, loadCurrentDriver],
+    [clearSession, loadCurrentUser],
   );
 
   const logout = useCallback(async () => {

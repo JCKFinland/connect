@@ -113,6 +113,13 @@ func (r *branchRepositoryStub) List(
 	return nil, nil
 }
 
+func (s *branchRepositoryStub) ListActiveByCompanyID(
+	ctx context.Context,
+	companyID string,
+) ([]*models.Branch, error) {
+	return nil, nil
+}
+
 func (r *branchRepositoryStub) Delete(
 	ctx context.Context,
 	id string,

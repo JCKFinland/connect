@@ -26,6 +26,11 @@ type BranchRepository interface {
 		ctx context.Context,
 	) ([]*models.Branch, error)
 
+	ListActiveByCompanyID(
+		ctx context.Context,
+		companyID string,
+	) ([]*models.Branch, error)
+
 	Delete(
 		ctx context.Context,
 		id string,

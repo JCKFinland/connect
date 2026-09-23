@@ -224,6 +224,79 @@ func (r *BranchRepository) List(
 	return branches, nil
 }
 
+func (r *BranchRepository) ListActiveByCompanyID(
+	ctx context.Context,
+	companyID string,
+) ([]*models.Branch, error) {
+	query := `
+	SELECT
+		id,
+		company_id,
+		code,
+		name,
+		email,
+		phone,
+		address_line1,
+		address_line2,
+		city,
+		state,
+		postal_code,
+		latitude,
+		longitude,
+		is_active,
+		created_at,
+		updated_at,
+		deleted_at
+	FROM branches
+	WHERE company_id = $1
+	AND deleted_at IS NULL
+	AND is_active = TRUE
+	ORDER BY name;
+	`
+
+	rows, err := r.db.Query(ctx, query, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var branches []*models.Branch
+
+	for rows.Next() {
+		var branch models.Branch
+
+		if err := rows.Scan(
+			&branch.ID,
+			&branch.CompanyID,
+			&branch.Code,
+			&branch.Name,
+			&branch.Email,
+			&branch.Phone,
+			&branch.AddressLine1,
+			&branch.AddressLine2,
+			&branch.City,
+			&branch.State,
+			&branch.PostalCode,
+			&branch.Latitude,
+			&branch.Longitude,
+			&branch.IsActive,
+			&branch.CreatedAt,
+			&branch.UpdatedAt,
+			&branch.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		branches = append(branches, &branch)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return branches, nil
+}
+
 func (r *BranchRepository) Update(
 	ctx context.Context,
 	branch *models.Branch,

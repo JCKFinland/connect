@@ -230,6 +230,81 @@ func (r *CompanyRepository) List(
 	return companies, nil
 }
 
+func (r *CompanyRepository) ListActive(
+	ctx context.Context,
+) ([]*models.Company, error) {
+	query := `
+	SELECT
+		id,
+		name,
+		legal_name,
+		business_id,
+		email,
+		phone,
+		website,
+		country_code,
+		timezone,
+		address_line1,
+		address_line2,
+		city,
+		state,
+		postal_code,
+		logo_url,
+		is_active,
+		created_at,
+		updated_at,
+		deleted_at
+	FROM companies
+	WHERE deleted_at IS NULL
+	AND is_active = TRUE
+	ORDER BY name;
+	`
+
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var companies []*models.Company
+
+	for rows.Next() {
+		var company models.Company
+
+		if err := rows.Scan(
+			&company.ID,
+			&company.Name,
+			&company.LegalName,
+			&company.BusinessID,
+			&company.Email,
+			&company.Phone,
+			&company.Website,
+			&company.CountryCode,
+			&company.Timezone,
+			&company.AddressLine1,
+			&company.AddressLine2,
+			&company.City,
+			&company.State,
+			&company.PostalCode,
+			&company.LogoURL,
+			&company.IsActive,
+			&company.CreatedAt,
+			&company.UpdatedAt,
+			&company.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		companies = append(companies, &company)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return companies, nil
+}
+
 func (r *CompanyRepository) Update(
 	ctx context.Context,
 	company *models.Company,
