@@ -104,8 +104,10 @@ func RegisterRoutes(
 		driver := v1.Group("/driver")
 
 		// Secures driver operational endpoints from
-		// unauthenticated requests.
+		// unauthenticated requests and restricts them to
+		// authorized driver accounts.
 		driver.Use(authMiddleware.RequireAuth())
+		driver.Use(rbacMiddleware.RequirePermission("driver.operations"))
 
 		{
 			// Tracks shift initialization and termination.
@@ -173,16 +175,19 @@ func RegisterRoutes(
 			// enforced by the dispatch service.
 			drivers.GET(
 				"/dispatch-offers/pending",
+				rbacMiddleware.RequirePermission("driver.operations"),
 				dispatchHandler.GetPendingOffer,
 			)
 
 			drivers.POST(
 				"/dispatch-offers/:offer_id/accept",
+				rbacMiddleware.RequirePermission("driver.operations"),
 				dispatchHandler.AcceptOffer,
 			)
 
 			drivers.POST(
 				"/dispatch-offers/:offer_id/reject",
+				rbacMiddleware.RequirePermission("driver.operations"),
 				dispatchHandler.RejectOffer,
 			)
 
