@@ -7,19 +7,17 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type PostgresUserRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
-func NewUserRepository(db *pgxpool.Pool) UserRepository {
+func NewUserRepository(db DBTX) UserRepository {
 	return &PostgresUserRepository{
 		db: db,
 	}
 }
-
 func (r *PostgresUserRepository) Create(
 	ctx context.Context,
 	user *models.User,

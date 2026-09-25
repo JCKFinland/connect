@@ -42,7 +42,9 @@ type Driver struct {
 	Status string `db:"status" json:"status"`
 
 	// Compliance.
-	IsVerified bool `db:"is_verified" json:"is_verified"`
+	IsVerified       bool       `db:"is_verified" json:"is_verified"`
+	VerifiedAt       *time.Time `db:"verified_at" json:"verified_at,omitempty"`
+	VerifiedByUserID *string    `db:"verified_by_user_id" json:"verified_by_user_id,omitempty"`
 
 	IsActive bool `db:"is_active" json:"is_active"`
 }

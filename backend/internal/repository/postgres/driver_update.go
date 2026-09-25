@@ -31,9 +31,11 @@ func (r *DriverRepository) Update(
 			driving_license_expiry = $12,
 			hire_date = $13,
 			status = $14,
-			is_verified = $15,
-			is_active = $16,
-			updated_at = $17
+            is_verified = $15,
+            verified_at = $16,
+            verified_by_user_id = $17,
+            is_active = $18,
+            updated_at = $19
 		WHERE id = $1
 		  AND deleted_at IS NULL;
 	`
@@ -56,6 +58,8 @@ func (r *DriverRepository) Update(
 		driver.HireDate,
 		driver.Status,
 		driver.IsVerified,
+		driver.VerifiedAt,
+		driver.VerifiedByUserID,
 		driver.IsActive,
 		driver.UpdatedAt,
 	)

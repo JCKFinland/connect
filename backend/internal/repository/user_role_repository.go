@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
@@ -18,10 +17,10 @@ type UserRoleRepository interface {
 }
 
 type PostgresUserRoleRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
-func NewUserRoleRepository(db *pgxpool.Pool) UserRoleRepository {
+func NewUserRoleRepository(db DBTX) UserRoleRepository {
 	return &PostgresUserRoleRepository{
 		db: db,
 	}

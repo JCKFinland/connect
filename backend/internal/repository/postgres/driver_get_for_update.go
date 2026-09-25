@@ -6,8 +6,9 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 )
 
-// GetByID returns a single driver by its ID.
-func (r *DriverRepository) GetByID(
+// GetByIDForUpdate returns a driver and locks the row for the
+// duration of the current database transaction.
+func (r *DriverRepository) GetByIDForUpdate(
 	ctx context.Context,
 	id string,
 ) (*models.Driver, error) {
@@ -38,6 +39,7 @@ func (r *DriverRepository) GetByID(
 		FROM drivers
 		WHERE id = $1
 		  AND deleted_at IS NULL
+		FOR UPDATE
 	`
 
 	driver := &models.Driver{}

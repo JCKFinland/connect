@@ -192,6 +192,19 @@ func RegisterRoutes(
 			)
 
 			// ---------------------------------------------------
+			// Driver Verification
+			// ---------------------------------------------------
+			//
+			// Driver verification grants operational DRIVER access.
+			// This dedicated permission is currently assigned only
+			// to SYSTEM_ADMIN.
+			drivers.POST(
+				"/:id/verify",
+				rbacMiddleware.RequirePermission("drivers.verify"),
+				driverHandler.Verify,
+			)
+
+			// ---------------------------------------------------
 			// Administrative Driver Management
 			// ---------------------------------------------------
 			//

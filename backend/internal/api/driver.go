@@ -300,3 +300,59 @@ func (h *DriverHandler) Delete(c *gin.Context) {
 		"message": "Driver deleted successfully",
 	})
 }
+
+// Verify approves a pending driver registration.
+// The verifier identity is derived from the authenticated user.
+func (h *DriverHandler) Verify(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authentication required",
+		})
+		return
+	}
+
+	driver, err := h.service.Verify(
+		c.Request.Context(),
+		c.Param("id"),
+		user.ID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, driverservice.ErrDriverNotFound):
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "driver not found",
+			})
+
+		case errors.Is(
+			err,
+			driverservice.ErrDriverNotPendingVerification,
+		):
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"message": "driver is not pending verification",
+			})
+
+		case errors.Is(err, driverservice.ErrInvalidDriver):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "driver cannot be verified",
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "failed to verify driver",
+			})
+		}
+
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    driver,
+	})
+}

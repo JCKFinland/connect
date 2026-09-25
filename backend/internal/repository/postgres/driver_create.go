@@ -30,6 +30,8 @@ func (r *DriverRepository) Create(
 			hire_date,
 			status,
 			is_verified,
+			verified_at,
+            verified_by_user_id,
 			is_active,
 			created_at,
 			updated_at
@@ -37,7 +39,7 @@ func (r *DriverRepository) Create(
 		VALUES
 		(
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,
-			$10,$11,$12,$13,$14,$15,$16,$17,$18
+			$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
 		)
 	`
 
@@ -59,6 +61,8 @@ func (r *DriverRepository) Create(
 		driver.HireDate,
 		driver.Status,
 		driver.IsVerified,
+		driver.VerifiedAt,
+		driver.VerifiedByUserID,
 		driver.IsActive,
 		driver.CreatedAt,
 		driver.UpdatedAt,

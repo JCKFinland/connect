@@ -16,8 +16,14 @@ type DriverRepository interface {
 	) error
 
 	// GetByID returns a single driver by its unique identifier.
-	// GetByID returns a single driver by its unique identifier.
 	GetByID(
+		ctx context.Context,
+		id string,
+	) (*models.Driver, error)
+
+	// GetByIDForUpdate returns a driver and locks the row for the
+	// duration of the current database transaction.
+	GetByIDForUpdate(
 		ctx context.Context,
 		id string,
 	) (*models.Driver, error)

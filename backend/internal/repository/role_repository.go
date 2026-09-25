@@ -6,7 +6,6 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
@@ -19,10 +18,10 @@ type RoleRepository interface {
 }
 
 type PostgresRoleRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
-func NewRoleRepository(db *pgxpool.Pool) RoleRepository {
+func NewRoleRepository(db DBTX) RoleRepository {
 	return &PostgresRoleRepository{
 		db: db,
 	}
