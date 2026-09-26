@@ -96,6 +96,24 @@ button:disabled {
   font-weight: 700;
 }
 
+.driver-navigation-actions {
+  margin-top: 20px;
+}
+
+.driver-navigation-actions a {
+  display: inline-block;
+  padding: 11px 16px;
+  border: 1px solid #172033;
+  border-radius: 8px;
+  color: #172033;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.driver-navigation-actions a:hover {
+  background: #f4f6f8;
+}
+
 .login-page,
 .page-status {
   min-height: 100vh;

@@ -1,3 +1,13 @@
+function buildNavigationUrl(latitude, longitude) {
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    return null;
+  }
+
+  const destination = encodeURIComponent(`${latitude},${longitude}`);
+
+  return `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
+}
+
 export function ActiveTripCard({
   trip,
   updating = false,
@@ -12,6 +22,22 @@ export function ActiveTripCard({
       </div>
     );
   }
+
+  const navigatingToPickup =
+    trip.status === "ASSIGNED" || trip.status === "DRIVER_EN_ROUTE";
+
+  const navigatingToDestination =
+    trip.status === "DRIVER_ARRIVED" || trip.status === "IN_PROGRESS";
+
+  const navigationUrl = navigatingToPickup
+    ? buildNavigationUrl(trip.pickup_latitude, trip.pickup_longitude)
+    : navigatingToDestination
+      ? buildNavigationUrl(trip.dropoff_latitude, trip.dropoff_longitude)
+      : null;
+
+  const navigationLabel = navigatingToPickup
+    ? "Navigate to pickup"
+    : "Navigate to destination";
 
   return (
     <div className="driver-status-card">
@@ -39,6 +65,14 @@ export function ActiveTripCard({
           <br />
           {trip.passenger_note}
         </p>
+      )}
+
+      {navigationUrl && (
+        <div className="driver-navigation-actions">
+          <a href={navigationUrl} target="_blank" rel="noopener noreferrer">
+            {navigationLabel}
+          </a>
+        </div>
       )}
 
       {trip.status === "ASSIGNED" && (
