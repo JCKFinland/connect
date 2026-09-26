@@ -1,4 +1,4 @@
-import { Outlet, useNavigate } from "react-router";
+import { NavLink, Outlet, useNavigate } from "react-router";
 
 import { useAuth } from "../auth/AuthContext";
 
@@ -20,6 +20,14 @@ export function DriverLayout() {
             {user?.first_name} {user?.last_name}
           </div>
         </div>
+
+        <nav className="app-navigation" aria-label="Driver navigation">
+          <NavLink to="/" end>
+            Dashboard
+          </NavLink>
+
+          <NavLink to="/vehicles/register">Register vehicle</NavLink>
+        </nav>
 
         <button type="button" onClick={handleLogout}>
           Log out

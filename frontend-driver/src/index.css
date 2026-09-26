@@ -248,3 +248,40 @@ button:disabled {
 .muted {
   color: #667085;
 }
+
+.app-navigation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.app-navigation a {
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: #475467;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-navigation a:hover {
+  background: #f4f6f8;
+  color: #172033;
+}
+
+.app-navigation a.active {
+  background: #172033;
+  color: #ffffff;
+}
+
+@media (max-width: 700px) {
+  .app-header {
+    flex-wrap: wrap;
+  }
+
+  .app-navigation {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+  }
+}
