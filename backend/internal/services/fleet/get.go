@@ -11,7 +11,7 @@ func (s *Service) GetByID(
 	id string,
 ) (*FleetResponse, error) {
 
-	fleet, err := s.repo.GetByID(
+	fleet, err := s.fleets.GetByID(
 		ctx,
 		id,
 	)

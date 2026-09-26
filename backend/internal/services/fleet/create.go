@@ -12,15 +12,15 @@ func (s *Service) Create(
 ) (*FleetResponse, error) {
 
 	fleet := &models.Fleet{
-		CompanyID:  req.CompanyID,
-		BranchID:   req.BranchID,
-		Code:       req.Code,
-		Name:       req.Name,
+		CompanyID:   req.CompanyID,
+		BranchID:    req.BranchID,
+		Code:        req.Code,
+		Name:        req.Name,
 		Description: req.Description,
-		IsActive:   req.IsActive,
+		IsActive:    req.IsActive,
 	}
 
-	if err := s.repo.Create(
+	if err := s.fleets.Create(
 		ctx,
 		fleet,
 	); err != nil {

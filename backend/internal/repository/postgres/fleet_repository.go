@@ -181,6 +181,73 @@ func (r *FleetRepository) List(
 	return fleets, nil
 }
 
+func (r *FleetRepository) ListActiveByCompanyAndBranch(
+	ctx context.Context,
+	companyID string,
+	branchID string,
+) ([]*models.Fleet, error) {
+
+	query := `
+	SELECT
+		id,
+		company_id,
+		branch_id,
+		code,
+		name,
+		description,
+		is_active,
+		created_at,
+		updated_at,
+		deleted_at
+	FROM fleets
+	WHERE company_id = $1
+	  AND branch_id = $2
+	  AND is_active = TRUE
+	  AND deleted_at IS NULL
+	ORDER BY name;
+	`
+
+	rows, err := r.db.Query(
+		ctx,
+		query,
+		companyID,
+		branchID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	fleets := make([]*models.Fleet, 0)
+
+	for rows.Next() {
+		var fleet models.Fleet
+
+		if err := rows.Scan(
+			&fleet.ID,
+			&fleet.CompanyID,
+			&fleet.BranchID,
+			&fleet.Code,
+			&fleet.Name,
+			&fleet.Description,
+			&fleet.IsActive,
+			&fleet.CreatedAt,
+			&fleet.UpdatedAt,
+			&fleet.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		fleets = append(fleets, &fleet)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return fleets, nil
+}
+
 func (r *FleetRepository) Update(
 	ctx context.Context,
 	fleet *models.Fleet,

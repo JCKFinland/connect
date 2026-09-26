@@ -13,7 +13,7 @@ func (s *Service) Update(
 	req UpdateFleetRequest,
 ) error {
 
-	_, err := s.repo.GetByID(
+	_, err := s.fleets.GetByID(
 		ctx,
 		id,
 	)
@@ -30,15 +30,15 @@ func (s *Service) Update(
 		BaseModel: models.BaseModel{
 			ID: id,
 		},
-		CompanyID:  req.CompanyID,
-		BranchID:   req.BranchID,
-		Code:       req.Code,
-		Name:       req.Name,
+		CompanyID:   req.CompanyID,
+		BranchID:    req.BranchID,
+		Code:        req.Code,
+		Name:        req.Name,
 		Description: req.Description,
-		IsActive:   req.IsActive,
+		IsActive:    req.IsActive,
 	}
 
-	if err := s.repo.Update(
+	if err := s.fleets.Update(
 		ctx,
 		fleet,
 	); err != nil {

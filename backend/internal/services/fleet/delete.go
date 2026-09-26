@@ -11,7 +11,7 @@ func (s *Service) Delete(
 	id string,
 ) error {
 
-	_, err := s.repo.GetByID(
+	_, err := s.fleets.GetByID(
 		ctx,
 		id,
 	)
@@ -24,7 +24,7 @@ func (s *Service) Delete(
 		return err
 	}
 
-	if err := s.repo.Delete(
+	if err := s.fleets.Delete(
 		ctx,
 		id,
 	); err != nil {

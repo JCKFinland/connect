@@ -21,6 +21,12 @@ type FleetRepository interface {
 		ctx context.Context,
 	) ([]*models.Fleet, error)
 
+	ListActiveByCompanyAndBranch(
+		ctx context.Context,
+		companyID string,
+		branchID string,
+	) ([]*models.Fleet, error)
+
 	Update(
 		ctx context.Context,
 		fleet *models.Fleet,

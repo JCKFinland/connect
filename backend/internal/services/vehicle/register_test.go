@@ -150,6 +150,14 @@ func (r *vehicleFleetRepositoryStub) List(
 	return nil, nil
 }
 
+func (s *vehicleFleetRepositoryStub) ListActiveByCompanyAndBranch(
+	ctx context.Context,
+	companyID string,
+	branchID string,
+) ([]*models.Fleet, error) {
+	return nil, nil
+}
+
 func (r *vehicleFleetRepositoryStub) Update(
 	ctx context.Context,
 	fleet *models.Fleet,

@@ -1,18 +1,20 @@
 package fleet
 
-import (
-	"github.com/JCKFinland/connect/backend/internal/repository"
-)
+import "github.com/JCKFinland/connect/backend/internal/repository"
 
-type Service struct {
-	repo repository.FleetRepository
+type Dependencies struct {
+	Fleets  repository.FleetRepository
+	Drivers repository.DriverRepository
 }
 
-func NewService(
-	repo repository.FleetRepository,
-) *Service {
+type Service struct {
+	fleets  repository.FleetRepository
+	drivers repository.DriverRepository
+}
 
+func NewService(deps Dependencies) *Service {
 	return &Service{
-		repo: repo,
+		fleets:  deps.Fleets,
+		drivers: deps.Drivers,
 	}
 }

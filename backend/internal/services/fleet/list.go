@@ -6,7 +6,7 @@ func (s *Service) List(
 	ctx context.Context,
 ) ([]*FleetResponse, error) {
 
-	fleets, err := s.repo.List(ctx)
+	fleets, err := s.fleets.List(ctx)
 	if err != nil {
 		return nil, err
 	}

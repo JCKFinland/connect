@@ -127,6 +127,8 @@ func RegisterRoutes(
 
 			driver.GET("/presence", driverPresenceHandler.GetCurrent)
 
+			driver.GET("/fleets", fleetHandler.ListForDriver)
+
 			// Registers a vehicle for the authenticated verified driver.
 			driver.POST("/vehicles", vehicleHandler.RegisterForDriver)
 

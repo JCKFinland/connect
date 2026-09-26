@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	// Uses Gin to manage HTTP context, URL routing parameters, and JSON mapping.
@@ -8,6 +9,8 @@ import (
 
 	// References the business logic package tailored explicitly to taxi fleet metadata.
 	"github.com/JCKFinland/connect/backend/internal/services/fleet"
+
+	"github.com/JCKFinland/connect/backend/internal/middleware"
 
 	// Leverages a shared response envelope utility format.
 	"github.com/JCKFinland/connect/backend/pkg/response"
@@ -136,6 +139,52 @@ func (h *FleetHandler) List(
 		c,
 		http.StatusOK,
 		"Fleets retrieved successfully",
+		fleets,
+	)
+}
+
+func (h *FleetHandler) ListForDriver(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
+		response.Error(
+			c,
+			http.StatusUnauthorized,
+			"Authentication required",
+			nil,
+		)
+		return
+	}
+
+	fleets, err := h.service.ListForDriver(
+		c.Request.Context(),
+		user.ID,
+	)
+	if err != nil {
+		if errors.Is(err, fleet.ErrDriverNotEligible) {
+			response.Error(
+				c,
+				http.StatusForbidden,
+				err.Error(),
+				nil,
+			)
+			return
+		}
+
+		response.Error(
+			c,
+			http.StatusInternalServerError,
+			"Failed to retrieve driver fleets",
+			nil,
+		)
+		return
+	}
+
+	response.Success(
+		c,
+		http.StatusOK,
+		"Driver fleets retrieved successfully",
 		fleets,
 	)
 }
