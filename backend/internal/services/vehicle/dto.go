@@ -1,5 +1,29 @@
 package vehicle
 
+// RegisterDriverVehicleRequest contains vehicle data supplied by an
+// authenticated driver registering a vehicle with CONNECT.
+type RegisterDriverVehicleRequest struct {
+	FleetID string `json:"fleet_id" binding:"required"`
+
+	RegistrationNumber string `json:"registration_number" binding:"required"`
+
+	VIN string `json:"vin"`
+
+	Make string `json:"make" binding:"required"`
+
+	Model string `json:"model" binding:"required"`
+
+	ModelYear int `json:"model_year" binding:"required"`
+
+	Color string `json:"color"`
+
+	VehicleType string `json:"vehicle_type" binding:"required"`
+
+	FuelType string `json:"fuel_type" binding:"required"`
+
+	SeatingCapacity int `json:"seating_capacity" binding:"required"`
+}
+
 // CreateVehicleRequest contains the payload required to register a vehicle.
 type CreateVehicleRequest struct {
 	CompanyID string `json:"company_id" binding:"required"`
@@ -21,6 +45,8 @@ type CreateVehicleRequest struct {
 	Color string `json:"color"`
 
 	VehicleType string `json:"vehicle_type" binding:"required"`
+
+	FuelType string `json:"fuel_type" binding:"required"`
 
 	SeatingCapacity int `json:"seating_capacity"`
 
@@ -48,6 +74,8 @@ type UpdateVehicleRequest struct {
 	Color string `json:"color"`
 
 	VehicleType string `json:"vehicle_type"`
+
+	FuelType string `json:"fuel_type"`
 
 	SeatingCapacity int `json:"seating_capacity"`
 
@@ -77,6 +105,8 @@ type VehicleResponse struct {
 	Color string `json:"color"`
 
 	VehicleType string `json:"vehicle_type"`
+
+	FuelType string `json:"fuel_type"`
 
 	SeatingCapacity int `json:"seating_capacity"`
 

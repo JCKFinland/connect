@@ -10,7 +10,7 @@ func (s *Service) Delete(
 	id string,
 ) error {
 
-	return s.repo.Delete(
+	return s.vehicles.Delete(
 		ctx,
 		id,
 	)

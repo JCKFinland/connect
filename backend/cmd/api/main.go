@@ -165,7 +165,13 @@ func main() {
 
 	fleetService := fleetservice.NewService(fleetRepository)
 
-	vehicleService := vehicleservice.NewService(vehicleRepo)
+	vehicleService := vehicleservice.NewService(
+		vehicleservice.Dependencies{
+			Vehicles: vehicleRepo,
+			Drivers:  driverRepo,
+			Fleets:   fleetRepository,
+		},
+	)
 
 	branchService := branchservice.NewService(
 		branchservice.Dependencies{

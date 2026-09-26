@@ -21,17 +21,18 @@ func (s *Service) Update(
 		BranchID:           req.BranchID,
 		FleetID:            req.FleetID,
 		RegistrationNumber: req.RegistrationNumber,
-		VIN:                req.VIN,
+		VIN:                normalizeVIN(req.VIN),
 		Make:               req.Make,
 		Model:              req.Model,
 		ModelYear:          req.ModelYear,
 		Color:              req.Color,
 		VehicleType:        req.VehicleType,
+		FuelType:           req.FuelType,
 		SeatingCapacity:    req.SeatingCapacity,
 		IsActive:           req.IsActive,
 	}
 
-	return s.repo.Update(
+	return s.vehicles.Update(
 		ctx,
 		vehicle,
 	)

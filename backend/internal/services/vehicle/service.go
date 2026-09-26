@@ -4,15 +4,25 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/repository"
 )
 
+type Dependencies struct {
+	Vehicles repository.VehicleRepository
+	Drivers  repository.DriverRepository
+	Fleets   repository.FleetRepository
+}
+
 type Service struct {
-	repo repository.VehicleRepository
+	vehicles repository.VehicleRepository
+	drivers  repository.DriverRepository
+	fleets   repository.FleetRepository
 }
 
 func NewService(
-	repo repository.VehicleRepository,
+	deps Dependencies,
 ) *Service {
 
 	return &Service{
-		repo: repo,
+		vehicles: deps.Vehicles,
+		drivers:  deps.Drivers,
+		fleets:   deps.Fleets,
 	}
 }

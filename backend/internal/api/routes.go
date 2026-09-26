@@ -127,6 +127,9 @@ func RegisterRoutes(
 
 			driver.GET("/presence", driverPresenceHandler.GetCurrent)
 
+			// Registers a vehicle for the authenticated verified driver.
+			driver.POST("/vehicles", vehicleHandler.RegisterForDriver)
+
 			// Recovers the authenticated driver's active trip.
 			driver.GET("/trip", tripHandler.GetActiveDriverTrip)
 		}
@@ -294,15 +297,35 @@ func RegisterRoutes(
 		vehicles.Use(authMiddleware.RequireAuth())
 
 		{
-			vehicles.POST("", vehicleHandler.Create)
+			vehicles.POST(
+				"",
+				rbacMiddleware.RequirePermission("vehicles.manage"),
+				vehicleHandler.Create,
+			)
 
-			vehicles.GET("", vehicleHandler.List)
+			vehicles.GET(
+				"",
+				rbacMiddleware.RequirePermission("vehicles.read"),
+				vehicleHandler.List,
+			)
 
-			vehicles.GET("/:id", vehicleHandler.GetByID)
+			vehicles.GET(
+				"/:id",
+				rbacMiddleware.RequirePermission("vehicles.read"),
+				vehicleHandler.GetByID,
+			)
 
-			vehicles.PUT("/:id", vehicleHandler.Update)
+			vehicles.PUT(
+				"/:id",
+				rbacMiddleware.RequirePermission("vehicles.manage"),
+				vehicleHandler.Update,
+			)
 
-			vehicles.DELETE("/:id", vehicleHandler.Delete)
+			vehicles.DELETE(
+				"/:id",
+				rbacMiddleware.RequirePermission("vehicles.manage"),
+				vehicleHandler.Delete,
+			)
 		}
 
 		assignments := v1.Group("/driver-vehicle-assignments")

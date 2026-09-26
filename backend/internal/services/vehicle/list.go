@@ -9,7 +9,7 @@ func (s *Service) List(
 	ctx context.Context,
 ) ([]VehicleResponse, error) {
 
-	vehicles, err := s.repo.List(
+	vehicles, err := s.vehicles.List(
 		ctx,
 	)
 	if err != nil {
@@ -26,12 +26,13 @@ func (s *Service) List(
 			BranchID:           vehicle.BranchID,
 			FleetID:            vehicle.FleetID,
 			RegistrationNumber: vehicle.RegistrationNumber,
-			VIN:                vehicle.VIN,
+			VIN:                vinValue(vehicle.VIN),
 			Make:               vehicle.Make,
 			Model:              vehicle.Model,
 			ModelYear:          vehicle.ModelYear,
 			Color:              vehicle.Color,
 			VehicleType:        vehicle.VehicleType,
+			FuelType:           vehicle.FuelType,
 			SeatingCapacity:    vehicle.SeatingCapacity,
 			IsActive:           vehicle.IsActive,
 		})

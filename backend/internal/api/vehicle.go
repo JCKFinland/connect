@@ -1,10 +1,13 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	// Uses Gin to manage HTTP context, URL routing parameters, and JSON mapping.
 	"github.com/gin-gonic/gin"
+
+	"github.com/JCKFinland/connect/backend/internal/middleware"
 
 	// References the business logic package tailored explicitly to taxi fleet metadata.
 	"github.com/JCKFinland/connect/backend/internal/services/vehicle"
@@ -221,5 +224,54 @@ func (h *VehicleHandler) Delete(
 		http.StatusOK,
 		"Vehicle deleted successfully",
 		nil,
+	)
+}
+
+// RegisterForDriver registers a vehicle for the authenticated driver.
+func (h *VehicleHandler) RegisterForDriver(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
+	var req vehicle.RegisterDriverVehicleRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+
+	createdVehicle, err := h.service.Register(
+		c.Request.Context(),
+		user.ID,
+		req,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, vehicle.ErrInvalidVehicle),
+			errors.Is(err, vehicle.ErrInvalidFleet):
+			response.BadRequest(c, err.Error())
+
+		case errors.Is(err, vehicle.ErrDriverNotEligible):
+			response.Forbidden(c, err.Error())
+
+		case errors.Is(err, vehicle.ErrDuplicateRegistrationNumber),
+			errors.Is(err, vehicle.ErrDuplicateVIN):
+			response.Conflict(c, err.Error())
+
+		default:
+			response.InternalServerError(c)
+		}
+
+		return
+	}
+
+	response.Created(
+		c,
+		"Vehicle registered successfully",
+		createdVehicle,
 	)
 }

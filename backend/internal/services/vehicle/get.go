@@ -10,7 +10,7 @@ func (s *Service) GetByID(
 	id string,
 ) (*VehicleResponse, error) {
 
-	vehicle, err := s.repo.GetByID(
+	vehicle, err := s.vehicles.GetByID(
 		ctx,
 		id,
 	)
@@ -24,12 +24,13 @@ func (s *Service) GetByID(
 		BranchID:           vehicle.BranchID,
 		FleetID:            vehicle.FleetID,
 		RegistrationNumber: vehicle.RegistrationNumber,
-		VIN:                vehicle.VIN,
+		VIN:                vinValue(vehicle.VIN),
 		Make:               vehicle.Make,
 		Model:              vehicle.Model,
 		ModelYear:          vehicle.ModelYear,
 		Color:              vehicle.Color,
 		VehicleType:        vehicle.VehicleType,
+		FuelType:           vehicle.FuelType,
 		SeatingCapacity:    vehicle.SeatingCapacity,
 		IsActive:           vehicle.IsActive,
 	}, nil

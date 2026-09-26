@@ -13,7 +13,7 @@ type Vehicle struct {
 
 	RegistrationNumber string `db:"registration_number" json:"registration_number"`
 
-	VIN string `db:"vin" json:"vin"`
+	VIN *string `db:"vin" json:"vin,omitempty"`
 
 	Make string `db:"make" json:"make"`
 
@@ -24,6 +24,8 @@ type Vehicle struct {
 	Color string `db:"color" json:"color"`
 
 	VehicleType string `db:"vehicle_type" json:"vehicle_type"`
+
+	FuelType string `db:"fuel_type" json:"fuel_type"`
 
 	SeatingCapacity int `db:"seating_capacity" json:"seating_capacity"`
 

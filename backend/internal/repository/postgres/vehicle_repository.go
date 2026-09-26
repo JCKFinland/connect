@@ -46,12 +46,13 @@ func (r *VehicleRepository) Create(
 			model_year,
 			color,
 			vehicle_type,
+			fuel_type,
 			seating_capacity,
 			is_active
 		)
 		VALUES
 		(
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
 		)
 		RETURNING
 			id,
@@ -72,6 +73,7 @@ func (r *VehicleRepository) Create(
 		vehicle.ModelYear,
 		vehicle.Color,
 		vehicle.VehicleType,
+		vehicle.FuelType,
 		vehicle.SeatingCapacity,
 		vehicle.IsActive,
 	).Scan(
@@ -100,6 +102,7 @@ func (r *VehicleRepository) GetByID(
 			model_year,
 			color,
 			vehicle_type,
+			fuel_type,
 			seating_capacity,
 			is_active,
 			created_at,
@@ -128,6 +131,7 @@ func (r *VehicleRepository) GetByID(
 		&vehicle.ModelYear,
 		&vehicle.Color,
 		&vehicle.VehicleType,
+		&vehicle.FuelType,
 		&vehicle.SeatingCapacity,
 		&vehicle.IsActive,
 		&vehicle.CreatedAt,
@@ -160,6 +164,7 @@ func (r *VehicleRepository) List(
 			model_year,
 			color,
 			vehicle_type,
+			fuel_type,
 			seating_capacity,
 			is_active,
 			created_at,
@@ -194,6 +199,7 @@ func (r *VehicleRepository) List(
 			&vehicle.ModelYear,
 			&vehicle.Color,
 			&vehicle.VehicleType,
+			&vehicle.FuelType,
 			&vehicle.SeatingCapacity,
 			&vehicle.IsActive,
 			&vehicle.CreatedAt,
@@ -229,8 +235,9 @@ func (r *VehicleRepository) Update(
 			model_year=$9,
 			color=$10,
 			vehicle_type=$11,
-			seating_capacity=$12,
-			is_active=$13,
+			fuel_type=$12,
+			seating_capacity=$13,
+			is_active=$14,
 			updated_at=NOW()
 		WHERE id=$1
 		  AND deleted_at IS NULL
@@ -250,6 +257,7 @@ func (r *VehicleRepository) Update(
 		vehicle.ModelYear,
 		vehicle.Color,
 		vehicle.VehicleType,
+		vehicle.FuelType,
 		vehicle.SeatingCapacity,
 		vehicle.IsActive,
 	)
