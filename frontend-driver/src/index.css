@@ -344,3 +344,49 @@ button:disabled {
 .earnings-row .muted {
   overflow-wrap: anywhere;
 }
+
+.trip-history-list {
+  display: grid;
+  gap: 0;
+  margin-top: 1rem;
+}
+
+.trip-history-row {
+  padding: 1rem 0;
+  border-top: 1px solid #e5e7eb;
+}
+
+.trip-history-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.trip-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.trip-history-heading .muted {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.trip-history-main > span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .trip-history-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .trip-history-heading .muted {
+    text-align: left;
+    white-space: normal;
+  }
+}

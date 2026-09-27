@@ -9,10 +9,12 @@ import { getCurrentPresence, goOffline, goOnline } from "../api/presence";
 import {
   completeTrip,
   getActiveDriverTrip,
+  getDriverTripHistory,
   updateTripStatus,
 } from "../api/trips";
 import { useAuth } from "../auth/AuthContext";
 import { ActiveTripCard } from "../components/ActiveTripCard";
+import { TripHistoryCard } from "../components/TripHistoryCard";
 import { DispatchOfferCard } from "../components/DispatchOfferCard";
 import { getDriverEarnings } from "../api/earnings";
 import { EarningsCard } from "../components/EarningsCard";
@@ -40,6 +42,10 @@ export function DashboardPage() {
   const [earnings, setEarnings] = useState(null);
   const [earningsLoading, setEarningsLoading] = useState(true);
   const [earningsError, setEarningsError] = useState("");
+
+  const [tripHistory, setTripHistory] = useState([]);
+  const [tripHistoryLoading, setTripHistoryLoading] = useState(true);
+  const [tripHistoryError, setTripHistoryError] = useState("");
 
   useDriverHeartbeat(presence?.is_online === true);
 
@@ -105,6 +111,19 @@ export function DashboardPage() {
     }
   }
 
+  async function loadTripHistory() {
+    try {
+      setTripHistoryError("");
+
+      const trips = await getDriverTripHistory();
+      setTripHistory(trips);
+    } catch (err) {
+      setTripHistoryError(err.message || "Unable to load trip history.");
+    } finally {
+      setTripHistoryLoading(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -136,6 +155,10 @@ export function DashboardPage() {
 
     void (async () => {
       await loadEarnings();
+    })();
+
+    void (async () => {
+      await loadTripHistory();
     })();
 
     return () => {
@@ -250,7 +273,7 @@ export function DashboardPage() {
 
       setActiveTrip(null);
 
-      await loadPresence();
+      await Promise.all([loadPresence(), loadTripHistory(), loadEarnings()]);
     } catch (err) {
       setTripError(err.message || "Unable to complete trip.");
     } finally {
@@ -352,6 +375,12 @@ export function DashboardPage() {
         dashboard={earnings}
         loading={earningsLoading}
         error={earningsError}
+      />
+
+      <TripHistoryCard
+        trips={tripHistory}
+        loading={tripHistoryLoading}
+        error={tripHistoryError}
       />
 
       {presence?.is_online && (

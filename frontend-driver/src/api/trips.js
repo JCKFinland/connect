@@ -31,3 +31,34 @@ export function recordTripLocation(tripId, location) {
     body: location,
   });
 }
+
+export async function getDriverTripHistory({ limit = 20, offset = 0 } = {}) {
+  const statuses = ["COMPLETED", "CANCELLED"];
+
+  const responses = await Promise.all(
+    statuses.map((status) =>
+      apiRequest(
+        `/trips?status=${encodeURIComponent(status)}&limit=${limit}&offset=${offset}`,
+        {
+          authenticated: true,
+        },
+      ),
+    ),
+  );
+
+  const trips = responses
+    .flatMap((response) => response?.data ?? [])
+    .sort((a, b) => {
+      const aTime = new Date(
+        a.completed_at || a.cancelled_at || a.created_at,
+      ).getTime();
+
+      const bTime = new Date(
+        b.completed_at || b.cancelled_at || b.created_at,
+      ).getTime();
+
+      return bTime - aTime;
+    });
+
+  return trips.slice(0, limit);
+}
