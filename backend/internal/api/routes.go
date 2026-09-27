@@ -24,6 +24,7 @@ func RegisterRoutes(
 	fleetHandler *FleetHandler,
 	vehicleHandler *VehicleHandler,
 	driverHandler *DriverHandler,
+	driverDocumentHandler *DriverDocumentHandler,
 	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 	tripHandler *TripHandler,
 	tripStreamHandler *TripStreamHandler,
@@ -131,6 +132,21 @@ func RegisterRoutes(
 			// Returns the authenticated driver's authoritative earnings dashboard.
 			driver.GET("/earnings", driverEarningsHandler.GetDashboard)
 
+			// Driver regulatory documents.
+			//
+			// Document ownership is derived from the authenticated
+			// users.id -> drivers.id relationship. The client never
+			// supplies an authoritative driver identity here.
+			driver.GET(
+				"/documents",
+				driverDocumentHandler.ListForCurrentDriver,
+			)
+
+			driver.GET(
+				"/documents/:document_id",
+				driverDocumentHandler.GetForCurrentDriver,
+			)
+
 			driver.GET("/fleets", fleetHandler.ListForDriver)
 
 			// Registers a vehicle for the authenticated verified driver.
@@ -198,6 +214,39 @@ func RegisterRoutes(
 				"/dispatch-offers/:offer_id/reject",
 				rbacMiddleware.RequirePermission("driver.operations"),
 				dispatchHandler.RejectOffer,
+			)
+
+			// ---------------------------------------------------
+			// Driver Regulatory Documents
+			// ---------------------------------------------------
+			//
+			// Administrative reads require drivers.read.
+			// Review state transitions require drivers.verify.
+			// Reviewer identity is always taken from the authenticated
+			// users.id stored by authentication middleware.
+
+			drivers.GET(
+				"/:id/documents",
+				rbacMiddleware.RequirePermission("drivers.read"),
+				driverDocumentHandler.ListForDriver,
+			)
+
+			drivers.GET(
+				"/:id/documents/:document_id",
+				rbacMiddleware.RequirePermission("drivers.read"),
+				driverDocumentHandler.GetForDriver,
+			)
+
+			drivers.POST(
+				"/:id/documents/:document_id/verify",
+				rbacMiddleware.RequirePermission("drivers.verify"),
+				driverDocumentHandler.Verify,
+			)
+
+			drivers.POST(
+				"/:id/documents/:document_id/reject",
+				rbacMiddleware.RequirePermission("drivers.verify"),
+				driverDocumentHandler.Reject,
 			)
 
 			// ---------------------------------------------------

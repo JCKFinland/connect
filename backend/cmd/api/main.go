@@ -20,6 +20,7 @@ import (
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/security"
 	driverservice "github.com/JCKFinland/connect/backend/internal/services/driver"
+	driverdocumentservice "github.com/JCKFinland/connect/backend/internal/services/driver_document"
 	driverearningservice "github.com/JCKFinland/connect/backend/internal/services/driver_earning"
 	fareservice "github.com/JCKFinland/connect/backend/internal/services/fare"
 	fareestimateservice "github.com/JCKFinland/connect/backend/internal/services/fare_estimate"
@@ -121,6 +122,7 @@ func main() {
 	fleetRepository := postgresrepo.NewFleetRepository(db)
 	vehicleRepo := postgresrepo.NewVehicleRepository(db)
 	driverRepo := postgresrepo.NewDriverRepository(db)
+	driverDocumentRepo := postgresrepo.NewDriverDocumentRepository(db)
 	driverVehicleAssignmentRepo := postgresrepo.NewDriverVehicleAssignmentRepository(db)
 	tripRepo := postgresrepo.NewTripRepository(db)
 	rideRequestRepo := postgresrepo.NewRideRequestRepository(db)
@@ -194,6 +196,14 @@ func main() {
 			Drivers:   driverRepo,
 			Companies: companyRepo,
 			Branches:  branchRepo,
+		},
+	)
+
+	driverDocumentService := driverdocumentservice.NewService(
+		driverdocumentservice.Dependencies{
+			DB:        db,
+			Documents: driverDocumentRepo,
+			Drivers:   driverRepo,
 		},
 	)
 
@@ -462,6 +472,9 @@ func main() {
 	fleetHandler := api.NewFleetHandler(fleetService)
 	vehicleHandler := api.NewVehicleHandler(vehicleService)
 	driverHandler := api.NewDriverHandler(driverService)
+	driverDocumentHandler := api.NewDriverDocumentHandler(
+		driverDocumentService,
+	)
 	driverVehicleAssignmentHandler :=
 		api.NewDriverVehicleAssignmentHandler(
 			driverVehicleAssignmentService,
@@ -517,6 +530,7 @@ func main() {
 		fleetHandler,
 		vehicleHandler,
 		driverHandler,
+		driverDocumentHandler,
 		driverVehicleAssignmentHandler,
 		tripHandler,
 		tripStreamHandler,
