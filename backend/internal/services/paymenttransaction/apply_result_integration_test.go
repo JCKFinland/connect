@@ -484,6 +484,61 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 		)
 	}
 
+	earningRepo :=
+		postgresrepo.NewDriverEarningRepository(db)
+
+	earning, err :=
+		earningRepo.GetByTripID(
+			ctx,
+			tripID,
+		)
+	if err != nil {
+		t.Fatalf(
+			"get driver earning after SALE success: %v",
+			err,
+		)
+	}
+
+	if earning.PaymentID == nil ||
+		*earning.PaymentID != paymentID {
+
+		t.Fatal(
+			"expected driver earning to reference paid payment",
+		)
+	}
+
+	if earning.GrossAmount != aggregatePayment.Amount {
+		t.Fatalf(
+			"expected earning gross amount %s, got %s",
+			aggregatePayment.Amount,
+			earning.GrossAmount,
+		)
+	}
+
+	if earning.NetAmount != aggregatePayment.Amount {
+		t.Fatalf(
+			"expected earning net amount %s, got %s",
+			aggregatePayment.Amount,
+			earning.NetAmount,
+		)
+	}
+
+	if earning.Currency != aggregatePayment.Currency {
+		t.Fatalf(
+			"expected earning currency %s, got %s",
+			aggregatePayment.Currency,
+			earning.Currency,
+		)
+	}
+
+	if earning.SettlementStatus != "PENDING" {
+		t.Fatalf(
+			"expected earning settlement status PENDING, got %s",
+			earning.SettlementStatus,
+		)
+
+	}
+
 	if success.Status != StatusSuccess {
 		t.Fatalf(
 			"expected SUCCESS, got %s",
@@ -570,6 +625,51 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 
 		t.Fatal(
 			"processed_at changed on duplicate provider delivery",
+		)
+	}
+
+	replayedEarning, err :=
+		earningRepo.GetByTripID(
+			ctx,
+			tripID,
+		)
+	if err != nil {
+		t.Fatalf(
+			"get driver earning after SALE replay: %v",
+			err,
+		)
+	}
+
+	if replayedEarning.ID != earning.ID {
+		t.Fatalf(
+			"expected SALE replay to preserve earning ID %s, got %s",
+			earning.ID,
+			replayedEarning.ID,
+		)
+	}
+
+	var earningCount int
+
+	err = db.QueryRow(
+		ctx,
+		`
+	SELECT COUNT(*)
+	FROM driver_earnings
+	WHERE trip_id = $1
+	`,
+		tripID,
+	).Scan(&earningCount)
+	if err != nil {
+		t.Fatalf(
+			"count driver earnings after SALE replay: %v",
+			err,
+		)
+	}
+
+	if earningCount != 1 {
+		t.Fatalf(
+			"expected exactly 1 driver earning after SALE replay, got %d",
+			earningCount,
 		)
 	}
 

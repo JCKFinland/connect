@@ -52,6 +52,11 @@ func (s *paymentTransactionService) ApplyResult(
 					tx,
 				)
 
+			earnings :=
+				postgresrepo.NewDriverEarningRepositoryWithDB(
+					tx,
+				)
+
 			// Read the transaction first so we know which parent
 			// payment row must be locked.
 			candidate, err :=
@@ -157,6 +162,7 @@ func (s *paymentTransactionService) ApplyResult(
 					ctx,
 					payments,
 					transactions,
+					earnings,
 					currentPayment,
 					updated,
 				); err != nil {
@@ -223,6 +229,7 @@ func (s *paymentTransactionService) ApplyResult(
 					ctx,
 					payments,
 					transactions,
+					earnings,
 					currentPayment,
 					updated,
 				); err != nil {

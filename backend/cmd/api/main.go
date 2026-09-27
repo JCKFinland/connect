@@ -20,6 +20,7 @@ import (
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/security"
 	driverservice "github.com/JCKFinland/connect/backend/internal/services/driver"
+	driverearningservice "github.com/JCKFinland/connect/backend/internal/services/driver_earning"
 	fareservice "github.com/JCKFinland/connect/backend/internal/services/fare"
 	fareestimateservice "github.com/JCKFinland/connect/backend/internal/services/fare_estimate"
 	pricingservice "github.com/JCKFinland/connect/backend/internal/services/pricing"
@@ -129,6 +130,8 @@ func main() {
 	dispatchOfferRepo := postgresrepo.NewDispatchOfferRepository(db)
 	tripLocationRepo := postgresrepo.NewTripLocationRepository(db)
 	paymentRepo := postgresrepo.NewPaymentRepository(db)
+	driverEarningRepo :=
+		postgresrepo.NewDriverEarningRepository(db)
 	paymentTransactionRepo :=
 		postgresrepo.NewPaymentTransactionRepository(db)
 
@@ -193,6 +196,13 @@ func main() {
 			Branches:  branchRepo,
 		},
 	)
+
+	driverEarningService :=
+		driverearningservice.NewService(
+			driverearningservice.Dependencies{
+				Earnings: driverEarningRepo,
+			},
+		)
 
 	driverVehicleAssignmentService := dvassignmentservice.NewService(
 		driverVehicleAssignmentRepo)
@@ -442,6 +452,10 @@ func main() {
 	authHandler := api.NewAuthHandler(authService, cfg)
 	userHandler := api.NewUserHandler(userRoleRepo)
 	driverPresenceHandler := api.NewDriverPresenceHandler(presenceService)
+	driverEarningsHandler :=
+		api.NewDriverEarningsHandler(
+			driverEarningService,
+		)
 	companyHandler := api.NewCompanyHandler(companyService)
 	branchHandler := api.NewBranchHandler(branchService)
 	driverAssignmentHandler := api.NewDriverAssignmentHandler(assignmentService)
@@ -496,6 +510,7 @@ func main() {
 		rbacMiddleware,
 		userHandler,
 		driverPresenceHandler,
+		driverEarningsHandler,
 		driverAssignmentHandler,
 		branchHandler,
 		companyHandler,

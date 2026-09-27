@@ -14,6 +14,7 @@ func reconcilePaymentOperationResult(
 	ctx context.Context,
 	payments *postgresrepo.PaymentRepository,
 	transactions *postgresrepo.PaymentTransactionRepository,
+	earnings *postgresrepo.DriverEarningRepository,
 	currentPayment *models.Payment,
 	currentTransaction *models.PaymentTransaction,
 ) error {
@@ -92,31 +93,41 @@ func reconcilePaymentOperationResult(
 		)
 	}
 
-	if currentPayment.Status == targetStatus {
-		return nil
-	}
-
-	if !paymentservice.CanTransitionStatus(
-		currentPayment.Status,
-		targetStatus,
-	) {
-		return fmt.Errorf(
-			"%w: %s -> %s",
-			paymentservice.ErrInvalidPaymentTransition,
+	if currentPayment.Status != targetStatus {
+		if !paymentservice.CanTransitionStatus(
 			currentPayment.Status,
 			targetStatus,
-		)
+		) {
+			return fmt.Errorf(
+				"%w: %s -> %s",
+				paymentservice.ErrInvalidPaymentTransition,
+				currentPayment.Status,
+				targetStatus,
+			)
+		}
+
+		if err := payments.UpdateStatus(
+			ctx,
+			currentPayment.ID,
+			targetStatus,
+		); err != nil {
+			return fmt.Errorf(
+				"persist aggregate payment status: %w",
+				err,
+			)
+		}
 	}
 
-	if err := payments.UpdateStatus(
-		ctx,
-		currentPayment.ID,
-		targetStatus,
-	); err != nil {
-		return fmt.Errorf(
-			"persist aggregate payment status: %w",
-			err,
-		)
+	if targetStatus == paymentservice.StatusPaid {
+		if _, err := earnings.CreateFromPaidPayment(
+			ctx,
+			currentPayment.ID,
+		); err != nil {
+			return fmt.Errorf(
+				"create driver earning from paid payment: %w",
+				err,
+			)
+		}
 	}
 
 	return nil

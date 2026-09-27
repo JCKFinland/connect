@@ -17,6 +17,7 @@ func RegisterRoutes(
 	rbacMiddleware *middleware.RBACMiddleware,
 	userHandler *UserHandler,
 	driverPresenceHandler *DriverPresenceHandler,
+	driverEarningsHandler *DriverEarningsHandler,
 	driverAssignmentHandler *DriverAssignmentHandler,
 	branchHandler *BranchHandler,
 	companyHandler *CompanyHandler,
@@ -126,6 +127,9 @@ func RegisterRoutes(
 			driver.PATCH("/availability", driverPresenceHandler.UpdateAvailability)
 
 			driver.GET("/presence", driverPresenceHandler.GetCurrent)
+
+			// Returns the authenticated driver's authoritative earnings dashboard.
+			driver.GET("/earnings", driverEarningsHandler.GetDashboard)
 
 			driver.GET("/fleets", fleetHandler.ListForDriver)
 
