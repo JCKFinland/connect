@@ -14,6 +14,8 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { ActiveTripCard } from "../components/ActiveTripCard";
 import { DispatchOfferCard } from "../components/DispatchOfferCard";
+import { getDriverEarnings } from "../api/earnings";
+import { EarningsCard } from "../components/EarningsCard";
 import { useDriverHeartbeat } from "../hooks/useDriverHeartbeat";
 import { useTripLocationTracking } from "../hooks/useTripLocationTracking";
 
@@ -34,6 +36,10 @@ export function DashboardPage() {
   const [activeTrip, setActiveTrip] = useState(null);
   const [tripUpdating, setTripUpdating] = useState(false);
   const [tripError, setTripError] = useState("");
+
+  const [earnings, setEarnings] = useState(null);
+  const [earningsLoading, setEarningsLoading] = useState(true);
+  const [earningsError, setEarningsError] = useState("");
 
   useDriverHeartbeat(presence?.is_online === true);
 
@@ -86,6 +92,19 @@ export function DashboardPage() {
     }
   }
 
+  async function loadEarnings() {
+    try {
+      setEarningsError("");
+
+      const response = await getDriverEarnings();
+      setEarnings(response?.data ?? null);
+    } catch (err) {
+      setEarningsError(err.message || "Unable to load earnings.");
+    } finally {
+      setEarningsLoading(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -114,6 +133,10 @@ export function DashboardPage() {
     }
 
     initializePresence();
+
+    void (async () => {
+      await loadEarnings();
+    })();
 
     return () => {
       cancelled = true;
@@ -324,6 +347,12 @@ export function DashboardPage() {
           </>
         )}
       </div>
+
+      <EarningsCard
+        dashboard={earnings}
+        loading={earningsLoading}
+        error={earningsError}
+      />
 
       {presence?.is_online && (
         <>

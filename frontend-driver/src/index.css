@@ -303,3 +303,44 @@ button:disabled {
     margin-left: 0;
   }
 }
+
+.earnings-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.earnings-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.earnings-summary strong {
+  font-size: 1.25rem;
+}
+
+.earnings-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.earnings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid #e5e7eb;
+}
+
+.earnings-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.earnings-row .muted {
+  overflow-wrap: anywhere;
+}
