@@ -2,18 +2,25 @@ package postgres
 
 import (
 	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/repository"
 )
 
 // GetByIDForUpdate returns a driver and locks the row for the
 // duration of the current database transaction.
+//
+// PostgreSQL's pgx.ErrNoRows is translated into repository.ErrNotFound so
+// callers do not need to depend on PostgreSQL-specific error semantics.
 func (r *DriverRepository) GetByIDForUpdate(
 	ctx context.Context,
 	id string,
 ) (*models.Driver, error) {
-
-	query := `
+	const query = `
 		SELECT
 			id,
 			user_id,
@@ -31,7 +38,7 @@ func (r *DriverRepository) GetByIDForUpdate(
 			status,
 			is_verified,
 			verified_at,
-            verified_by_user_id,
+			verified_by_user_id,
 			is_active,
 			created_at,
 			updated_at,
@@ -72,8 +79,15 @@ func (r *DriverRepository) GetByIDForUpdate(
 		&driver.DeletedAt,
 	)
 
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, repository.ErrNotFound
+	}
+
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(
+			"get driver by id for update: %w",
+			err,
+		)
 	}
 
 	return driver, nil
