@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -12,10 +14,18 @@ import (
 	"github.com/JCKFinland/connect/backend/pkg/response"
 )
 
+const driverDocumentUploadRequestMaxBytes int64 = 11 * 1024 * 1024
+
 // DriverDocumentService defines the driver-document operations required by
 // the HTTP boundary. Keeping this boundary interface-based allows the API layer
 // to be tested independently from PostgreSQL.
 type DriverDocumentService interface {
+	UploadForUser(
+		ctx context.Context,
+		userID string,
+		req driverdocument.UploadDocumentRequest,
+	) (*models.DriverDocument, error)
+
 	ListForUser(
 		ctx context.Context,
 		userID string,
@@ -110,6 +120,96 @@ func handleDriverDocumentError(
 	default:
 		response.InternalServerError(c)
 	}
+}
+
+// UploadForCurrentDriver handles POST /api/v1/driver/documents.
+//
+// The authenticated users.id is translated to the authoritative drivers.id
+// inside the driver-document service. Storage keys, content type, file size,
+// and storage extension are never accepted from multipart metadata.
+func (h *DriverDocumentHandler) UploadForCurrentDriver(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(
+			c,
+			"authenticated user not found",
+		)
+		return
+	}
+
+	// Bound the complete multipart request before Gin parses form fields or
+	// creates temporary multipart files. The service independently enforces
+	// the stricter 10 MiB binary-document limit.
+	c.Request.Body = http.MaxBytesReader(
+		c.Writer,
+		c.Request.Body,
+		driverDocumentUploadRequestMaxBytes,
+	)
+
+	documentType := c.PostForm("document_type")
+	expiresAtRaw := c.PostForm("expires_at")
+
+	if documentType == "" || expiresAtRaw == "" {
+		response.BadRequest(
+			c,
+			"document_type and expires_at are required",
+		)
+		return
+	}
+
+	expiresAt, err := time.Parse(
+		"2006-01-02",
+		expiresAtRaw,
+	)
+	if err != nil {
+		response.BadRequest(
+			c,
+			"expires_at must use YYYY-MM-DD format",
+		)
+		return
+	}
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		response.BadRequest(
+			c,
+			"document file is required",
+		)
+		return
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		response.BadRequest(
+			c,
+			"document file could not be opened",
+		)
+		return
+	}
+	defer file.Close()
+
+	document, err := h.service.UploadForUser(
+		c.Request.Context(),
+		user.ID,
+		driverdocument.UploadDocumentRequest{
+			DocumentType: documentType,
+			FileName:     fileHeader.Filename,
+			ExpiresAt:    &expiresAt,
+			Body:         file,
+		},
+	)
+	if err != nil {
+		handleDriverDocumentError(c, err)
+		return
+	}
+
+	response.Created(
+		c,
+		"Driver document uploaded successfully",
+		document,
+	)
 }
 
 // ListForCurrentDriver handles GET /api/v1/driver/documents.

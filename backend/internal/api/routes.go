@@ -137,6 +137,11 @@ func RegisterRoutes(
 			// Document ownership is derived from the authenticated
 			// users.id -> drivers.id relationship. The client never
 			// supplies an authoritative driver identity here.
+			driver.POST(
+				"/documents",
+				driverDocumentHandler.UploadForCurrentDriver,
+			)
+
 			driver.GET(
 				"/documents",
 				driverDocumentHandler.ListForCurrentDriver,

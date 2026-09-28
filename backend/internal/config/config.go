@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -34,6 +36,18 @@ type LogConfig struct {
 	Level string
 }
 
+// DocumentStorageConfig contains regulatory-document binary storage
+// configuration.
+//
+// Driver identifies the configured storage implementation. LocalRoot is used
+// only by the local filesystem implementation. UploadMaxBytes is the maximum
+// accepted binary size before a document reaches persistent storage.
+type DocumentStorageConfig struct {
+	Driver         string
+	LocalRoot      string
+	UploadMaxBytes int64
+}
+
 // StripeConfig contains Stripe payment-provider configuration.
 type StripeConfig struct {
 	SecretKey     string
@@ -42,15 +56,16 @@ type StripeConfig struct {
 
 // Config represents the application's configuration.
 type Config struct {
-	App         AppConfig
-	Database    DatabaseConfig
-	JWT         JWTConfig
-	Presence    PresenceConfig
-	RideRequest RideRequestConfig
-	Booking     BookingConfig
-	Routing     RoutingConfig
-	Stripe      StripeConfig
-	Log         LogConfig
+	App             AppConfig
+	Database        DatabaseConfig
+	JWT             JWTConfig
+	Presence        PresenceConfig
+	RideRequest     RideRequestConfig
+	Booking         BookingConfig
+	Routing         RoutingConfig
+	Stripe          StripeConfig
+	DocumentStorage DocumentStorageConfig
+	Log             LogConfig
 }
 
 // PresenceConfig contains real-time driver presence configuration.
@@ -111,6 +126,27 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	documentUploadMaxBytes, err := strconv.ParseInt(
+		GetEnv(
+			"DOCUMENT_UPLOAD_MAX_BYTES",
+			"10485760",
+		),
+		10,
+		64,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"parse DOCUMENT_UPLOAD_MAX_BYTES: %w",
+			err,
+		)
+	}
+
+	if documentUploadMaxBytes <= 0 {
+		return nil, fmt.Errorf(
+			"DOCUMENT_UPLOAD_MAX_BYTES must be greater than zero",
+		)
+	}
+
 	cfg := &Config{
 
 		App: AppConfig{
@@ -167,6 +203,18 @@ func Load() (*Config, error) {
 				"STRIPE_WEBHOOK_SECRET",
 				"",
 			),
+		},
+
+		DocumentStorage: DocumentStorageConfig{
+			Driver: GetEnv(
+				"DOCUMENT_STORAGE_DRIVER",
+				"local",
+			),
+			LocalRoot: GetEnv(
+				"DOCUMENT_STORAGE_LOCAL_ROOT",
+				"./var/driver-documents",
+			),
+			UploadMaxBytes: documentUploadMaxBytes,
 		},
 
 		Log: LogConfig{

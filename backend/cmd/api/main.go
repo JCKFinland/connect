@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	fareestimateservice "github.com/JCKFinland/connect/backend/internal/services/fare_estimate"
 	pricingservice "github.com/JCKFinland/connect/backend/internal/services/pricing"
 	routingservice "github.com/JCKFinland/connect/backend/internal/services/routing"
+	documentstorage "github.com/JCKFinland/connect/backend/internal/storage/document"
 
 	authservice "github.com/JCKFinland/connect/backend/internal/services/auth"
 
@@ -199,11 +201,49 @@ func main() {
 		},
 	)
 
+	// Driver regulatory-document binaries are intentionally stored outside
+	// PostgreSQL. Fail startup if the configured storage implementation cannot
+	// be initialized so CONNECT never accepts uploads without durable binary
+	// storage.
+	var driverDocumentStorage documentstorage.Storage
+
+	switch strings.ToLower(
+		strings.TrimSpace(cfg.DocumentStorage.Driver),
+	) {
+	case "local":
+		localDocumentStorage, err :=
+			documentstorage.NewLocalStorage(
+				cfg.DocumentStorage.LocalRoot,
+			)
+		if err != nil {
+			log.Error(
+				"failed to configure driver document storage",
+				"driver",
+				cfg.DocumentStorage.Driver,
+				"error",
+				err,
+			)
+			os.Exit(1)
+		}
+
+		driverDocumentStorage = localDocumentStorage
+
+	default:
+		log.Error(
+			"unsupported driver document storage driver",
+			"driver",
+			cfg.DocumentStorage.Driver,
+		)
+		os.Exit(1)
+	}
+
 	driverDocumentService := driverdocumentservice.NewService(
 		driverdocumentservice.Dependencies{
-			DB:        db,
-			Documents: driverDocumentRepo,
-			Drivers:   driverRepo,
+			DB:             db,
+			Documents:      driverDocumentRepo,
+			Drivers:        driverRepo,
+			Storage:        driverDocumentStorage,
+			UploadMaxBytes: cfg.DocumentStorage.UploadMaxBytes,
 		},
 	)
 

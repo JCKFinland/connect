@@ -25,3 +25,7 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+# Runtime data
+# Local regulatory-document binaries and temporary E2E artifacts must never
+# be committed to source control.
+var/

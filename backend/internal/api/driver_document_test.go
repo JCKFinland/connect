@@ -1,12 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -16,6 +19,12 @@ import (
 )
 
 type driverDocumentAPIService struct {
+	uploadForUserFunc func(
+		context.Context,
+		string,
+		driverdocument.UploadDocumentRequest,
+	) (*models.DriverDocument, error)
+
 	listForUserFunc func(
 		context.Context,
 		string,
@@ -50,6 +59,22 @@ type driverDocumentAPIService struct {
 		string,
 		string,
 	) (*models.DriverDocument, error)
+}
+
+func (s *driverDocumentAPIService) UploadForUser(
+	ctx context.Context,
+	userID string,
+	req driverdocument.UploadDocumentRequest,
+) (*models.DriverDocument, error) {
+	if s.uploadForUserFunc == nil {
+		return nil, errors.New("unexpected UploadForUser call")
+	}
+
+	return s.uploadForUserFunc(
+		ctx,
+		userID,
+		req,
+	)
 }
 
 func (s *driverDocumentAPIService) ListForUser(
@@ -189,6 +214,357 @@ func setDriverDocumentAPIUser(
 			},
 		},
 	)
+}
+
+func TestDriverDocumentUploadForCurrentDriverUsesAuthenticatedUserAndMultipartFile(
+	t *testing.T,
+) {
+	const (
+		userID       = "user-123"
+		documentType = models.DriverDocumentTypeDrivingLicense
+		fileName     = "client-license.exe"
+	)
+
+	expectedExpiry := time.Date(
+		2030,
+		time.January,
+		2,
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+
+	fileBytes := []byte(
+		"%PDF-1.7\nCONNECT regulatory document",
+	)
+
+	called := false
+
+	service := &driverDocumentAPIService{
+		uploadForUserFunc: func(
+			_ context.Context,
+			gotUserID string,
+			req driverdocument.UploadDocumentRequest,
+		) (*models.DriverDocument, error) {
+			called = true
+
+			if gotUserID != userID {
+				t.Fatalf(
+					"user ID mismatch: got %q want %q",
+					gotUserID,
+					userID,
+				)
+			}
+
+			if req.DocumentType != documentType {
+				t.Fatalf(
+					"document type mismatch: got %q want %q",
+					req.DocumentType,
+					documentType,
+				)
+			}
+
+			if req.FileName != fileName {
+				t.Fatalf(
+					"filename mismatch: got %q want %q",
+					req.FileName,
+					fileName,
+				)
+			}
+
+			if req.ExpiresAt == nil ||
+				!req.ExpiresAt.Equal(expectedExpiry) {
+				t.Fatalf(
+					"expiry mismatch: got %v want %v",
+					req.ExpiresAt,
+					expectedExpiry,
+				)
+			}
+
+			if req.Body == nil {
+				t.Fatal("expected uploaded file body")
+			}
+
+			var gotBody bytes.Buffer
+			if _, err := gotBody.ReadFrom(req.Body); err != nil {
+				t.Fatalf(
+					"read upload body: %v",
+					err,
+				)
+			}
+
+			if !bytes.Equal(
+				gotBody.Bytes(),
+				fileBytes,
+			) {
+				t.Fatalf(
+					"file body mismatch: got %q want %q",
+					gotBody.Bytes(),
+					fileBytes,
+				)
+			}
+
+			return &models.DriverDocument{
+				BaseModel: models.BaseModel{
+					ID: "document-456",
+				},
+				DocumentType: documentType,
+				FileName:     fileName,
+				Status:       models.DriverDocumentStatusPending,
+			}, nil
+		},
+	}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentMultipartAPIContext(
+		t,
+		map[string]string{
+			"document_type": documentType,
+			"expires_at":    "2030-01-02",
+		},
+		"file",
+		fileName,
+		fileBytes,
+	)
+
+	setDriverDocumentAPIUser(c, userID)
+
+	handler.UploadForCurrentDriver(c)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusCreated,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	if !called {
+		t.Fatal("expected UploadForUser to be called")
+	}
+}
+
+func TestDriverDocumentUploadForCurrentDriverRequiresAuthenticatedUser(
+	t *testing.T,
+) {
+	service := &driverDocumentAPIService{}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentMultipartAPIContext(
+		t,
+		map[string]string{
+			"document_type": models.DriverDocumentTypeDrivingLicense,
+			"expires_at":    "2030-01-02",
+		},
+		"file",
+		"license.pdf",
+		[]byte("%PDF-1.7\nCONNECT"),
+	)
+
+	handler.UploadForCurrentDriver(c)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusUnauthorized,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestDriverDocumentUploadForCurrentDriverRejectsInvalidExpiry(
+	t *testing.T,
+) {
+	service := &driverDocumentAPIService{}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentMultipartAPIContext(
+		t,
+		map[string]string{
+			"document_type": models.DriverDocumentTypeDrivingLicense,
+			"expires_at":    "02-01-2030",
+		},
+		"file",
+		"license.pdf",
+		[]byte("%PDF-1.7\nCONNECT"),
+	)
+
+	setDriverDocumentAPIUser(c, "user-123")
+
+	handler.UploadForCurrentDriver(c)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusBadRequest,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestDriverDocumentUploadForCurrentDriverRequiresFile(
+	t *testing.T,
+) {
+	service := &driverDocumentAPIService{}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentMultipartAPIContext(
+		t,
+		map[string]string{
+			"document_type": models.DriverDocumentTypeDrivingLicense,
+			"expires_at":    "2030-01-02",
+		},
+		"",
+		"",
+		nil,
+	)
+
+	setDriverDocumentAPIUser(c, "user-123")
+
+	handler.UploadForCurrentDriver(c)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusBadRequest,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestDriverDocumentUploadForCurrentDriverRejectsOversizedMultipartRequest(
+	t *testing.T,
+) {
+	called := false
+
+	service := &driverDocumentAPIService{
+		uploadForUserFunc: func(
+			context.Context,
+			string,
+			driverdocument.UploadDocumentRequest,
+		) (*models.DriverDocument, error) {
+			called = true
+			return nil, nil
+		},
+	}
+
+	handler := NewDriverDocumentHandler(service)
+
+	oversizedFile := bytes.Repeat(
+		[]byte{'A'},
+		int(driverDocumentUploadRequestMaxBytes),
+	)
+
+	c, recorder := newDriverDocumentMultipartAPIContext(
+		t,
+		map[string]string{
+			"document_type": models.DriverDocumentTypeDrivingLicense,
+			"expires_at":    "2030-01-02",
+		},
+		"file",
+		"license.pdf",
+		oversizedFile,
+	)
+
+	setDriverDocumentAPIUser(c, "user-123")
+
+	handler.UploadForCurrentDriver(c)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusBadRequest,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	if called {
+		t.Fatal(
+			"UploadForUser must not be called for oversized multipart request",
+		)
+	}
+}
+
+func newDriverDocumentMultipartAPIContext(
+	t *testing.T,
+	fields map[string]string,
+	fileField string,
+	fileName string,
+	fileBytes []byte,
+) (*gin.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	for key, value := range fields {
+		if err := writer.WriteField(
+			key,
+			value,
+		); err != nil {
+			t.Fatalf(
+				"write multipart field %q: %v",
+				key,
+				err,
+			)
+		}
+	}
+
+	if fileField != "" {
+		part, err := writer.CreateFormFile(
+			fileField,
+			fileName,
+		)
+		if err != nil {
+			t.Fatalf(
+				"create multipart file: %v",
+				err,
+			)
+		}
+
+		if _, err := part.Write(fileBytes); err != nil {
+			t.Fatalf(
+				"write multipart file: %v",
+				err,
+			)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf(
+			"close multipart writer: %v",
+			err,
+		)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/driver/documents",
+		&body,
+	)
+
+	c.Request.Header.Set(
+		"Content-Type",
+		writer.FormDataContentType(),
+	)
+
+	return c, recorder
 }
 
 func TestDriverDocumentListForCurrentDriverUsesAuthenticatedUserID(
