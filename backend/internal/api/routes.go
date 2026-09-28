@@ -152,6 +152,11 @@ func RegisterRoutes(
 				driverDocumentHandler.GetForCurrentDriver,
 			)
 
+			driver.GET(
+				"/documents/:document_id/download",
+				driverDocumentHandler.DownloadForCurrentDriver,
+			)
+
 			driver.GET("/fleets", fleetHandler.ListForDriver)
 
 			// Registers a vehicle for the authenticated verified driver.
@@ -252,6 +257,12 @@ func RegisterRoutes(
 				"/:id/documents/:document_id/reject",
 				rbacMiddleware.RequirePermission("drivers.verify"),
 				driverDocumentHandler.Reject,
+			)
+
+			drivers.GET(
+				"/:id/documents/:document_id/download",
+				rbacMiddleware.RequirePermission("drivers.read"),
+				driverDocumentHandler.DownloadForDriver,
 			)
 
 			// ---------------------------------------------------

@@ -35,6 +35,11 @@ type Storage interface {
 		req PutRequest,
 	) error
 
+	Open(
+		ctx context.Context,
+		key string,
+	) (io.ReadCloser, error)
+
 	Delete(
 		ctx context.Context,
 		key string,

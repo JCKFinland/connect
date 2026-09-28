@@ -546,6 +546,13 @@ func (s *driverDocumentStorageStub) Put(
 	return nil
 }
 
+func (s *driverDocumentStorageStub) Open(
+	_ context.Context,
+	_ string,
+) (io.ReadCloser, error) {
+	return nil, documentstorage.ErrNotFound
+}
+
 func (s *driverDocumentStorageStub) Delete(
 	ctx context.Context,
 	key string,

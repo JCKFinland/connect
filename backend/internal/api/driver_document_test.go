@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -59,6 +61,18 @@ type driverDocumentAPIService struct {
 		string,
 		string,
 	) (*models.DriverDocument, error)
+
+	openForUserFunc func(
+		context.Context,
+		string,
+		string,
+	) (*driverdocument.OpenDocument, error)
+
+	openFunc func(
+		context.Context,
+		string,
+		string,
+	) (*driverdocument.OpenDocument, error)
 }
 
 func (s *driverDocumentAPIService) UploadForUser(
@@ -100,6 +114,42 @@ func (s *driverDocumentAPIService) GetForUser(
 	return s.getForUserFunc(
 		ctx,
 		userID,
+		documentID,
+	)
+}
+
+func (s *driverDocumentAPIService) OpenForUser(
+	ctx context.Context,
+	userID string,
+	documentID string,
+) (*driverdocument.OpenDocument, error) {
+	if s.openForUserFunc == nil {
+		return nil, errors.New(
+			"unexpected OpenForUser call",
+		)
+	}
+
+	return s.openForUserFunc(
+		ctx,
+		userID,
+		documentID,
+	)
+}
+
+func (s *driverDocumentAPIService) Open(
+	ctx context.Context,
+	driverID string,
+	documentID string,
+) (*driverdocument.OpenDocument, error) {
+	if s.openFunc == nil {
+		return nil, errors.New(
+			"unexpected Open call",
+		)
+	}
+
+	return s.openFunc(
+		ctx,
+		driverID,
 		documentID,
 	)
 }
@@ -1235,6 +1285,305 @@ func TestDriverDocumentErrorMapping(
 					)
 				}
 			},
+		)
+	}
+}
+
+func TestDriverDocumentDownloadForCurrentDriverStreamsAuthorizedBinary(
+	t *testing.T,
+) {
+	const (
+		userID      = "user-123"
+		documentID  = "document-456"
+		fileName    = `driver "license"; final.pdf`
+		contentType = "application/pdf"
+	)
+
+	fileBytes := []byte("%PDF-1.7\nCONNECT regulatory document")
+
+	service := &driverDocumentAPIService{
+		openForUserFunc: func(
+			_ context.Context,
+			gotUserID string,
+			gotDocumentID string,
+		) (*driverdocument.OpenDocument, error) {
+			if gotUserID != userID {
+				t.Fatalf(
+					"user ID mismatch: got %q want %q",
+					gotUserID,
+					userID,
+				)
+			}
+
+			if gotDocumentID != documentID {
+				t.Fatalf(
+					"document ID mismatch: got %q want %q",
+					gotDocumentID,
+					documentID,
+				)
+			}
+
+			return &driverdocument.OpenDocument{
+				Document: &models.DriverDocument{
+					BaseModel: models.BaseModel{
+						ID: documentID,
+					},
+					FileName:      fileName,
+					ContentType:   contentType,
+					FileSizeBytes: int64(len(fileBytes)),
+				},
+				Body: io.NopCloser(
+					bytes.NewReader(fileBytes),
+				),
+			}, nil
+		},
+	}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentAPIContext(
+		t,
+		http.MethodGet,
+		"/api/v1/driver/documents/"+
+			documentID+
+			"/download",
+		"",
+	)
+
+	c.Params = gin.Params{
+		{
+			Key:   "document_id",
+			Value: documentID,
+		},
+	}
+
+	setDriverDocumentAPIUser(c, userID)
+
+	handler.DownloadForCurrentDriver(c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusOK,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	if recorder.Header().Get("Content-Type") != contentType {
+		t.Fatalf(
+			"content type mismatch: got %q want %q",
+			recorder.Header().Get("Content-Type"),
+			contentType,
+		)
+	}
+
+	contentDisposition := recorder.Header().Get(
+		"Content-Disposition",
+	)
+	if contentDisposition == "" {
+		t.Fatal("expected Content-Disposition header")
+	}
+
+	_, params, err := mime.ParseMediaType(
+		contentDisposition,
+	)
+	if err != nil {
+		t.Fatalf(
+			"parse Content-Disposition: %v",
+			err,
+		)
+	}
+
+	if params["filename"] != fileName {
+		t.Fatalf(
+			"download filename mismatch: got %q want %q",
+			params["filename"],
+			fileName,
+		)
+	}
+
+	if !bytes.Equal(
+		recorder.Body.Bytes(),
+		fileBytes,
+	) {
+		t.Fatalf(
+			"binary body mismatch: got %q want %q",
+			recorder.Body.Bytes(),
+			fileBytes,
+		)
+	}
+}
+
+func TestDriverDocumentDownloadForCurrentDriverRequiresAuthenticatedUser(
+	t *testing.T,
+) {
+	service := &driverDocumentAPIService{}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentAPIContext(
+		t,
+		http.MethodGet,
+		"/api/v1/driver/documents/document-456/download",
+		"",
+	)
+
+	c.Params = gin.Params{
+		{
+			Key:   "document_id",
+			Value: "document-456",
+		},
+	}
+
+	handler.DownloadForCurrentDriver(c)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusUnauthorized,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestDriverDocumentAdministrativeDownloadPreservesOwnershipScope(
+	t *testing.T,
+) {
+	const (
+		driverID   = "driver-123"
+		documentID = "document-456"
+	)
+
+	fileBytes := []byte{
+		0x89, 'P', 'N', 'G',
+		'\r', '\n', 0x1a, '\n',
+	}
+
+	service := &driverDocumentAPIService{
+		openFunc: func(
+			_ context.Context,
+			gotDriverID string,
+			gotDocumentID string,
+		) (*driverdocument.OpenDocument, error) {
+			if gotDriverID != driverID {
+				t.Fatalf(
+					"driver ID mismatch: got %q want %q",
+					gotDriverID,
+					driverID,
+				)
+			}
+
+			if gotDocumentID != documentID {
+				t.Fatalf(
+					"document ID mismatch: got %q want %q",
+					gotDocumentID,
+					documentID,
+				)
+			}
+
+			return &driverdocument.OpenDocument{
+				Document: &models.DriverDocument{
+					BaseModel: models.BaseModel{
+						ID: documentID,
+					},
+					DriverID:      driverID,
+					FileName:      "license.png",
+					ContentType:   "image/png",
+					FileSizeBytes: int64(len(fileBytes)),
+				},
+				Body: io.NopCloser(
+					bytes.NewReader(fileBytes),
+				),
+			}, nil
+		},
+	}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentAPIContext(
+		t,
+		http.MethodGet,
+		"/api/v1/drivers/"+driverID+
+			"/documents/"+documentID+
+			"/download",
+		"",
+	)
+
+	c.Params = gin.Params{
+		{
+			Key:   "id",
+			Value: driverID,
+		},
+		{
+			Key:   "document_id",
+			Value: documentID,
+		},
+	}
+
+	handler.DownloadForDriver(c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusOK,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	if !bytes.Equal(
+		recorder.Body.Bytes(),
+		fileBytes,
+	) {
+		t.Fatalf(
+			"binary body mismatch: got %v want %v",
+			recorder.Body.Bytes(),
+			fileBytes,
+		)
+	}
+}
+
+func TestDriverDocumentDownloadMapsDocumentNotFound(
+	t *testing.T,
+) {
+	service := &driverDocumentAPIService{
+		openForUserFunc: func(
+			context.Context,
+			string,
+			string,
+		) (*driverdocument.OpenDocument, error) {
+			return nil, driverdocument.ErrDocumentNotFound
+		},
+	}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentAPIContext(
+		t,
+		http.MethodGet,
+		"/api/v1/driver/documents/document-456/download",
+		"",
+	)
+
+	c.Params = gin.Params{
+		{
+			Key:   "document_id",
+			Value: "document-456",
+		},
+	}
+
+	setDriverDocumentAPIUser(c, "user-123")
+
+	handler.DownloadForCurrentDriver(c)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusNotFound,
+			recorder.Code,
+			recorder.Body.String(),
 		)
 	}
 }

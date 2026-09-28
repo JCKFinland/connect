@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -261,4 +262,102 @@ func (r *failingReader) Read(
 	_ []byte,
 ) (int, error) {
 	return 0, r.err
+}
+
+func TestLocalStorageOpenReturnsStoredObject(
+	t *testing.T,
+) {
+	storage, err := NewLocalStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
+	}
+
+	const key = "drivers/driver-123/driving_license/document.pdf"
+
+	expected := []byte("%PDF-1.7\nCONNECT regulatory document")
+
+	err = storage.Put(
+		context.Background(),
+		PutRequest{
+			Key:  key,
+			Body: bytes.NewReader(expected),
+		},
+	)
+	if err != nil {
+		t.Fatalf("put document: %v", err)
+	}
+
+	reader, err := storage.Open(
+		context.Background(),
+		key,
+	)
+	if err != nil {
+		t.Fatalf("open document: %v", err)
+	}
+	defer reader.Close()
+
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read document: %v", err)
+	}
+
+	if !bytes.Equal(got, expected) {
+		t.Fatalf(
+			"document body mismatch: got %q want %q",
+			got,
+			expected,
+		)
+	}
+}
+
+func TestLocalStorageOpenRejectsInvalidKey(
+	t *testing.T,
+) {
+	storage, err := NewLocalStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
+	}
+
+	reader, err := storage.Open(
+		context.Background(),
+		"../outside.pdf",
+	)
+
+	if reader != nil {
+		reader.Close()
+		t.Fatal("expected no reader for invalid key")
+	}
+
+	if !errors.Is(err, ErrInvalidKey) {
+		t.Fatalf(
+			"expected ErrInvalidKey, got %v",
+			err,
+		)
+	}
+}
+
+func TestLocalStorageOpenReturnsNotFound(
+	t *testing.T,
+) {
+	storage, err := NewLocalStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
+	}
+
+	reader, err := storage.Open(
+		context.Background(),
+		"drivers/driver-123/driving_license/missing.pdf",
+	)
+
+	if reader != nil {
+		reader.Close()
+		t.Fatal("expected no reader for missing object")
+	}
+
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf(
+			"expected ErrNotFound, got %v",
+			err,
+		)
+	}
 }

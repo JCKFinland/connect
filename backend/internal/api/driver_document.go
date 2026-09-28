@@ -3,7 +3,10 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
+	"mime"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +39,18 @@ type DriverDocumentService interface {
 		userID string,
 		documentID string,
 	) (*models.DriverDocument, error)
+
+	OpenForUser(
+		ctx context.Context,
+		userID string,
+		documentID string,
+	) (*driverdocument.OpenDocument, error)
+
+	Open(
+		ctx context.Context,
+		driverID string,
+		documentID string,
+	) (*driverdocument.OpenDocument, error)
 
 	List(
 		ctx context.Context,
@@ -119,6 +134,53 @@ func handleDriverDocumentError(
 
 	default:
 		response.InternalServerError(c)
+	}
+}
+
+func serveDriverDocumentBinary(
+	c *gin.Context,
+	opened *driverdocument.OpenDocument,
+) {
+	if opened == nil ||
+		opened.Document == nil ||
+		opened.Body == nil {
+		response.InternalServerError(c)
+		return
+	}
+	defer opened.Body.Close()
+
+	c.Header(
+		"Content-Type",
+		opened.Document.ContentType,
+	)
+
+	c.Header(
+		"Content-Disposition",
+		mime.FormatMediaType(
+			"attachment",
+			map[string]string{
+				"filename": opened.Document.FileName,
+			},
+		),
+	)
+
+	if opened.Document.FileSizeBytes >= 0 {
+		c.Header(
+			"Content-Length",
+			strconv.FormatInt(
+				opened.Document.FileSizeBytes,
+				10,
+			),
+		)
+	}
+
+	c.Status(http.StatusOK)
+
+	if _, err := io.Copy(
+		c.Writer,
+		opened.Body,
+	); err != nil {
+		_ = c.Error(err)
 	}
 }
 
@@ -272,6 +334,36 @@ func (h *DriverDocumentHandler) GetForCurrentDriver(
 	)
 }
 
+// DownloadForCurrentDriver handles
+// GET /api/v1/driver/documents/:document_id/download.
+//
+// Ownership is derived from the authenticated users.id. Clients never supply
+// a storage key or authoritative driver identity.
+func (h *DriverDocumentHandler) DownloadForCurrentDriver(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(
+			c,
+			"authenticated user not found",
+		)
+		return
+	}
+
+	opened, err := h.service.OpenForUser(
+		c.Request.Context(),
+		user.ID,
+		c.Param("document_id"),
+	)
+	if err != nil {
+		handleDriverDocumentError(c, err)
+		return
+	}
+
+	serveDriverDocumentBinary(c, opened)
+}
+
 // ListForDriver handles GET /api/v1/drivers/:id/documents.
 func (h *DriverDocumentHandler) ListForDriver(
 	c *gin.Context,
@@ -312,6 +404,27 @@ func (h *DriverDocumentHandler) GetForDriver(
 		"Driver document retrieved successfully",
 		document,
 	)
+}
+
+// DownloadForDriver handles
+// GET /api/v1/drivers/:id/documents/:document_id/download.
+//
+// The service verifies that document_id belongs to :id before opening the
+// server-controlled storage key.
+func (h *DriverDocumentHandler) DownloadForDriver(
+	c *gin.Context,
+) {
+	opened, err := h.service.Open(
+		c.Request.Context(),
+		c.Param("id"),
+		c.Param("document_id"),
+	)
+	if err != nil {
+		handleDriverDocumentError(c, err)
+		return
+	}
+
+	serveDriverDocumentBinary(c, opened)
 }
 
 // Verify handles

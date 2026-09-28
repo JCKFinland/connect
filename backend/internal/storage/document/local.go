@@ -179,6 +179,53 @@ func (s *LocalStorage) Put(
 	return nil
 }
 
+func (s *LocalStorage) Open(
+	ctx context.Context,
+	key string,
+) (io.ReadCloser, error) {
+	if s == nil || strings.TrimSpace(s.root) == "" {
+		return nil, fmt.Errorf(
+			"open document object: local storage is not configured",
+		)
+	}
+
+	if err := ValidateKey(key); err != nil {
+		return nil, fmt.Errorf(
+			"open document object: %w",
+			err,
+		)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"open document object: %w",
+			err,
+		)
+	}
+
+	target, err := s.pathForKey(key)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"open document object: %w",
+			err,
+		)
+	}
+
+	file, err := os.Open(target)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
+
+		return nil, fmt.Errorf(
+			"open document object: %w",
+			err,
+		)
+	}
+
+	return file, nil
+}
+
 // Delete removes a stored document object.
 //
 // Deleting a missing object is reported as ErrNotFound so callers can decide
