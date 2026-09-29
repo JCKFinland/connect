@@ -337,6 +337,8 @@ func TestGoOnlineRejectsBusyDriverWithActiveTrip(t *testing.T) {
 		Dependencies{
 			DB:          db,
 			Config:      cfg,
+			Drivers:     postgresrepo.NewDriverRepository(db),
+			Compliance:  eligibleComplianceStub(),
 			Presence:    presenceRepo,
 			Assignments: assignmentRepo,
 		},
@@ -720,6 +722,8 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 		Dependencies{
 			DB:          db,
 			Config:      cfg,
+			Drivers:     postgresrepo.NewDriverRepository(db),
+			Compliance:  eligibleComplianceStub(),
 			Presence:    presenceRepo,
 			Assignments: assignmentRepo,
 		},
@@ -2017,6 +2021,8 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 		Dependencies{
 			DB:          db,
 			Config:      cfg,
+			Drivers:     postgresrepo.NewDriverRepository(db),
+			Compliance:  eligibleComplianceStub(),
 			Presence:    presenceRepo,
 			Assignments: assignmentRepo,
 		},
@@ -2362,6 +2368,8 @@ func TestGoOnlineRejectsMissingPresenceRow(t *testing.T) {
 		Dependencies{
 			DB:          db,
 			Config:      cfg,
+			Drivers:     postgresrepo.NewDriverRepository(db),
+			Compliance:  eligibleComplianceStub(),
 			Presence:    presenceRepo,
 			Assignments: assignmentRepo,
 		},

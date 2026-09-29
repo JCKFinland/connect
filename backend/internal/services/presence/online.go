@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
@@ -12,6 +13,9 @@ import (
 
 var ErrDriverAssignmentRequired = errors.New(
 	"driver assignment required before going online",
+)
+var ErrDriverComplianceRequired = errors.New(
+	"driver regulatory compliance required before going online",
 )
 
 func (s *Service) GoOnline(
@@ -35,6 +39,42 @@ func (s *Service) GoOnline(
 		return errors.New(
 			"user ID is required",
 		)
+	}
+
+	if s.drivers == nil {
+		return errors.New(
+			"driver repository is not configured",
+		)
+	}
+
+	if s.compliance == nil {
+		return errors.New(
+			"driver compliance service is not configured",
+		)
+	}
+
+	driver, err := s.getDriverByUserID(
+		ctx,
+		req.UserID,
+	)
+	if err != nil {
+		return err
+	}
+
+	eligible, err := s.compliance.IsEligible(
+		ctx,
+		driver.ID,
+		time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"evaluate driver compliance before going online: %w",
+			err,
+		)
+	}
+
+	if !eligible {
+		return ErrDriverComplianceRequired
 	}
 
 	return postgresrepo.RunInTransaction(

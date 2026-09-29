@@ -1,10 +1,21 @@
 package presence
 
 import (
+	"context"
+	"time"
+
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type ComplianceEvaluator interface {
+	IsEligible(
+		ctx context.Context,
+		driverID string,
+		now time.Time,
+	) (bool, error)
+}
 
 type Dependencies struct {
 	DB     *pgxpool.Pool
@@ -14,6 +25,7 @@ type Dependencies struct {
 	Drivers     repository.DriverRepository
 	Presence    repository.DriverPresenceRepository
 	Assignments repository.DriverAssignmentRepository
+	Compliance  ComplianceEvaluator
 }
 
 type Service struct {
@@ -24,12 +36,12 @@ type Service struct {
 	drivers     repository.DriverRepository
 	presence    repository.DriverPresenceRepository
 	assignments repository.DriverAssignmentRepository
+	compliance  ComplianceEvaluator
 }
 
 func NewService(
 	deps Dependencies,
 ) *Service {
-
 	return &Service{
 		db:  deps.DB,
 		cfg: deps.Config,
@@ -38,5 +50,6 @@ func NewService(
 		drivers:     deps.Drivers,
 		presence:    deps.Presence,
 		assignments: deps.Assignments,
+		compliance:  deps.Compliance,
 	}
 }

@@ -21,6 +21,7 @@ import (
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/security"
 	driverservice "github.com/JCKFinland/connect/backend/internal/services/driver"
+	drivercomplianceservice "github.com/JCKFinland/connect/backend/internal/services/driver_compliance"
 	driverdocumentservice "github.com/JCKFinland/connect/backend/internal/services/driver_document"
 	driverearningservice "github.com/JCKFinland/connect/backend/internal/services/driver_earning"
 	fareservice "github.com/JCKFinland/connect/backend/internal/services/fare"
@@ -236,6 +237,13 @@ func main() {
 		)
 		os.Exit(1)
 	}
+
+	driverComplianceService := drivercomplianceservice.NewService(
+		drivercomplianceservice.Dependencies{
+			Drivers:   driverRepo,
+			Documents: driverDocumentRepo,
+		},
+	)
 
 	driverDocumentService := driverdocumentservice.NewService(
 		driverdocumentservice.Dependencies{
@@ -459,6 +467,7 @@ func main() {
 			Drivers:     driverRepo,
 			Presence:    driverPresenceRepo,
 			Assignments: driverAssignmentRepo,
+			Compliance:  driverComplianceService,
 		},
 	)
 

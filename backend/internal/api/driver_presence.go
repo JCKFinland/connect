@@ -84,6 +84,10 @@ func handlePresenceError(
 		errors.Is(
 			err,
 			presence.ErrDriverHeartbeatUnavailable,
+		),
+		errors.Is(
+			err,
+			presence.ErrDriverComplianceRequired,
 		):
 
 		response.Conflict(
