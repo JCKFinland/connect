@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -87,6 +88,30 @@ func TestCreateOfferConcurrentSameRide(t *testing.T) {
 		); err != nil {
 			t.Logf(
 				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	complianceCleanup, err :=
+		testutil.MakeDriverRegulatorilyCompliant(
+			ctx,
+			db,
+			driverFixture,
+		)
+	if err != nil {
+		t.Fatalf(
+			"make isolated driver regulatorily compliant: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := complianceCleanup(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver compliance fixture: %v",
 				err,
 			)
 		}
@@ -1697,6 +1722,30 @@ func TestCreateOfferResetsDispatchRetryState(t *testing.T) {
 		}
 	}()
 
+	complianceCleanup, err :=
+		testutil.MakeDriverRegulatorilyCompliant(
+			ctx,
+			db,
+			driverFixture,
+		)
+	if err != nil {
+		t.Fatalf(
+			"make isolated driver regulatorily compliant: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := complianceCleanup(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver compliance fixture: %v",
+				err,
+			)
+		}
+	}()
+
 	driverUserID := driverFixture.UserID
 	driverID := driverFixture.DriverID
 
@@ -2331,6 +2380,30 @@ func TestCreateOfferCapsOfferExpiryAtRideExpiry(t *testing.T) {
 		); err != nil {
 			t.Logf(
 				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	complianceCleanup, err :=
+		testutil.MakeDriverRegulatorilyCompliant(
+			ctx,
+			db,
+			driverFixture,
+		)
+	if err != nil {
+		t.Fatalf(
+			"make isolated driver regulatorily compliant: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := complianceCleanup(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver compliance fixture: %v",
 				err,
 			)
 		}
@@ -7321,6 +7394,30 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 		); err != nil {
 			t.Logf(
 				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	complianceCleanup, err :=
+		testutil.MakeDriverRegulatorilyCompliant(
+			ctx,
+			db,
+			driverFixture,
+		)
+	if err != nil {
+		t.Fatalf(
+			"make isolated driver regulatorily compliant: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := complianceCleanup(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver compliance fixture: %v",
 				err,
 			)
 		}
@@ -13160,5 +13257,2140 @@ func TestDispatchRideRechecksVehicleTypeAfterCandidateRanking(t *testing.T) {
 				persistedRideStatus,
 			)
 		}
+	}
+}
+
+func TestDispatchRideRechecksComplianceAfterCandidateRanking(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	if cfg.Presence.HeartbeatTimeout <= 0 {
+		t.Fatalf(
+			"heartbeat timeout must be greater than zero, got %v",
+			cfg.Presence.HeartbeatTimeout,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	complianceCleanup, err :=
+		testutil.MakeDriverRegulatorilyCompliant(
+			ctx,
+			db,
+			driverFixture,
+		)
+	if err != nil {
+		t.Fatalf(
+			"make isolated driver regulatorily compliant: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := complianceCleanup(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver compliance fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	driverUserID := driverFixture.UserID
+
+	freshHeartbeat := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO driver_presence (
+			driver_id,
+			company_id,
+			branch_id,
+			vehicle_id,
+			assignment_id,
+			is_online,
+			availability_status,
+			latitude,
+			longitude,
+			last_heartbeat_at
+		)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			TRUE,
+			'AVAILABLE',
+			60.2055,
+			24.6559,
+			$6
+		)
+	`,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
+		freshHeartbeat,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create isolated fresh-heartbeat driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`
+			DELETE FROM driver_presence
+			WHERE driver_id = $1
+		`,
+			driverUserID,
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver presence: %v",
+				err,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Create disposable PENDING STANDARD ride.
+	//
+	// Pickup coordinates exactly match John's coordinates.
+	// ---------------------------------------------------------
+
+	rideRequestID := uuid.NewString()
+
+	pricingProfileID := uuid.NewString()
+	pricingVersion := "test-" + uuid.NewString()
+
+	// ---------------------------------------------------------
+	// Create disposable service category for propagation test.
+	// ---------------------------------------------------------
+
+	companyID := driverFixture.CompanyID
+
+	serviceCategoryID := uuid.NewString()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO service_categories
+			(
+				id,
+				code,
+				name,
+				description,
+				is_active,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'DispatchRide Test Category',
+				'DispatchRide service-category propagation regression test',
+				TRUE,
+				NOW(),
+				NOW()
+			)
+		`,
+		serviceCategoryID,
+		"DISPATCH_TEST_"+uuid.NewString()[:8],
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create DispatchRide service category: %v",
+			err,
+		)
+	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO fare_pricing_profiles
+			(
+				id,
+				company_id,
+				branch_id,
+				service_category_id,
+				version,
+				currency,
+				base_fare,
+				distance_rate_per_km,
+				time_rate_per_minute,
+				waiting_rate_per_minute,
+				booking_fee,
+				surge_multiplier,
+				effective_from,
+				effective_to,
+				is_active,
+				created_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				NULL,
+				$3,
+				$4,
+				'EUR',
+				5.00,
+				1.50,
+				0.50,
+				0.50,
+				0.00,
+				1.00,
+				$5,
+				NULL,
+				TRUE,
+				$5
+			)
+		`,
+		pricingProfileID,
+		companyID,
+		serviceCategoryID,
+		pricingVersion,
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create DispatchRide fresh-heartbeat pricing profile: %v",
+			err,
+		)
+	}
+
+	now := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+                service_category_id,
+                passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'DispatchRide Compliance Recheck Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+                $3,
+                1,
+                'PENDING',
+				'DispatchRide post-ranking compliance regression test',
+				$4,
+				$5,
+				$4,
+				$4
+			)
+		`,
+		rideRequestID,
+		customerID,
+		serviceCategoryID,
+		now,
+		now.Add(10*time.Minute),
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create DispatchRide fresh-heartbeat ride: %v",
+			err,
+		)
+	}
+
+	// Clean up in FK-safe order:
+	// trip -> ride request -> pricing profile -> service category.
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		// 1. Trip references the ride request, service category,
+		//    and frozen pricing profile.
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM trips
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide fresh-heartbeat trip: %v",
+				cleanupErr,
+			)
+		}
+
+		// 2. Ride request references the service category.
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide fresh-heartbeat ride: %v",
+				cleanupErr,
+			)
+		}
+
+		// 3. Pricing profile references the service category.
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM fare_pricing_profiles
+				WHERE id = $1
+			`,
+			pricingProfileID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide pricing profile: %v",
+				cleanupErr,
+			)
+		}
+
+		// 4. Nothing created by this test should reference
+		//    the service category now.
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM service_categories
+				WHERE id = $1
+			`,
+			serviceCategoryID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide service category: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	service := NewService(
+		Dependencies{
+			DB:     db,
+			Config: cfg,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// Deterministic compliance race point.
+	//
+	// The isolated driver has already passed the initial regulatory
+	// compliance check and entered the ranked candidate set.
+	//
+	// Immediately before the final presence-row lock, expire the
+	// verified taxi-driver-license document through another pool
+	// connection. The post-lock compliance recheck must reject the
+	// already-ranked driver.
+	// ---------------------------------------------------------
+
+	hookCalled := false
+	var hookErr error
+
+	service.beforeClaimCandidate = func(driverID string) {
+		if driverID != driverUserID || hookCalled {
+			return
+		}
+
+		hookCalled = true
+
+		result, err := db.Exec(
+			context.Background(),
+			`
+				UPDATE driver_documents
+				SET
+					expires_at = CURRENT_DATE,
+					updated_at = NOW()
+				WHERE driver_id = $1
+				  AND document_type = 'TAXI_DRIVER_LICENSE'
+				  AND deleted_at IS NULL
+			`,
+			driverFixture.DriverID,
+		)
+		if err != nil {
+			hookErr = err
+			return
+		}
+
+		if result.RowsAffected() != 1 {
+			hookErr = fmt.Errorf(
+				"expected exactly one taxi-driver-license document to expire, got %d",
+				result.RowsAffected(),
+			)
+		}
+	}
+
+	trip, dispatchErr := service.DispatchRide(
+		ctx,
+		rideRequestID,
+	)
+
+	if hookErr != nil {
+		t.Fatalf(
+			"expire regulatory document after candidate ranking: %v",
+			hookErr,
+		)
+	}
+
+	if !hookCalled {
+		t.Fatal(
+			"expected isolated driver to reach post-ranking claim boundary",
+		)
+	}
+
+	if dispatchErr != nil &&
+		!errors.Is(
+			dispatchErr,
+			ErrNoAvailableDrivers,
+		) {
+		t.Fatalf(
+			"unexpected DispatchRide error after compliance changed: %v",
+			dispatchErr,
+		)
+	}
+
+	// Another globally available driver may legitimately receive the
+	// ride, but the driver whose compliance changed must never do so.
+	if trip != nil && trip.DriverID == driverUserID {
+		t.Fatalf(
+			"non-compliant driver received trip %s after compliance changed post-ranking",
+			trip.ID,
+		)
+	}
+
+	var driverTripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE ride_request_id = $1
+			  AND driver_id = $2
+		`,
+		rideRequestID,
+		driverUserID,
+	).Scan(
+		&driverTripCount,
+	); err != nil {
+		t.Fatalf(
+			"count trips for post-ranking non-compliant driver: %v",
+			err,
+		)
+	}
+
+	if driverTripCount != 0 {
+		t.Fatalf(
+			"expected zero trips for post-ranking non-compliant driver, got %d",
+			driverTripCount,
+		)
+	}
+
+	// Rejection must not claim the driver or mutate presence to BUSY.
+	var (
+		persistedIsOnline     bool
+		persistedAvailability string
+		persistedHeartbeat    *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		driverUserID,
+	).Scan(
+		&persistedIsOnline,
+		&persistedAvailability,
+		&persistedHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"read presence after compliance recheck: %v",
+			err,
+		)
+	}
+
+	if !persistedIsOnline {
+		t.Fatal(
+			"expected post-ranking non-compliant driver to remain online",
+		)
+	}
+
+	if persistedAvailability != "AVAILABLE" {
+		t.Fatalf(
+			"expected post-ranking non-compliant driver to remain AVAILABLE, got %s",
+			persistedAvailability,
+		)
+	}
+
+	if persistedHeartbeat == nil {
+		t.Fatal(
+			"expected post-ranking non-compliant driver's heartbeat to remain present",
+		)
+	}
+}
+
+func TestDispatchRideSkipsRegulatorilyNonCompliantDriver(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	if cfg.Presence.HeartbeatTimeout <= 0 {
+		t.Fatalf(
+			"heartbeat timeout must be greater than zero, got %v",
+			cfg.Presence.HeartbeatTimeout,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	driverUserID := driverFixture.UserID
+
+	freshHeartbeat := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO driver_presence (
+			driver_id,
+			company_id,
+			branch_id,
+			vehicle_id,
+			assignment_id,
+			is_online,
+			availability_status,
+			latitude,
+			longitude,
+			last_heartbeat_at
+		)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			TRUE,
+			'AVAILABLE',
+			60.2055,
+			24.6559,
+			$6
+		)
+	`,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
+		freshHeartbeat,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create isolated fresh-heartbeat driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`
+			DELETE FROM driver_presence
+			WHERE driver_id = $1
+		`,
+			driverUserID,
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver presence: %v",
+				err,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Create disposable PENDING STANDARD ride for the non-compliant driver.
+	//
+	// Pickup coordinates exactly match the isolated driver's coordinates.
+	// ---------------------------------------------------------
+
+	rideRequestID := uuid.NewString()
+
+	pricingProfileID := uuid.NewString()
+	pricingVersion := "test-" + uuid.NewString()
+
+	// ---------------------------------------------------------
+	// Create disposable service category for propagation test.
+	// ---------------------------------------------------------
+
+	companyID := driverFixture.CompanyID
+
+	serviceCategoryID := uuid.NewString()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO service_categories
+			(
+				id,
+				code,
+				name,
+				description,
+				is_active,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'DispatchRide Compliance Test Category',
+				'DispatchRide regulatory compliance regression test',
+				TRUE,
+				NOW(),
+				NOW()
+			)
+		`,
+		serviceCategoryID,
+		"DISPATCH_COMPLIANCE_"+uuid.NewString()[:8],
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create DispatchRide service category: %v",
+			err,
+		)
+	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO fare_pricing_profiles
+			(
+				id,
+				company_id,
+				branch_id,
+				service_category_id,
+				version,
+				currency,
+				base_fare,
+				distance_rate_per_km,
+				time_rate_per_minute,
+				waiting_rate_per_minute,
+				booking_fee,
+				surge_multiplier,
+				effective_from,
+				effective_to,
+				is_active,
+				created_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				NULL,
+				$3,
+				$4,
+				'EUR',
+				5.00,
+				1.50,
+				0.50,
+				0.50,
+				0.00,
+				1.00,
+				$5,
+				NULL,
+				TRUE,
+				$5
+			)
+		`,
+		pricingProfileID,
+		companyID,
+		serviceCategoryID,
+		pricingVersion,
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create DispatchRide compliance pricing profile: %v",
+			err,
+		)
+	}
+
+	now := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+                service_category_id,
+                passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'DispatchRide Compliance Test',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+                $3,
+                1,
+                'PENDING',
+				'DispatchRide regulatory compliance regression test',
+				$4,
+				$5,
+				$4,
+				$4
+			)
+		`,
+		rideRequestID,
+		customerID,
+		serviceCategoryID,
+		now,
+		now.Add(10*time.Minute),
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"create DispatchRide compliance ride: %v",
+			err,
+		)
+	}
+
+	// Clean up in FK-safe order:
+	// trip -> ride request -> pricing profile -> service category.
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		// 1. Trip references the ride request, service category,
+		//    and frozen pricing profile.
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM trips
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide compliance trip: %v",
+				cleanupErr,
+			)
+		}
+
+		// 2. Ride request references the service category.
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide compliance ride: %v",
+				cleanupErr,
+			)
+		}
+
+		// 3. Pricing profile references the service category.
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM fare_pricing_profiles
+				WHERE id = $1
+			`,
+			pricingProfileID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide pricing profile: %v",
+				cleanupErr,
+			)
+		}
+
+		// 4. Nothing created by this test should reference
+		//    the service category now.
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM service_categories
+				WHERE id = $1
+			`,
+			serviceCategoryID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup DispatchRide service category: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	service := NewService(
+		Dependencies{
+			DB:     db,
+			Config: cfg,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// Dispatch.
+	//
+	// The fixture is otherwise fully dispatchable but has no
+	// regulatory documents. It must therefore be filtered out.
+	// ---------------------------------------------------------
+
+	trip, err := service.DispatchRide(
+		ctx,
+		rideRequestID,
+	)
+
+	if !errors.Is(
+		err,
+		ErrNoAvailableDrivers,
+	) {
+		t.Fatalf(
+			"expected ErrNoAvailableDrivers for non-compliant driver, got trip=%v err=%v",
+			trip,
+			err,
+		)
+	}
+
+	if trip != nil {
+		t.Fatalf(
+			"expected no trip for non-compliant driver, got %+v",
+			trip,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// No successful-dispatch state may have been persisted.
+	// ---------------------------------------------------------
+
+	var tripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE ride_request_id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&tripCount,
+	); err != nil {
+		t.Fatalf(
+			"count trips after rejected DispatchRide: %v",
+			err,
+		)
+	}
+
+	if tripCount != 0 {
+		t.Fatalf(
+			"expected no trip for non-compliant driver, got %d",
+			tripCount,
+		)
+	}
+
+	var rideStatus string
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT status
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&rideStatus,
+	); err != nil {
+		t.Fatalf(
+			"read ride after rejected DispatchRide: %v",
+			err,
+		)
+	}
+
+	if rideStatus != rideRequestStatusPending {
+		t.Fatalf(
+			"expected ride to remain %s, got %s",
+			rideRequestStatusPending,
+			rideStatus,
+		)
+	}
+
+	var (
+		persistedIsOnline     bool
+		persistedAvailability string
+		persistedHeartbeat    *time.Time
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				last_heartbeat_at
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		driverUserID,
+	).Scan(
+		&persistedIsOnline,
+		&persistedAvailability,
+		&persistedHeartbeat,
+	); err != nil {
+		t.Fatalf(
+			"read presence after rejected DispatchRide: %v",
+			err,
+		)
+	}
+
+	if !persistedIsOnline {
+		t.Fatal(
+			"expected non-compliant driver to remain online",
+		)
+	}
+
+	if persistedAvailability != "AVAILABLE" {
+		t.Fatalf(
+			"expected non-compliant driver to remain AVAILABLE, got %s",
+			persistedAvailability,
+		)
+	}
+
+	if persistedHeartbeat == nil {
+		t.Fatal(
+			"expected non-compliant driver's heartbeat to remain present",
+		)
+	}
+}
+
+func TestAcceptOfferRejectsDriverWhoseComplianceChangedAfterOfferCreation(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	// ---------------------------------------------------------
+	// 1. Create an isolated operational driver.
+	// ---------------------------------------------------------
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// 2. Make the driver regulatorily compliant before offer
+	//    creation.
+	// ---------------------------------------------------------
+
+	complianceCleanup, err :=
+		testutil.MakeDriverRegulatorilyCompliant(
+			ctx,
+			db,
+			driverFixture,
+		)
+	if err != nil {
+		t.Fatalf(
+			"make isolated driver regulatorily compliant: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := complianceCleanup(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver compliance fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	driverUserID := driverFixture.UserID
+	driverID := driverFixture.DriverID
+
+	// ---------------------------------------------------------
+	// 3. Create AVAILABLE presence.
+	//
+	// Presence uses users.id, while regulatory compliance uses
+	// permanent drivers.id.
+	// ---------------------------------------------------------
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO driver_presence (
+				driver_id,
+				company_id,
+				branch_id,
+				vehicle_id,
+				assignment_id,
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				last_heartbeat_at
+			)
+			VALUES (
+				$1,
+				$2,
+				$3,
+				$4,
+				$5,
+				TRUE,
+				'AVAILABLE',
+				60.2055,
+				24.6559,
+				NOW()
+			)
+		`,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
+	); err != nil {
+		t.Fatalf(
+			"create isolated driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`
+				DELETE FROM driver_presence
+				WHERE driver_id = $1
+			`,
+			driverUserID,
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver presence: %v",
+				err,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// 4. Create pricing required by AcceptOffer.
+	// ---------------------------------------------------------
+
+	serviceCategoryID := uuid.NewString()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO service_categories
+			(
+				id,
+				code,
+				name,
+				description,
+				is_active,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Accept Compliance Test Category',
+				'Acceptance-time regulatory compliance regression test',
+				TRUE,
+				NOW(),
+				NOW()
+			)
+		`,
+		serviceCategoryID,
+		"ACCEPT_COMPLIANCE_"+uuid.NewString()[:8],
+	); err != nil {
+		t.Fatalf(
+			"create acceptance compliance service category: %v",
+			err,
+		)
+	}
+
+	pricingProfileID := uuid.NewString()
+	pricingVersion := "test-" + uuid.NewString()
+	pricingEffectiveFrom := time.Now().UTC().Add(-time.Hour)
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO fare_pricing_profiles
+			(
+				id,
+				company_id,
+				branch_id,
+				service_category_id,
+				version,
+				currency,
+				base_fare,
+				distance_rate_per_km,
+				time_rate_per_minute,
+				waiting_rate_per_minute,
+				booking_fee,
+				surge_multiplier,
+				effective_from,
+				effective_to,
+				is_active,
+				created_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				$3,
+				$4,
+				$5,
+				'EUR',
+				5.00,
+				1.50,
+				0.50,
+				0.50,
+				0.00,
+				1.00,
+				$6,
+				NULL,
+				TRUE,
+				$6
+			)
+		`,
+		pricingProfileID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		serviceCategoryID,
+		pricingVersion,
+		pricingEffectiveFrom,
+	); err != nil {
+		t.Fatalf(
+			"create acceptance compliance pricing profile: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 5. Create a disposable PENDING ride.
+	// ---------------------------------------------------------
+
+	rideRequestID := uuid.NewString()
+	now := time.Now().UTC()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				service_category_id,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Acceptance Compliance Test Pickup',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				$3,
+				1,
+				'PENDING',
+				'Acceptance-time regulatory compliance regression test',
+				$4,
+				$4,
+				$4
+			)
+		`,
+		rideRequestID,
+		customerID,
+		serviceCategoryID,
+		now,
+	); err != nil {
+		t.Fatalf(
+			"create acceptance compliance ride request: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 6. Clean up all disposable dispatch/pricing state before
+	//    the driver fixture cleanup runs.
+	// ---------------------------------------------------------
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM trips
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup acceptance compliance trip: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup acceptance compliance offer: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup acceptance compliance ride: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM fare_pricing_profiles
+				WHERE id = $1
+			`,
+			pricingProfileID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup acceptance compliance pricing profile: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM service_categories
+				WHERE id = $1
+			`,
+			serviceCategoryID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup acceptance compliance service category: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// 7. Construct the real dispatch service.
+	// ---------------------------------------------------------
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	driverAssignmentRepo :=
+		postgresrepo.NewDriverAssignmentRepository(db)
+
+	driverPresenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	tripRepo :=
+		postgresrepo.NewTripRepository(db)
+
+	vehicleRepo :=
+		postgresrepo.NewVehicleRepository(db)
+
+	driverRepo :=
+		postgresrepo.NewDriverRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Assignments:  driverAssignmentRepo,
+			Presence:     driverPresenceRepo,
+			Trips:        tripRepo,
+			Vehicles:     vehicleRepo,
+			Drivers:      driverRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// 8. Create the offer while the driver is fully compliant.
+	//
+	// This proves candidate-time compliance succeeds before we
+	// deliberately change eligibility.
+	// ---------------------------------------------------------
+
+	offer, err := service.CreateOffer(
+		ctx,
+		rideRequestID,
+		"",
+	)
+	if err != nil {
+		t.Fatalf(
+			"create offer while driver is compliant: %v",
+			err,
+		)
+	}
+
+	if offer == nil || offer.ID == "" {
+		t.Fatal(
+			"expected committed dispatch offer",
+		)
+	}
+
+	if offer.DriverID != driverID {
+		t.Fatalf(
+			"expected offer driver %s, got %s",
+			driverID,
+			offer.DriverID,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 9. Regulatory eligibility changes after offer creation.
+	//
+	// Expiring one required verified document is sufficient to
+	// make the driver ineligible without changing presence.
+	// ---------------------------------------------------------
+
+	result, err := db.Exec(
+		ctx,
+		`
+			UPDATE driver_documents
+			SET
+				expires_at = CURRENT_DATE,
+				updated_at = NOW()
+			WHERE driver_id = $1
+			  AND document_type = 'TAXI_DRIVER_LICENSE'
+			  AND deleted_at IS NULL
+		`,
+		driverID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"expire taxi driver license after offer creation: %v",
+			err,
+		)
+	}
+
+	if result.RowsAffected() != 1 {
+		t.Fatalf(
+			"expected exactly one taxi driver license to expire, affected %d",
+			result.RowsAffected(),
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 10. Acceptance must now fail closed.
+	// ---------------------------------------------------------
+
+	trip, err := service.AcceptOffer(
+		ctx,
+		offer.ID,
+	)
+
+	if !errors.Is(
+		err,
+		ErrDispatchOfferDriverNonCompliant,
+	) {
+		t.Fatalf(
+			"expected ErrDispatchOfferDriverNonCompliant, got trip=%v err=%v",
+			trip,
+			err,
+		)
+	}
+
+	if trip != nil {
+		t.Fatalf(
+			"expected no trip for non-compliant driver, got %+v",
+			trip,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 11. Verify the failed acceptance transaction did not
+	//     mutate successful-acceptance state.
+	// ---------------------------------------------------------
+
+	var tripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE ride_request_id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&tripCount,
+	); err != nil {
+		t.Fatalf(
+			"count trips after rejected acceptance: %v",
+			err,
+		)
+	}
+
+	if tripCount != 0 {
+		t.Fatalf(
+			"expected no trip after rejected acceptance, got %d",
+			tripCount,
+		)
+	}
+
+	var rideStatus string
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT status
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&rideStatus,
+	); err != nil {
+		t.Fatalf(
+			"load ride after rejected acceptance: %v",
+			err,
+		)
+	}
+
+	if rideStatus != rideRequestStatusMatching {
+		t.Fatalf(
+			"expected ride to remain %s, got %s",
+			rideRequestStatusMatching,
+			rideStatus,
+		)
+	}
+
+	var offerStatus string
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT status
+			FROM dispatch_offers
+			WHERE id = $1
+		`,
+		offer.ID,
+	).Scan(
+		&offerStatus,
+	); err != nil {
+		t.Fatalf(
+			"load offer after rejected acceptance: %v",
+			err,
+		)
+	}
+
+	if offerStatus != dispatchOfferStatusPending {
+		t.Fatalf(
+			"expected offer to remain %s, got %s",
+			dispatchOfferStatusPending,
+			offerStatus,
+		)
+	}
+
+	var (
+		isOnline           bool
+		availabilityStatus string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		driverUserID,
+	).Scan(
+		&isOnline,
+		&availabilityStatus,
+	); err != nil {
+		t.Fatalf(
+			"load presence after rejected acceptance: %v",
+			err,
+		)
+	}
+
+	if !isOnline {
+		t.Fatal(
+			"expected driver to remain online after rejected acceptance",
+		)
+	}
+
+	if availabilityStatus != "AVAILABLE" {
+		t.Fatalf(
+			"expected driver to remain AVAILABLE, got %s",
+			availabilityStatus,
+		)
+	}
+}
+
+func TestCreateOfferSkipsRegulatorilyNonCompliantDriver(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	// ---------------------------------------------------------
+	// 1. Create an otherwise eligible isolated driver.
+	//
+	// Deliberately do NOT create regulatory documents. The
+	// fixture itself is active, verified, ACTIVE, has a valid
+	// driving-license expiry, an active vehicle, and assignment.
+	// ---------------------------------------------------------
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	driverUserID := driverFixture.UserID
+	driverID := driverFixture.DriverID
+
+	// ---------------------------------------------------------
+	// 2. Give the non-compliant driver fresh AVAILABLE
+	//    presence so regulatory compliance is the gate that
+	//    excludes it.
+	// ---------------------------------------------------------
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO driver_presence (
+				driver_id,
+				company_id,
+				branch_id,
+				vehicle_id,
+				assignment_id,
+				is_online,
+				availability_status,
+				latitude,
+				longitude,
+				last_heartbeat_at
+			)
+			VALUES (
+				$1,
+				$2,
+				$3,
+				$4,
+				$5,
+				TRUE,
+				'AVAILABLE',
+				60.2055,
+				24.6559,
+				NOW()
+			)
+		`,
+		driverUserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+		driverFixture.VehicleID,
+		driverFixture.AssignmentID,
+	); err != nil {
+		t.Fatalf(
+			"create isolated driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`
+				DELETE FROM driver_presence
+				WHERE driver_id = $1
+			`,
+			driverUserID,
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver presence: %v",
+				err,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// 3. Create a disposable PENDING ride at exactly the
+	//    driver's location.
+	// ---------------------------------------------------------
+
+	rideRequestID := uuid.NewString()
+	now := time.Now().UTC()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Non-Compliant Driver Test Pickup',
+				60.2055,
+				24.6559,
+				'Helsinki Central Station',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'CreateOffer regulatory compliance regression test',
+				$3,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+	); err != nil {
+		t.Fatalf(
+			"create non-compliant driver ride request: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM dispatch_offers
+				WHERE ride_request_id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup non-compliant driver offers: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup non-compliant driver ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// 4. Construct the real dispatch service.
+	// ---------------------------------------------------------
+
+	offerRepo :=
+		postgresrepo.NewDispatchOfferRepository(db)
+
+	rideRequestRepo :=
+		postgresrepo.NewRideRequestRepository(db)
+
+	driverAssignmentRepo :=
+		postgresrepo.NewDriverAssignmentRepository(db)
+
+	driverPresenceRepo :=
+		postgresrepo.NewDriverPresenceRepository(db)
+
+	vehicleRepo :=
+		postgresrepo.NewVehicleRepository(db)
+
+	driverRepo :=
+		postgresrepo.NewDriverRepository(db)
+
+	service := NewService(
+		Dependencies{
+			DB:           db,
+			Config:       cfg,
+			RideRequests: rideRequestRepo,
+			Assignments:  driverAssignmentRepo,
+			Presence:     driverPresenceRepo,
+			Vehicles:     vehicleRepo,
+			Drivers:      driverRepo,
+			Offers:       offerRepo,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// 5. The sole otherwise-eligible candidate must be filtered
+	//    out because its required regulatory documents are
+	//    missing.
+	// ---------------------------------------------------------
+
+	offer, err := service.CreateOffer(
+		ctx,
+		rideRequestID,
+		"",
+	)
+
+	if !errors.Is(
+		err,
+		ErrNoAvailableDrivers,
+	) {
+		t.Fatalf(
+			"expected ErrNoAvailableDrivers for non-compliant driver, got offer=%v err=%v",
+			offer,
+			err,
+		)
+	}
+
+	if offer != nil {
+		t.Fatalf(
+			"expected no offer for non-compliant driver, got %+v",
+			offer,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 6. Verify no dispatch state was advanced.
+	// ---------------------------------------------------------
+
+	var offerCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM dispatch_offers
+			WHERE ride_request_id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&offerCount,
+	); err != nil {
+		t.Fatalf(
+			"count offers after rejected dispatch: %v",
+			err,
+		)
+	}
+
+	if offerCount != 0 {
+		t.Fatalf(
+			"expected no dispatch offer, got %d",
+			offerCount,
+		)
+	}
+
+	var rideStatus string
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT status
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&rideStatus,
+	); err != nil {
+		t.Fatalf(
+			"load ride after rejected dispatch: %v",
+			err,
+		)
+	}
+
+	if rideStatus != rideRequestStatusPending {
+		t.Fatalf(
+			"expected ride to remain %s, got %s",
+			rideRequestStatusPending,
+			rideStatus,
+		)
+	}
+
+	var (
+		isOnline           bool
+		availabilityStatus string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		driverUserID,
+	).Scan(
+		&isOnline,
+		&availabilityStatus,
+	); err != nil {
+		t.Fatalf(
+			"load non-compliant driver presence: %v",
+			err,
+		)
+	}
+
+	if !isOnline {
+		t.Fatal(
+			"expected filtered driver to remain online",
+		)
+	}
+
+	if availabilityStatus != "AVAILABLE" {
+		t.Fatalf(
+			"expected filtered driver to remain AVAILABLE, got %s",
+			availabilityStatus,
+		)
+	}
+
+	// Explicitly prove this fixture has no active regulatory
+	// documents, so the regression cannot accidentally pass
+	// because of some unrelated candidate condition.
+	var regulatoryDocumentCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM driver_documents
+			WHERE driver_id = $1
+			  AND deleted_at IS NULL
+		`,
+		driverID,
+	).Scan(
+		&regulatoryDocumentCount,
+	); err != nil {
+		t.Fatalf(
+			"count isolated driver regulatory documents: %v",
+			err,
+		)
+	}
+
+	if regulatoryDocumentCount != 0 {
+		t.Fatalf(
+			"expected isolated driver to have no regulatory documents, got %d",
+			regulatoryDocumentCount,
+		)
 	}
 }

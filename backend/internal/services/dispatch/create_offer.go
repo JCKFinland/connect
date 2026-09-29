@@ -10,6 +10,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	drivercomplianceservice "github.com/JCKFinland/connect/backend/internal/services/driver_compliance"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -120,6 +121,16 @@ func (s *Service) CreateOffer(
 
 			drivers :=
 				postgresrepo.NewDriverRepositoryWithDB(tx)
+
+			documents :=
+				postgresrepo.NewDriverDocumentRepositoryWithDB(tx)
+
+			compliance := drivercomplianceservice.NewService(
+				drivercomplianceservice.Dependencies{
+					Drivers:   drivers,
+					Documents: documents,
+				},
+			)
 
 			offers :=
 				postgresrepo.NewDispatchOfferRepositoryWithDB(tx)
@@ -407,6 +418,21 @@ func (s *Service) CreateOffer(
 					continue
 				}
 
+				eligible, err := compliance.IsEligible(
+					ctx,
+					operationalDriver.ID,
+					now,
+				)
+				if err != nil {
+					return fmt.Errorf(
+						"evaluate candidate driver compliance: %w",
+						err,
+					)
+				}
+				if !eligible {
+					continue
+				}
+
 				// Never offer the same ride to the same driver again.
 				_, alreadyOffered := previouslyOfferedDrivers[operationalDriver.ID]
 
@@ -575,6 +601,21 @@ func (s *Service) CreateOffer(
 					lockedOperationalDriver.ID == "" ||
 					!lockedOperationalDriver.IsActive {
 
+					continue
+				}
+
+				eligible, err := compliance.IsEligible(
+					ctx,
+					lockedOperationalDriver.ID,
+					now,
+				)
+				if err != nil {
+					return fmt.Errorf(
+						"recheck locked driver compliance: %w",
+						err,
+					)
+				}
+				if !eligible {
 					continue
 				}
 

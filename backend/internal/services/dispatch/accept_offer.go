@@ -12,6 +12,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	drivercomplianceservice "github.com/JCKFinland/connect/backend/internal/services/driver_compliance"
 	"github.com/JCKFinland/connect/backend/internal/services/pricing"
 )
 
@@ -26,6 +27,10 @@ var (
 
 	ErrDispatchOfferDriverUnavailable = errors.New(
 		"dispatch offer driver is no longer available",
+	)
+
+	ErrDispatchOfferDriverNonCompliant = errors.New(
+		"dispatch offer driver is no longer regulatorily compliant",
 	)
 )
 
@@ -83,6 +88,7 @@ func (s *Service) AcceptOffer(
 
 			offers := postgresrepo.NewDispatchOfferRepositoryWithDB(tx)
 			drivers := postgresrepo.NewDriverRepositoryWithDB(tx)
+			documents := postgresrepo.NewDriverDocumentRepositoryWithDB(tx)
 			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
 			rideRequests := postgresrepo.NewRideRequestRepositoryWithDB(tx)
 			trips := postgresrepo.NewTripRepositoryWithDB(tx)
@@ -92,6 +98,13 @@ func (s *Service) AcceptOffer(
 			pricingService := pricing.NewService(
 				pricing.Dependencies{
 					FarePricingProfiles: farePricingProfiles,
+				},
+			)
+
+			compliance := drivercomplianceservice.NewService(
+				drivercomplianceservice.Dependencies{
+					Drivers:   drivers,
+					Documents: documents,
 				},
 			)
 
@@ -267,6 +280,25 @@ func (s *Service) AcceptOffer(
 				return errors.New(
 					"ride request service category is required for offer acceptance",
 				)
+			}
+
+			// Regulatory eligibility can change after an offer is created.
+			// Revalidate it inside the acceptance transaction after the
+			// offer, presence, and ride request have been locked, but before
+			// any successful-acceptance state mutation occurs.
+			eligible, err := compliance.IsEligible(
+				ctx,
+				driver.ID,
+				now,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"recheck dispatch offer driver compliance: %w",
+					err,
+				)
+			}
+			if !eligible {
+				return ErrDispatchOfferDriverNonCompliant
 			}
 
 			branchID := offer.BranchID

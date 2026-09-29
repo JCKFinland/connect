@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 
@@ -200,6 +201,19 @@ func (h *DispatchHandler) AcceptOffer(
 			response.BadRequest(
 				c,
 				"Driver is no longer available",
+			)
+			return
+		}
+
+		if errors.Is(
+			err,
+			dispatch.ErrDispatchOfferDriverNonCompliant,
+		) {
+			response.Error(
+				c,
+				http.StatusConflict,
+				"Driver is no longer regulatorily compliant",
+				nil,
 			)
 			return
 		}
