@@ -214,10 +214,9 @@ func (h *DriverPresenceHandler) Heartbeat(
 		c.Request.Context(),
 		req,
 	); err != nil {
-
-		response.BadRequest(
+		handlePresenceError(
 			c,
-			err.Error(),
+			err,
 		)
 		return
 	}

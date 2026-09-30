@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
@@ -101,7 +102,9 @@ func (s *Service) Heartbeat(
 	// and dispatch operations.
 	// ---------------------------------------------------------
 
-	return postgresrepo.RunInTransaction(
+	complianceRejected := false
+
+	err := postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
 		func(tx pgx.Tx) error {
@@ -126,7 +129,7 @@ func (s *Service) Heartbeat(
 			// lifecycle state between existence checking and heartbeat.
 			// ---------------------------------------------------------
 
-			_, err :=
+			current, err :=
 				presenceRepo.GetByDriverIDForUpdate(
 					ctx,
 					req.UserID,
@@ -147,6 +150,76 @@ func (s *Service) Heartbeat(
 			}
 
 			// ---------------------------------------------------------
+			// Revalidate regulatory compliance for idle online states.
+			//
+			// BUSY drivers must keep sending telemetry for an active trip
+			// even if regulatory eligibility changes mid-trip. Dispatch and
+			// offer acceptance independently prevent new work from being
+			// assigned to a non-compliant driver.
+			//
+			// AVAILABLE and BREAK are idle online states. If compliance has
+			// lapsed, remove the driver from the online pool while the presence
+			// lifecycle row remains locked.
+			if current != nil &&
+				current.IsOnline &&
+				(current.AvailabilityStatus == StatusAvailable ||
+					current.AvailabilityStatus == StatusBreak) {
+
+				if s.drivers == nil {
+					return errors.New(
+						"driver repository is not configured",
+					)
+				}
+
+				if s.compliance == nil {
+					return errors.New(
+						"driver compliance service is not configured",
+					)
+				}
+
+				driver, err := s.getDriverByUserID(
+					ctx,
+					req.UserID,
+				)
+				if err != nil {
+					return err
+				}
+
+				eligible, err := s.compliance.IsEligible(
+					ctx,
+					driver.ID,
+					time.Now().UTC(),
+				)
+				if err != nil {
+					return fmt.Errorf(
+						"evaluate driver compliance before heartbeat: %w",
+						err,
+					)
+				}
+
+				if !eligible {
+					transitioned, err :=
+						presenceRepo.UpdateAvailabilityIfIdle(
+							ctx,
+							req.UserID,
+							StatusOffline,
+							false,
+						)
+
+					if err != nil {
+						return fmt.Errorf(
+							"mark non-compliant driver offline: %w",
+							err,
+						)
+					}
+
+					if transitioned {
+						complianceRejected = true
+						return nil
+					}
+				}
+			}
+
 			// Update live telemetry only for online operational states.
 			//
 			// Valid:
@@ -185,4 +258,13 @@ func (s *Service) Heartbeat(
 			return nil
 		},
 	)
+	if err != nil {
+		return err
+	}
+
+	if complianceRejected {
+		return ErrDriverComplianceRequired
+	}
+
+	return nil
 }

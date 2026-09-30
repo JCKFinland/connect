@@ -81,6 +81,12 @@ func TestHandlePresenceError(t *testing.T) {
 			expectedStatus:  http.StatusConflict,
 			expectedMessage: presence.ErrDriverHeartbeatUnavailable.Error(),
 		},
+		{
+			name:            "regulatory compliance required returns conflict",
+			err:             presence.ErrDriverComplianceRequired,
+			expectedStatus:  http.StatusConflict,
+			expectedMessage: presence.ErrDriverComplianceRequired.Error(),
+		},
 	}
 
 	for _, testCase := range tests {
