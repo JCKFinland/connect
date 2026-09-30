@@ -471,6 +471,27 @@ func main() {
 		},
 	)
 
+	// Reconciles persisted idle presence with heartbeat freshness. Dispatch
+	// already rejects stale heartbeats independently; this worker keeps the
+	// persisted operational state truthful as well.
+	stalePresenceCtx, cancelStalePresence := context.WithCancel(
+		context.Background(),
+	)
+
+	go presenceService.StartStalePresenceWorker(
+		stalePresenceCtx,
+		presence.StalePresenceWorkerOptions{
+			Interval: cfg.Presence.HeartbeatTimeout / 2,
+			OnError: func(err error) {
+				log.Error(
+					"stale presence reconciliation failed",
+					"error",
+					err,
+				)
+			},
+		},
+	)
+
 	// Matches trip orders to close by active drivers using presence data.
 	assignmentService := assignment.NewService(
 		assignment.Dependencies{
@@ -649,8 +670,9 @@ func main() {
 	// waiting for the HTTP server to shut down.
 	close(realtimeShutdown)
 
-	// Stop background dispatch processing before shutting down the HTTP server.
+	// Stop background lifecycle processing before shutting down the HTTP server.
 	cancelRedispatch()
+	cancelStalePresence()
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),

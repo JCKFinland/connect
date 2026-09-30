@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 )
@@ -75,6 +76,28 @@ type DriverPresenceRepository interface {
 		status string,
 		isOnline bool,
 	) (bool, error)
+
+	// ExpireStaleIdle transitions an online idle driver to OFFLINE only when
+	// the driver's heartbeat is still stale at mutation time.
+	//
+	// It returns false without modifying presence when the driver is not in an
+	// idle online state, has received a heartbeat at or after staleBefore, is BUSY,
+	// or has an active non-terminal trip.
+	ExpireStaleIdle(
+		ctx context.Context,
+		driverID string,
+		staleBefore time.Time,
+	) (bool, error)
+
+	// ExpireAllStaleIdle transitions every stale online idle driver to
+	// OFFLINE when the driver's heartbeat is still stale at mutation time.
+	//
+	// BUSY drivers and drivers with an active non-terminal trip are preserved.
+	// The returned count is the number of presence rows transitioned.
+	ExpireAllStaleIdle(
+		ctx context.Context,
+		staleBefore time.Time,
+	) (int64, error)
 
 	SetOffline(
 		ctx context.Context,

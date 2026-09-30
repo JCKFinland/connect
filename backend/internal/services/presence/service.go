@@ -37,12 +37,23 @@ type Service struct {
 	presence    repository.DriverPresenceRepository
 	assignments repository.DriverAssignmentRepository
 	compliance  ComplianceEvaluator
+
+	expireStaleIdle func(
+		ctx context.Context,
+		driverID string,
+		staleBefore time.Time,
+	) (bool, error)
+
+	expireAllStaleIdle func(
+		ctx context.Context,
+		staleBefore time.Time,
+	) (int64, error)
 }
 
 func NewService(
 	deps Dependencies,
 ) *Service {
-	return &Service{
+	service := &Service{
 		db:  deps.DB,
 		cfg: deps.Config,
 
@@ -52,4 +63,11 @@ func NewService(
 		assignments: deps.Assignments,
 		compliance:  deps.Compliance,
 	}
+
+	if deps.Presence != nil {
+		service.expireStaleIdle = deps.Presence.ExpireStaleIdle
+		service.expireAllStaleIdle = deps.Presence.ExpireAllStaleIdle
+	}
+
+	return service
 }
