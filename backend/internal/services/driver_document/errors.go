@@ -26,4 +26,10 @@ var (
 	ErrDocumentAlreadyReviewed = errors.New(
 		"driver document has already been reviewed",
 	)
+
+	// ErrDocumentNotRevocable indicates that the document exists but is not
+	// currently VERIFIED and therefore cannot enter the REVOKED state.
+	ErrDocumentNotRevocable = errors.New(
+		"driver document is not revocable",
+	)
 )

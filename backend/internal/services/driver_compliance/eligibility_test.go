@@ -128,6 +128,16 @@ func (r *complianceDocumentRepository) UpdateReviewState(
 	return time.Time{}, nil
 }
 
+func (r *complianceDocumentRepository) UpdateRevocationState(
+	context.Context,
+	string,
+	time.Time,
+	string,
+	string,
+) (time.Time, error) {
+	return time.Time{}, nil
+}
+
 func (r *complianceDocumentRepository) SoftDelete(
 	context.Context,
 	string,
@@ -312,6 +322,13 @@ func TestEvaluateRejectsNonCompliantDocuments(t *testing.T) {
 			name: "driving license document pending",
 			mutate: func(repo *complianceDocumentRepository) {
 				repo.documents[models.DriverDocumentTypeDrivingLicense].Status = models.DriverDocumentStatusPending
+			},
+			wantReason: ReasonDrivingLicenseNotVerified,
+		},
+		{
+			name: "driving license document revoked",
+			mutate: func(repo *complianceDocumentRepository) {
+				repo.documents[models.DriverDocumentTypeDrivingLicense].Status = models.DriverDocumentStatusRevoked
 			},
 			wantReason: ReasonDrivingLicenseNotVerified,
 		},

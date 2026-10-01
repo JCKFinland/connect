@@ -62,6 +62,16 @@ func (r *documentRepositoryStub) UpdateReviewState(
 	return time.Now().UTC(), nil
 }
 
+func (r *documentRepositoryStub) UpdateRevocationState(
+	ctx context.Context,
+	id string,
+	revokedAt time.Time,
+	revokedByUserID string,
+	revocationReason string,
+) (time.Time, error) {
+	return time.Now().UTC(), nil
+}
+
 func (r *documentRepositoryStub) GetByDriverAndType(
 	ctx context.Context,
 	driverID string,

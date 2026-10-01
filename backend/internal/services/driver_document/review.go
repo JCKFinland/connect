@@ -88,9 +88,52 @@ func (s *Service) review(
 		ctx,
 		s.db,
 		func(tx pgx.Tx) error {
+			drivers :=
+				postgresrepo.NewDriverRepositoryWithDB(tx)
 			documents :=
 				postgresrepo.NewDriverDocumentRepositoryWithDB(tx)
 
+			// Resolve the owning driver before taking any row lock. This first
+			// document read is identity discovery only; authoritative review state
+			// is re-read after the stable driver aggregate lock is acquired.
+			documentIdentity, err := documents.GetByID(
+				ctx,
+				documentID,
+			)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrDocumentNotFound
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"resolve driver document for review: %w",
+					err,
+				)
+			}
+			if documentIdentity == nil ||
+				documentIdentity.DriverID == "" {
+
+				return ErrDocumentNotFound
+			}
+
+			// All regulatory eligibility mutations serialize on the permanent
+			// driver row. Document submission uses the same driver-first order,
+			// preventing replacement and review from crossing each other.
+			_, err = drivers.GetByIDForUpdate(
+				ctx,
+				documentIdentity.DriverID,
+			)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrDriverNotFound
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"lock driver for document review: %w",
+					err,
+				)
+			}
+
+			// Re-read and lock the document only after the driver aggregate lock.
+			// The unlocked identity read above must never be used as review state.
 			document, err := documents.GetByIDForUpdate(
 				ctx,
 				documentID,
@@ -105,7 +148,9 @@ func (s *Service) review(
 				)
 			}
 
-			if document == nil {
+			if document == nil ||
+				document.DriverID != documentIdentity.DriverID {
+
 				return ErrDocumentNotFound
 			}
 

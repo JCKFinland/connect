@@ -53,6 +53,15 @@ type DriverDocumentRepository interface {
 		rejectionReason *string,
 	) (time.Time, error)
 
+	// UpdateRevocationState revokes a previously verified regulatory document.
+	UpdateRevocationState(
+		ctx context.Context,
+		id string,
+		revokedAt time.Time,
+		revokedByUserID string,
+		revocationReason string,
+	) (time.Time, error)
+
 	// SoftDelete marks a document as deleted.
 	SoftDelete(
 		ctx context.Context,

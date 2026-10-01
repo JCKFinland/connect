@@ -11,6 +11,7 @@ const (
 	DriverDocumentStatusPending  = "PENDING"
 	DriverDocumentStatusVerified = "VERIFIED"
 	DriverDocumentStatusRejected = "REJECTED"
+	DriverDocumentStatusRevoked  = "REVOKED"
 )
 
 // DriverDocument represents the metadata and verification state of a
@@ -39,4 +40,8 @@ type DriverDocument struct {
 	VerifiedByUserID *string    `db:"verified_by_user_id" json:"verified_by_user_id,omitempty"`
 
 	RejectionReason *string `db:"rejection_reason" json:"rejection_reason,omitempty"`
+
+	RevokedAt        *time.Time `db:"revoked_at" json:"revoked_at,omitempty"`
+	RevokedByUserID  *string    `db:"revoked_by_user_id" json:"revoked_by_user_id,omitempty"`
+	RevocationReason *string    `db:"revocation_reason" json:"revocation_reason,omitempty"`
 }

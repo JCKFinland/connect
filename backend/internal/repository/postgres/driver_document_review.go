@@ -35,6 +35,9 @@ func (r *DriverDocumentRepository) GetByIDForUpdate(
 			verified_at,
 			verified_by_user_id,
 			rejection_reason,
+			revoked_at,
+			revoked_by_user_id,
+			revocation_reason,
 			created_at,
 			updated_at,
 			deleted_at
@@ -63,6 +66,9 @@ func (r *DriverDocumentRepository) GetByIDForUpdate(
 		&document.VerifiedAt,
 		&document.VerifiedByUserID,
 		&document.RejectionReason,
+		&document.RevokedAt,
+		&document.RevokedByUserID,
+		&document.RevocationReason,
 		&document.CreatedAt,
 		&document.UpdatedAt,
 		&document.DeletedAt,
@@ -130,6 +136,59 @@ func (r *DriverDocumentRepository) UpdateReviewState(
 	if err != nil {
 		return time.Time{}, fmt.Errorf(
 			"update driver document review state: %w",
+			err,
+		)
+	}
+
+	return updatedAt, nil
+}
+
+// UpdateRevocationState persists the revocation of a previously verified
+// regulatory document.
+//
+// Lifecycle validation belongs to the service. The surrounding transaction
+// must hold the driver's aggregate lock and the document row lock before this
+// mutation is executed. Verification audit fields are deliberately preserved.
+func (r *DriverDocumentRepository) UpdateRevocationState(
+	ctx context.Context,
+	id string,
+	revokedAt time.Time,
+	revokedByUserID string,
+	revocationReason string,
+) (time.Time, error) {
+	const query = `
+		UPDATE driver_documents
+		SET
+			status = 'REVOKED',
+			revoked_at = $2,
+			revoked_by_user_id = $3,
+			revocation_reason = $4,
+			updated_at = NOW()
+		WHERE id = $1
+		  AND deleted_at IS NULL
+		RETURNING updated_at
+	`
+
+	var updatedAt time.Time
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		id,
+		revokedAt,
+		revokedByUserID,
+		revocationReason,
+	).Scan(
+		&updatedAt,
+	)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, repository.ErrNotFound
+	}
+
+	if err != nil {
+		return time.Time{}, fmt.Errorf(
+			"update driver document revocation state: %w",
 			err,
 		)
 	}

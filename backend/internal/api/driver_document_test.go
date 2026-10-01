@@ -62,6 +62,13 @@ type driverDocumentAPIService struct {
 		string,
 	) (*models.DriverDocument, error)
 
+	revokeFunc func(
+		context.Context,
+		string,
+		string,
+		string,
+	) (*models.DriverDocument, error)
+
 	openForUserFunc func(
 		context.Context,
 		string,
@@ -208,6 +215,24 @@ func (s *driverDocumentAPIService) Reject(
 	}
 
 	return s.rejectFunc(
+		ctx,
+		documentID,
+		reviewerUserID,
+		reason,
+	)
+}
+
+func (s *driverDocumentAPIService) Revoke(
+	ctx context.Context,
+	documentID string,
+	reviewerUserID string,
+	reason string,
+) (*models.DriverDocument, error) {
+	if s.revokeFunc == nil {
+		return nil, errors.New("unexpected Revoke call")
+	}
+
+	return s.revokeFunc(
 		ctx,
 		documentID,
 		reviewerUserID,
@@ -1239,6 +1264,11 @@ func TestDriverDocumentErrorMapping(
 			wantStatus: http.StatusConflict,
 		},
 		{
+			name:       "not revocable",
+			err:        driverdocument.ErrDocumentNotRevocable,
+			wantStatus: http.StatusConflict,
+		},
+		{
 			name:       "unexpected internal error",
 			err:        errors.New("database unavailable"),
 			wantStatus: http.StatusInternalServerError,
@@ -1582,6 +1612,330 @@ func TestDriverDocumentDownloadMapsDocumentNotFound(
 		t.Fatalf(
 			"expected HTTP %d, got %d: %s",
 			http.StatusNotFound,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestDriverDocumentRevokeUsesAuthenticatedReviewerAndReason(
+	t *testing.T,
+) {
+	const (
+		driverID       = "driver-123"
+		documentID     = "document-456"
+		reviewerUserID = "reviewer-user-789"
+		reason         = "regulatory credential withdrawn"
+	)
+
+	getCalled := false
+	revokeCalled := false
+
+	service := &driverDocumentAPIService{
+		getFunc: func(
+			_ context.Context,
+			gotDriverID string,
+			gotDocumentID string,
+		) (*models.DriverDocument, error) {
+			getCalled = true
+
+			if gotDriverID != driverID ||
+				gotDocumentID != documentID {
+
+				t.Fatalf(
+					"unexpected ownership lookup: driver=%q document=%q",
+					gotDriverID,
+					gotDocumentID,
+				)
+			}
+
+			return &models.DriverDocument{
+				BaseModel: models.BaseModel{
+					ID: documentID,
+				},
+				DriverID: driverID,
+				Status:   models.DriverDocumentStatusVerified,
+			}, nil
+		},
+
+		revokeFunc: func(
+			_ context.Context,
+			gotDocumentID string,
+			gotReviewerUserID string,
+			gotReason string,
+		) (*models.DriverDocument, error) {
+			revokeCalled = true
+
+			if !getCalled {
+				t.Fatal(
+					"Revoke must not run before ownership-aware Get",
+				)
+			}
+
+			if gotDocumentID != documentID {
+				t.Fatalf(
+					"document ID mismatch: got %q want %q",
+					gotDocumentID,
+					documentID,
+				)
+			}
+
+			if gotReviewerUserID != reviewerUserID {
+				t.Fatalf(
+					"reviewer user ID mismatch: got %q want %q",
+					gotReviewerUserID,
+					reviewerUserID,
+				)
+			}
+
+			if gotReason != reason {
+				t.Fatalf(
+					"reason mismatch: got %q want %q",
+					gotReason,
+					reason,
+				)
+			}
+
+			return &models.DriverDocument{
+				BaseModel: models.BaseModel{
+					ID: documentID,
+				},
+				DriverID: driverID,
+				Status:   models.DriverDocumentStatusRevoked,
+			}, nil
+		},
+	}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentAPIContext(
+		t,
+		http.MethodPost,
+		"/api/v1/drivers/"+driverID+
+			"/documents/"+documentID+
+			"/revoke",
+		`{"reason":"`+reason+`"}`,
+	)
+
+	c.Params = gin.Params{
+		{
+			Key:   "id",
+			Value: driverID,
+		},
+		{
+			Key:   "document_id",
+			Value: documentID,
+		},
+	}
+
+	setDriverDocumentAPIUser(
+		c,
+		reviewerUserID,
+	)
+
+	handler.Revoke(c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusOK,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	if !getCalled {
+		t.Fatal("expected ownership-aware Get to be called")
+	}
+
+	if !revokeCalled {
+		t.Fatal("expected Revoke to be called")
+	}
+}
+
+func TestDriverDocumentRevokeStopsWhenOwnershipCheckFails(
+	t *testing.T,
+) {
+	const (
+		driverID       = "driver-wrong"
+		documentID     = "document-456"
+		reviewerUserID = "reviewer-user-789"
+	)
+
+	revokeCalled := false
+
+	service := &driverDocumentAPIService{
+		getFunc: func(
+			_ context.Context,
+			gotDriverID string,
+			gotDocumentID string,
+		) (*models.DriverDocument, error) {
+			if gotDriverID != driverID ||
+				gotDocumentID != documentID {
+
+				t.Fatalf(
+					"unexpected ownership lookup: driver=%q document=%q",
+					gotDriverID,
+					gotDocumentID,
+				)
+			}
+
+			return nil, driverdocument.ErrDocumentNotFound
+		},
+
+		revokeFunc: func(
+			context.Context,
+			string,
+			string,
+			string,
+		) (*models.DriverDocument, error) {
+			revokeCalled = true
+			return nil, nil
+		},
+	}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentAPIContext(
+		t,
+		http.MethodPost,
+		"/api/v1/drivers/"+driverID+
+			"/documents/"+documentID+
+			"/revoke",
+		`{"reason":"credential withdrawn"}`,
+	)
+
+	c.Params = gin.Params{
+		{
+			Key:   "id",
+			Value: driverID,
+		},
+		{
+			Key:   "document_id",
+			Value: documentID,
+		},
+	}
+
+	setDriverDocumentAPIUser(
+		c,
+		reviewerUserID,
+	)
+
+	handler.Revoke(c)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusNotFound,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	if revokeCalled {
+		t.Fatal(
+			"Revoke must not run when ownership-aware Get fails",
+		)
+	}
+}
+
+func TestDriverDocumentRevokeRejectsInvalidBody(
+	t *testing.T,
+) {
+	service := &driverDocumentAPIService{}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentAPIContext(
+		t,
+		http.MethodPost,
+		"/api/v1/drivers/driver-123/documents/document-456/revoke",
+		`{}`,
+	)
+
+	setDriverDocumentAPIUser(
+		c,
+		"reviewer-user-789",
+	)
+
+	handler.Revoke(c)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusBadRequest,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestDriverDocumentRevokeMapsNotRevocableToConflict(
+	t *testing.T,
+) {
+	const (
+		driverID   = "driver-123"
+		documentID = "document-456"
+	)
+
+	service := &driverDocumentAPIService{
+		getFunc: func(
+			context.Context,
+			string,
+			string,
+		) (*models.DriverDocument, error) {
+			return &models.DriverDocument{
+				BaseModel: models.BaseModel{
+					ID: documentID,
+				},
+				DriverID: driverID,
+				Status:   models.DriverDocumentStatusPending,
+			}, nil
+		},
+
+		revokeFunc: func(
+			context.Context,
+			string,
+			string,
+			string,
+		) (*models.DriverDocument, error) {
+			return nil, driverdocument.ErrDocumentNotRevocable
+		},
+	}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentAPIContext(
+		t,
+		http.MethodPost,
+		"/api/v1/drivers/"+driverID+
+			"/documents/"+documentID+
+			"/revoke",
+		`{"reason":"credential withdrawn"}`,
+	)
+
+	c.Params = gin.Params{
+		{
+			Key:   "id",
+			Value: driverID,
+		},
+		{
+			Key:   "document_id",
+			Value: documentID,
+		},
+	}
+
+	setDriverDocumentAPIUser(
+		c,
+		"reviewer-user-789",
+	)
+
+	handler.Revoke(c)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusConflict,
 			recorder.Code,
 			recorder.Body.String(),
 		)

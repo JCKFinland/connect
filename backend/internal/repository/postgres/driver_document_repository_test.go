@@ -398,3 +398,216 @@ func TestDriverDocumentRepositoryRoundTrip(t *testing.T) {
 		)
 	}
 }
+
+func TestDriverDocumentRepositoryRevocationPreservesVerificationAudit(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	// Run from backend root so config.Load() finds .env.
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	fixture, cleanupFixture, err := testutil.CreateDriverFixture(
+		ctx,
+		db,
+	)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
+	}
+
+	defer func() {
+		if _, cleanupErr := db.Exec(
+			context.Background(),
+			`
+				DELETE FROM driver_documents
+				WHERE driver_id = $1
+			`,
+			fixture.DriverID,
+		); cleanupErr != nil {
+			t.Logf("cleanup driver documents: %v", cleanupErr)
+		}
+
+		if cleanupErr := cleanupFixture(
+			context.Background(),
+		); cleanupErr != nil {
+			t.Logf("cleanup driver fixture: %v", cleanupErr)
+		}
+	}()
+
+	repo := NewDriverDocumentRepository(db)
+
+	expiresAt := time.Now().UTC().
+		AddDate(1, 0, 0).
+		Truncate(24 * time.Hour)
+
+	document := &models.DriverDocument{
+		DriverID:      fixture.DriverID,
+		DocumentType:  models.DriverDocumentTypeDrivingLicense,
+		FileName:      "driving-license.pdf",
+		StorageKey:    "driver-documents/test/driving-license.pdf",
+		ContentType:   "application/pdf",
+		FileSizeBytes: 4096,
+		ExpiresAt:     &expiresAt,
+		Status:        models.DriverDocumentStatusPending,
+	}
+
+	if err := repo.Create(ctx, document); err != nil {
+		t.Fatalf("create pending driver document: %v", err)
+	}
+
+	verifiedAt := time.Now().UTC().Add(-time.Minute)
+
+	if _, err := repo.UpdateReviewState(
+		ctx,
+		document.ID,
+		models.DriverDocumentStatusVerified,
+		&verifiedAt,
+		fixture.UserID,
+		nil,
+	); err != nil {
+		t.Fatalf("verify driver document: %v", err)
+	}
+
+	verified, err := repo.GetByID(ctx, document.ID)
+	if err != nil {
+		t.Fatalf("reload verified driver document: %v", err)
+	}
+
+	if verified.Status != models.DriverDocumentStatusVerified {
+		t.Fatalf(
+			"verified status mismatch: got %s want %s",
+			verified.Status,
+			models.DriverDocumentStatusVerified,
+		)
+	}
+
+	if verified.VerifiedAt == nil {
+		t.Fatal("expected verified_at before revocation")
+	}
+
+	if verified.VerifiedByUserID == nil {
+		t.Fatal("expected verified_by_user_id before revocation")
+	}
+
+	originalVerifiedAt := *verified.VerifiedAt
+	originalVerifiedByUserID := *verified.VerifiedByUserID
+
+	revokedAt := time.Now().UTC()
+	const revocationReason = "credential withdrawn by issuing authority"
+
+	if _, err := repo.UpdateRevocationState(
+		ctx,
+		document.ID,
+		revokedAt,
+		fixture.UserID,
+		revocationReason,
+	); err != nil {
+		t.Fatalf("revoke driver document: %v", err)
+	}
+
+	revoked, err := repo.GetByID(ctx, document.ID)
+	if err != nil {
+		t.Fatalf("reload revoked driver document: %v", err)
+	}
+
+	if revoked.Status != models.DriverDocumentStatusRevoked {
+		t.Fatalf(
+			"revoked status mismatch: got %s want %s",
+			revoked.Status,
+			models.DriverDocumentStatusRevoked,
+		)
+	}
+
+	if revoked.VerifiedAt == nil {
+		t.Fatal("expected verified_at to survive revocation")
+	}
+
+	if !revoked.VerifiedAt.Equal(originalVerifiedAt) {
+		t.Fatalf(
+			"verified_at changed during revocation: got %s want %s",
+			revoked.VerifiedAt.UTC(),
+			originalVerifiedAt.UTC(),
+		)
+	}
+
+	if revoked.VerifiedByUserID == nil {
+		t.Fatal(
+			"expected verified_by_user_id to survive revocation",
+		)
+	}
+
+	if *revoked.VerifiedByUserID != originalVerifiedByUserID {
+		t.Fatalf(
+			"verified_by_user_id changed during revocation: got %s want %s",
+			*revoked.VerifiedByUserID,
+			originalVerifiedByUserID,
+		)
+	}
+
+	if revoked.RejectionReason != nil {
+		t.Fatalf(
+			"expected rejection_reason to remain nil, got %q",
+			*revoked.RejectionReason,
+		)
+	}
+
+	if revoked.RevokedAt == nil {
+		t.Fatal("expected revoked_at")
+	}
+
+	expectedRevokedAt := revokedAt.Truncate(time.Microsecond)
+
+	if !revoked.RevokedAt.Equal(expectedRevokedAt) {
+		t.Fatalf(
+			"revoked_at mismatch: got %s want %s",
+			revoked.RevokedAt.UTC(),
+			expectedRevokedAt.UTC(),
+		)
+	}
+
+	if revoked.RevokedByUserID == nil {
+		t.Fatal("expected revoked_by_user_id")
+	}
+
+	if *revoked.RevokedByUserID != fixture.UserID {
+		t.Fatalf(
+			"revoked_by_user_id mismatch: got %s want %s",
+			*revoked.RevokedByUserID,
+			fixture.UserID,
+		)
+	}
+
+	if revoked.RevocationReason == nil {
+		t.Fatal("expected revocation_reason")
+	}
+
+	if *revoked.RevocationReason != revocationReason {
+		t.Fatalf(
+			"revocation_reason mismatch: got %q want %q",
+			*revoked.RevocationReason,
+			revocationReason,
+		)
+	}
+}

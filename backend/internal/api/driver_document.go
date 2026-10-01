@@ -75,6 +75,13 @@ type DriverDocumentService interface {
 		reviewerUserID string,
 		reason string,
 	) (*models.DriverDocument, error)
+
+	Revoke(
+		ctx context.Context,
+		documentID string,
+		reviewerUserID string,
+		reason string,
+	) (*models.DriverDocument, error)
 }
 
 // DriverDocumentHandler exposes authenticated driver-document read and
@@ -95,6 +102,12 @@ func NewDriverDocumentHandler(
 // rejectDocumentRequest contains the administrator's rejection reason.
 // Reviewer identity is always derived from the authenticated user.
 type rejectDocumentRequest struct {
+	Reason string `json:"reason" binding:"required"`
+}
+
+// revokeDocumentRequest contains the administrator's revocation reason.
+// Reviewer identity is always derived from the authenticated user.
+type revokeDocumentRequest struct {
 	Reason string `json:"reason" binding:"required"`
 }
 
@@ -130,6 +143,15 @@ func handleDriverDocumentError(
 		response.Conflict(
 			c,
 			"driver document has already been reviewed",
+		)
+
+	case errors.Is(
+		err,
+		driverdocument.ErrDocumentNotRevocable,
+	):
+		response.Conflict(
+			c,
+			"driver document is not revocable",
 		)
 
 	default:
@@ -519,6 +541,60 @@ func (h *DriverDocumentHandler) Reject(
 	response.OK(
 		c,
 		"Driver document rejected successfully",
+		document,
+	)
+}
+
+// Revoke handles
+// POST /api/v1/drivers/:id/documents/:document_id/revoke.
+//
+// The driver resource path is ownership-checked before the VERIFIED document
+// is transitioned to REVOKED. Reviewer identity comes only from authentication.
+func (h *DriverDocumentHandler) Revoke(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(
+			c,
+			"authenticated user not found",
+		)
+		return
+	}
+
+	var req revokeDocumentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(
+			c,
+			"invalid request body",
+		)
+		return
+	}
+
+	document, err := h.service.Get(
+		c.Request.Context(),
+		c.Param("id"),
+		c.Param("document_id"),
+	)
+	if err != nil {
+		handleDriverDocumentError(c, err)
+		return
+	}
+
+	document, err = h.service.Revoke(
+		c.Request.Context(),
+		document.ID,
+		user.ID,
+		req.Reason,
+	)
+	if err != nil {
+		handleDriverDocumentError(c, err)
+		return
+	}
+
+	response.OK(
+		c,
+		"Driver document revoked successfully",
 		document,
 	)
 }

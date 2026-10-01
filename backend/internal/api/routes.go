@@ -259,6 +259,12 @@ func RegisterRoutes(
 				driverDocumentHandler.Reject,
 			)
 
+			drivers.POST(
+				"/:id/documents/:document_id/revoke",
+				rbacMiddleware.RequirePermission("drivers.verify"),
+				driverDocumentHandler.Revoke,
+			)
+
 			drivers.GET(
 				"/:id/documents/:document_id/download",
 				rbacMiddleware.RequirePermission("drivers.read"),
