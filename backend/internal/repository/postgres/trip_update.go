@@ -9,6 +9,10 @@ import (
 )
 
 // Update persists editable trip fields.
+//
+// Lifecycle state, assignment state, lifecycle timestamps, cancellation
+// metadata, ownership, and active state are intentionally excluded. Those
+// fields are owned by their dedicated operational mutation paths.
 func (r *TripRepository) Update(
 	ctx context.Context,
 	trip *models.Trip,
@@ -16,45 +20,30 @@ func (r *TripRepository) Update(
 	const query = `
 		UPDATE trips
 		SET
-			status = $1,
+			estimated_distance_km = $1,
+			estimated_duration_minutes = $2,
+			actual_distance_km = $3,
+			actual_duration_minutes = $4,
 
-			estimated_distance_km = $2,
-			estimated_duration_minutes = $3,
-			actual_distance_km = $4,
-			actual_duration_minutes = $5,
+			estimated_distance_meters = $5,
+			estimated_duration_seconds = $6,
+			actual_distance_meters = $7,
+			actual_duration_seconds = $8,
 
-			estimated_distance_meters = $6,
-			estimated_duration_seconds = $7,
-			actual_distance_meters = $8,
-			actual_duration_seconds = $9,
+			scheduled_at = $9,
 
-			assigned_at = $10,
-			scheduled_at = $11,
+			pickup_address = $10,
+			pickup_latitude = $11,
+			pickup_longitude = $12,
 
-			pickup_address = $12,
-			pickup_latitude = $13,
-			pickup_longitude = $14,
+			dropoff_address = $13,
+			dropoff_latitude = $14,
+			dropoff_longitude = $15,
 
-			dropoff_address = $15,
-			dropoff_latitude = $16,
-			dropoff_longitude = $17,
-
-			passenger_note = $18,
-
-			driver_arrived_at = $19,
-			passenger_on_board_at = $20,
-			pickup_at = $21,
-			started_at = $22,
-			completed_at = $23,
-			cancelled_at = $24,
-
-			cancelled_by = $25,
-			cancellation_reason = $26,
-
-			is_active = $27,
+			passenger_note = $16,
 
 			updated_at = NOW()
-		WHERE id = $28
+		WHERE id = $17
 		  AND deleted_at IS NULL
 		RETURNING updated_at
 	`
@@ -62,8 +51,6 @@ func (r *TripRepository) Update(
 	err := r.db.QueryRow(
 		ctx,
 		query,
-		trip.Status,
-
 		trip.EstimatedDistanceKM,
 		trip.EstimatedDurationMinutes,
 		trip.ActualDistanceKM,
@@ -74,7 +61,6 @@ func (r *TripRepository) Update(
 		trip.ActualDistanceMeters,
 		trip.ActualDurationSeconds,
 
-		trip.AssignedAt,
 		trip.ScheduledAt,
 
 		trip.PickupAddress,
@@ -86,18 +72,6 @@ func (r *TripRepository) Update(
 		trip.DropoffLongitude,
 
 		trip.PassengerNote,
-
-		trip.DriverArrivedAt,
-		trip.PassengerOnBoardAt,
-		trip.PickupAt,
-		trip.StartedAt,
-		trip.CompletedAt,
-		trip.CancelledAt,
-
-		trip.CancelledBy,
-		trip.CancellationReason,
-
-		trip.IsActive,
 
 		trip.ID,
 	).Scan(&trip.UpdatedAt)
