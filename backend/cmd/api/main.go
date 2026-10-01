@@ -42,7 +42,6 @@ import (
 
 	vehicleservice "github.com/JCKFinland/connect/backend/internal/services/vehicle"
 
-	dvassignmentservice "github.com/JCKFinland/connect/backend/internal/services/driver_vehicle_assignment"
 	paymentservice "github.com/JCKFinland/connect/backend/internal/services/payment"
 
 	tripservice "github.com/JCKFinland/connect/backend/internal/services/trip"
@@ -126,7 +125,6 @@ func main() {
 	vehicleRepo := postgresrepo.NewVehicleRepository(db)
 	driverRepo := postgresrepo.NewDriverRepository(db)
 	driverDocumentRepo := postgresrepo.NewDriverDocumentRepository(db)
-	driverVehicleAssignmentRepo := postgresrepo.NewDriverVehicleAssignmentRepository(db)
 	tripRepo := postgresrepo.NewTripRepository(db)
 	rideRequestRepo := postgresrepo.NewRideRequestRepository(db)
 	serviceCategoryRepo := postgresrepo.NewServiceCategoryRepository(db)
@@ -261,9 +259,6 @@ func main() {
 				Earnings: driverEarningRepo,
 			},
 		)
-
-	driverVehicleAssignmentService := dvassignmentservice.NewService(
-		driverVehicleAssignmentRepo)
 
 	tripService := tripservice.NewService(
 		tripservice.Dependencies{
@@ -545,10 +540,6 @@ func main() {
 	driverDocumentHandler := api.NewDriverDocumentHandler(
 		driverDocumentService,
 	)
-	driverVehicleAssignmentHandler :=
-		api.NewDriverVehicleAssignmentHandler(
-			driverVehicleAssignmentService,
-		)
 	realtimeBroker := realtime.NewBroker()
 	realtimeShutdown := make(chan struct{})
 
@@ -601,7 +592,6 @@ func main() {
 		vehicleHandler,
 		driverHandler,
 		driverDocumentHandler,
-		driverVehicleAssignmentHandler,
 		tripHandler,
 		tripStreamHandler,
 		paymentHandler,

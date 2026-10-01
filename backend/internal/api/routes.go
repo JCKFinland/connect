@@ -25,7 +25,6 @@ func RegisterRoutes(
 	vehicleHandler *VehicleHandler,
 	driverHandler *DriverHandler,
 	driverDocumentHandler *DriverDocumentHandler,
-	driverVehicleAssignmentHandler *DriverVehicleAssignmentHandler,
 	tripHandler *TripHandler,
 	tripStreamHandler *TripStreamHandler,
 	paymentHandler *PaymentHandler,
@@ -403,22 +402,6 @@ func RegisterRoutes(
 				rbacMiddleware.RequirePermission("vehicles.manage"),
 				vehicleHandler.Delete,
 			)
-		}
-
-		assignments := v1.Group("/driver-vehicle-assignments")
-
-		assignments.Use(authMiddleware.RequireAuth())
-
-		{
-			assignments.POST("", driverVehicleAssignmentHandler.Assign)
-
-			assignments.GET("", driverVehicleAssignmentHandler.List)
-
-			assignments.GET("/:id", driverVehicleAssignmentHandler.GetByID)
-
-			assignments.PATCH("/:id/release", driverVehicleAssignmentHandler.Release)
-
-			assignments.DELETE("/:id", driverVehicleAssignmentHandler.Delete)
 		}
 
 		// ---------------------------------------------------
