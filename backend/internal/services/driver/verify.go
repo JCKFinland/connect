@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/JCKFinland/connect/backend/internal/dateutil"
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
@@ -59,7 +60,7 @@ func (s *Service) Verify(
 			now := time.Now().UTC()
 
 			if driver.DrivingLicenseExpiry == nil ||
-				!driver.DrivingLicenseExpiry.After(now) {
+				dateutil.Before(*driver.DrivingLicenseExpiry, now) {
 				return ErrInvalidDriver
 			}
 

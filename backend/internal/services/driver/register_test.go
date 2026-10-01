@@ -456,3 +456,55 @@ func TestRegisterRejectsExpiredDrivingLicense(t *testing.T) {
 		t.Fatal("expected expired license registration not to be persisted")
 	}
 }
+
+func TestRegisterAcceptsDrivingLicenseExpiringToday(t *testing.T) {
+	now := time.Now().UTC()
+	expiry := time.Date(
+		now.Year(),
+		now.Month(),
+		now.Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+
+	driverRepo := &driverRepositoryStub{}
+	branchRepo := &branchRepositoryStub{
+		branch: &models.Branch{
+			CompanyID: "company-1",
+			IsActive:  true,
+		},
+	}
+
+	service := NewService(Dependencies{
+		Drivers:  driverRepo,
+		Branches: branchRepo,
+	})
+
+	user := &models.User{}
+	user.ID = "user-1"
+
+	_, err := service.Register(
+		context.Background(),
+		user,
+		RegisterDriverRequest{
+			CompanyID:               "company-1",
+			BranchID:                "branch-1",
+			TaxiDriverLicenseNumber: "TAXI-123",
+			DrivingLicenseNumber:    "DL-123",
+			DrivingLicenseExpiry:    &expiry,
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"expected license expiring today to be accepted, got %v",
+			err,
+		)
+	}
+
+	if driverRepo.created == nil {
+		t.Fatal("expected driver registration to be persisted")
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/JCKFinland/connect/backend/internal/dateutil"
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 )
@@ -54,7 +55,10 @@ func (s *Service) Register(
 		return nil, ErrInvalidDriver
 	}
 
-	if !req.DrivingLicenseExpiry.After(time.Now().UTC()) {
+	if dateutil.Before(
+		*req.DrivingLicenseExpiry,
+		time.Now().UTC(),
+	) {
 		return nil, ErrInvalidDriver
 	}
 

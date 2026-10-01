@@ -242,18 +242,10 @@ func TestEvaluateRejectsNonCompliantDriverState(t *testing.T) {
 			wantReason: ReasonDrivingLicenseExpired,
 		},
 		{
-			name: "driving license expired",
+			name: "driving license expired on previous date",
 			mutate: func(driver *models.Driver) {
-				expired := now.Add(-time.Second)
+				expired := now.AddDate(0, 0, -1)
 				driver.DrivingLicenseExpiry = &expired
-			},
-			wantReason: ReasonDrivingLicenseExpired,
-		},
-		{
-			name: "driving license expires exactly now",
-			mutate: func(driver *models.Driver) {
-				expiresNow := now
-				driver.DrivingLicenseExpiry = &expiresNow
 			},
 			wantReason: ReasonDrivingLicenseExpired,
 		},
@@ -286,6 +278,57 @@ func TestEvaluateRejectsNonCompliantDriverState(t *testing.T) {
 				tt.wantReason,
 			)
 		})
+	}
+}
+
+func TestEvaluateAcceptsDrivingLicenseExpiringToday(t *testing.T) {
+	now := time.Date(
+		2026,
+		time.September,
+		28,
+		23,
+		59,
+		59,
+		0,
+		time.UTC,
+	)
+
+	future := now.AddDate(1, 0, 0)
+	expiresToday := time.Date(
+		now.Year(),
+		now.Month(),
+		now.Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+
+	driver := eligibleDriver(future)
+	driver.DrivingLicenseExpiry = &expiresToday
+
+	service := NewService(Dependencies{
+		Drivers: &complianceDriverRepository{
+			driver: driver,
+		},
+		Documents: eligibleDocumentRepository(future),
+	})
+
+	result, err := service.Evaluate(
+		context.Background(),
+		driver.ID,
+		now,
+	)
+	if err != nil {
+		t.Fatalf("evaluate driver: %v", err)
+	}
+
+	if !result.Eligible {
+		t.Fatalf(
+			"expected driver with license expiring today to be eligible, got reasons %v",
+			result.Reasons,
+		)
 	}
 }
 
@@ -333,9 +376,18 @@ func TestEvaluateRejectsNonCompliantDocuments(t *testing.T) {
 			wantReason: ReasonDrivingLicenseNotVerified,
 		},
 		{
-			name: "driving license document expired",
+			name: "driving license document expired on previous date",
 			mutate: func(repo *complianceDocumentRepository) {
-				expired := now.Add(-time.Second)
+				expired := time.Date(
+					now.Year(),
+					now.Month(),
+					now.Day()-1,
+					0,
+					0,
+					0,
+					0,
+					time.UTC,
+				)
 				repo.documents[models.DriverDocumentTypeDrivingLicense].ExpiresAt = &expired
 			},
 			wantReason: ReasonDrivingLicenseDocExpired,
@@ -364,14 +416,6 @@ func TestEvaluateRejectsNonCompliantDocuments(t *testing.T) {
 			},
 			wantReason: ReasonTaxiLicenseExpired,
 		},
-		{
-			name: "taxi driver license expires exactly now",
-			mutate: func(repo *complianceDocumentRepository) {
-				expiresNow := now
-				repo.documents[models.DriverDocumentTypeTaxiDriverLicense].ExpiresAt = &expiresNow
-			},
-			wantReason: ReasonTaxiLicenseExpired,
-		},
 	}
 
 	for _, tt := range tests {
@@ -393,6 +437,94 @@ func TestEvaluateRejectsNonCompliantDocuments(t *testing.T) {
 			)
 			if err != nil {
 				t.Fatalf("evaluate driver: %v", err)
+			}
+
+			assertIneligibleWithReason(
+				t,
+				result,
+				tt.wantReason,
+			)
+		})
+	}
+}
+
+func TestEvaluateDocumentExpiryUsesCalendarDate(t *testing.T) {
+	now := time.Date(
+		2026,
+		time.September,
+		28,
+		23,
+		59,
+		59,
+		0,
+		time.UTC,
+	)
+
+	future := now.AddDate(1, 0, 0)
+
+	tests := []struct {
+		name       string
+		expiresAt  time.Time
+		wantReason string
+	}{
+		{
+			name: "valid throughout expiry date",
+			expiresAt: time.Date(
+				2026,
+				time.September,
+				28,
+				0,
+				0,
+				0,
+				0,
+				time.UTC,
+			),
+		},
+		{
+			name: "expired after expiry date",
+			expiresAt: time.Date(
+				2026,
+				time.September,
+				27,
+				0,
+				0,
+				0,
+				0,
+				time.UTC,
+			),
+			wantReason: ReasonDrivingLicenseDocExpired,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			documents := eligibleDocumentRepository(future)
+			documents.documents[models.DriverDocumentTypeDrivingLicense].ExpiresAt = &tt.expiresAt
+
+			service := NewService(Dependencies{
+				Drivers: &complianceDriverRepository{
+					driver: eligibleDriver(future),
+				},
+				Documents: documents,
+			})
+
+			result, err := service.Evaluate(
+				context.Background(),
+				"driver-123",
+				now,
+			)
+			if err != nil {
+				t.Fatalf("evaluate driver: %v", err)
+			}
+
+			if tt.wantReason == "" {
+				if !result.Eligible {
+					t.Fatalf(
+						"expected eligible result, got reasons %v",
+						result.Reasons,
+					)
+				}
+				return
 			}
 
 			assertIneligibleWithReason(

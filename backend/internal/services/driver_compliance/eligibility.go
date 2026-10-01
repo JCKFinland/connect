@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/JCKFinland/connect/backend/internal/dateutil"
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 )
@@ -97,7 +98,7 @@ func (s *Service) Evaluate(
 	}
 
 	if driver.DrivingLicenseExpiry == nil ||
-		!driver.DrivingLicenseExpiry.After(now) {
+		dateutil.Before(*driver.DrivingLicenseExpiry, now) {
 
 		result.addReason(ReasonDrivingLicenseExpired)
 	}
@@ -172,7 +173,7 @@ func (s *Service) evaluateDocument(
 	}
 
 	if document.ExpiresAt == nil ||
-		!document.ExpiresAt.After(now) {
+		dateutil.Before(*document.ExpiresAt, now) {
 
 		result.addReason(expiredReason)
 	}
