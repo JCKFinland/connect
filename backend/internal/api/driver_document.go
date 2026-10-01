@@ -6,7 +6,9 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -159,6 +161,34 @@ func handleDriverDocumentError(
 	}
 }
 
+func driverDocumentDownloadFileName(
+	fileName string,
+	contentType string,
+) (string, bool) {
+	var extension string
+
+	switch contentType {
+	case "application/pdf":
+		extension = ".pdf"
+	case "image/jpeg":
+		extension = ".jpg"
+	case "image/png":
+		extension = ".png"
+	default:
+		return "", false
+	}
+
+	baseName := strings.TrimSuffix(
+		fileName,
+		filepath.Ext(fileName),
+	)
+	if baseName == "" {
+		baseName = "driver-document"
+	}
+
+	return baseName + extension, true
+}
+
 func serveDriverDocumentBinary(
 	c *gin.Context,
 	opened *driverdocument.OpenDocument,
@@ -171,9 +201,22 @@ func serveDriverDocumentBinary(
 	}
 	defer opened.Body.Close()
 
+	downloadFileName, ok := driverDocumentDownloadFileName(
+		opened.Document.FileName,
+		opened.Document.ContentType,
+	)
+	if !ok {
+		response.InternalServerError(c)
+		return
+	}
+
 	c.Header(
 		"Content-Type",
 		opened.Document.ContentType,
+	)
+	c.Header(
+		"X-Content-Type-Options",
+		"nosniff",
 	)
 
 	c.Header(
@@ -181,7 +224,7 @@ func serveDriverDocumentBinary(
 		mime.FormatMediaType(
 			"attachment",
 			map[string]string{
-				"filename": opened.Document.FileName,
+				"filename": downloadFileName,
 			},
 		),
 	)

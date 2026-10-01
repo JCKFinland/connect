@@ -1323,10 +1323,11 @@ func TestDriverDocumentDownloadForCurrentDriverStreamsAuthorizedBinary(
 	t *testing.T,
 ) {
 	const (
-		userID      = "user-123"
-		documentID  = "document-456"
-		fileName    = `driver "license"; final.pdf`
-		contentType = "application/pdf"
+		userID           = "user-123"
+		documentID       = "document-456"
+		fileName         = `driver "license"; final.exe`
+		downloadFileName = `driver "license"; final.pdf`
+		contentType      = "application/pdf"
 	)
 
 	fileBytes := []byte("%PDF-1.7\nCONNECT regulatory document")
@@ -1425,11 +1426,21 @@ func TestDriverDocumentDownloadForCurrentDriverStreamsAuthorizedBinary(
 		)
 	}
 
-	if params["filename"] != fileName {
+	if params["filename"] != downloadFileName {
 		t.Fatalf(
 			"download filename mismatch: got %q want %q",
 			params["filename"],
-			fileName,
+			downloadFileName,
+		)
+	}
+
+	if got := recorder.Header().Get(
+		"X-Content-Type-Options",
+	); got != "nosniff" {
+		t.Fatalf(
+			"X-Content-Type-Options mismatch: got %q want %q",
+			got,
+			"nosniff",
 		)
 	}
 
@@ -1938,6 +1949,179 @@ func TestDriverDocumentRevokeMapsNotRevocableToConflict(
 			http.StatusConflict,
 			recorder.Code,
 			recorder.Body.String(),
+		)
+	}
+}
+
+func TestDriverDocumentDownloadFileNameUsesCanonicalExtension(
+	t *testing.T,
+) {
+	tests := []struct {
+		name        string
+		fileName    string
+		contentType string
+		want        string
+		wantOK      bool
+	}{
+		{
+			name:        "PDF replaces misleading extension",
+			fileName:    "driver-license.exe",
+			contentType: "application/pdf",
+			want:        "driver-license.pdf",
+			wantOK:      true,
+		},
+		{
+			name:        "JPEG replaces misleading extension",
+			fileName:    "driver-license.pdf",
+			contentType: "image/jpeg",
+			want:        "driver-license.jpg",
+			wantOK:      true,
+		},
+		{
+			name:        "PNG replaces misleading extension",
+			fileName:    "driver-license.jpg",
+			contentType: "image/png",
+			want:        "driver-license.png",
+			wantOK:      true,
+		},
+		{
+			name:        "missing basename uses safe fallback",
+			fileName:    ".exe",
+			contentType: "application/pdf",
+			want:        "driver-document.pdf",
+			wantOK:      true,
+		},
+		{
+			name:        "unsupported content type fails closed",
+			fileName:    "driver-license.exe",
+			contentType: "application/octet-stream",
+			wantOK:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(
+			tt.name,
+			func(t *testing.T) {
+				got, ok := driverDocumentDownloadFileName(
+					tt.fileName,
+					tt.contentType,
+				)
+
+				if ok != tt.wantOK {
+					t.Fatalf(
+						"ok = %v, want %v",
+						ok,
+						tt.wantOK,
+					)
+				}
+
+				if got != tt.want {
+					t.Fatalf(
+						"filename = %q, want %q",
+						got,
+						tt.want,
+					)
+				}
+			},
+		)
+	}
+}
+
+func TestDriverDocumentDownloadFailsClosedForUnsupportedContentType(
+	t *testing.T,
+) {
+	const (
+		userID     = "user-123"
+		documentID = "document-456"
+	)
+
+	fileBytes := []byte("untrusted binary content")
+
+	service := &driverDocumentAPIService{
+		openForUserFunc: func(
+			_ context.Context,
+			gotUserID string,
+			gotDocumentID string,
+		) (*driverdocument.OpenDocument, error) {
+			if gotUserID != userID {
+				t.Fatalf(
+					"user ID mismatch: got %q want %q",
+					gotUserID,
+					userID,
+				)
+			}
+
+			if gotDocumentID != documentID {
+				t.Fatalf(
+					"document ID mismatch: got %q want %q",
+					gotDocumentID,
+					documentID,
+				)
+			}
+
+			return &driverdocument.OpenDocument{
+				Document: &models.DriverDocument{
+					BaseModel: models.BaseModel{
+						ID: documentID,
+					},
+					FileName:      "credential.exe",
+					ContentType:   "application/octet-stream",
+					FileSizeBytes: int64(len(fileBytes)),
+				},
+				Body: io.NopCloser(
+					bytes.NewReader(fileBytes),
+				),
+			}, nil
+		},
+	}
+
+	handler := NewDriverDocumentHandler(service)
+
+	c, recorder := newDriverDocumentAPIContext(
+		t,
+		http.MethodGet,
+		"/api/v1/driver/documents/"+
+			documentID+
+			"/download",
+		"",
+	)
+
+	c.Params = gin.Params{
+		{
+			Key:   "document_id",
+			Value: documentID,
+		},
+	}
+
+	setDriverDocumentAPIUser(c, userID)
+
+	handler.DownloadForCurrentDriver(c)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf(
+			"expected HTTP %d, got %d: %s",
+			http.StatusInternalServerError,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	if got := recorder.Header().Get(
+		"Content-Disposition",
+	); got != "" {
+		t.Fatalf(
+			"unexpected Content-Disposition: %q",
+			got,
+		)
+	}
+
+	if bytes.Contains(
+		recorder.Body.Bytes(),
+		fileBytes,
+	) {
+		t.Fatal(
+			"unsupported document binary must not be streamed",
 		)
 	}
 }
