@@ -662,10 +662,8 @@ func TestGoOnlineReconcilesAssignmentAndBecomesAvailable(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		driverUserID,
@@ -1020,10 +1018,8 @@ func TestUpdateAvailabilityRejectsDriverWithActiveTrip(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				  'COMPLETED',
-				  'CANCELLED',
-				  'NO_DRIVER_AVAILABLE',
-				  'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -1437,10 +1433,8 @@ func TestGoOfflineRejectsDriverWithActiveTrip(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				  'COMPLETED',
-				  'CANCELLED',
-				  'NO_DRIVER_AVAILABLE',
-				  'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -1868,10 +1862,8 @@ func TestGoOnlineRejectsDriverWithoutActiveAssignment(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		driverUserID,
@@ -3582,10 +3574,8 @@ func TestUpdateAvailabilityValidatesManualStatuses(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,

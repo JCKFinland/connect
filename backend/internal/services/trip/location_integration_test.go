@@ -171,10 +171,8 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 		  AND is_active = TRUE
 		  AND deleted_at IS NULL
 		  AND status NOT IN (
-			'COMPLETED',
-			'CANCELLED',
-			'NO_DRIVER_AVAILABLE',
-			'EXPIRED'
+		        'COMPLETED',
+		        'CANCELLED'
 		  )
 	`,
 		driverUserID,
@@ -1013,10 +1011,8 @@ func TestRecordTripLocationSerializesAgainstTripCompletion(
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		driverUserID,

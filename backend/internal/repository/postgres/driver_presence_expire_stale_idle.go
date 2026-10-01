@@ -44,10 +44,8 @@ func (r *DriverPresenceRepository) ExpireStaleIdle(
 			  AND t.is_active = TRUE
 			  AND t.deleted_at IS NULL
 			  AND t.status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		  )
 	`
@@ -97,10 +95,8 @@ func (r *DriverPresenceRepository) ExpireAllStaleIdle(
 			  AND t.is_active = TRUE
 			  AND t.deleted_at IS NULL
 			  AND t.status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		  )
 	`

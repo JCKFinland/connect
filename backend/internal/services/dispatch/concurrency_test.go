@@ -686,10 +686,8 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				  'COMPLETED',
-				  'CANCELLED',
-				  'NO_DRIVER_AVAILABLE',
-				  'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -4306,10 +4304,8 @@ func TestDispatchRideRejectsDriverWithStaleHeartbeat(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -5243,10 +5239,8 @@ func TestAcceptOfferExpiredRidePersistsTerminalState(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				  'COMPLETED',
-				  'CANCELLED',
-				  'NO_DRIVER_AVAILABLE',
-				  'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -6549,10 +6543,8 @@ func TestDispatchRideRejectsDriverWithFutureHeartbeat(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -6971,10 +6963,8 @@ func TestDispatchRideRejectsDriverWithMissingHeartbeat(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -8059,10 +8049,8 @@ func TestDispatchRideRejectsDriverWithInvalidLocation(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -8543,10 +8531,8 @@ func TestDispatchRideRejectsDriverWithoutActiveAssignment(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -9105,10 +9091,8 @@ func TestDispatchRideRejectsDriverWithInactiveVehicle(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -9663,10 +9647,8 @@ func TestDispatchRideRejectsDriverWithIneligibleVehicleType(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -10246,10 +10228,8 @@ func TestDispatchRideSkipsDriverLockedByConcurrentDispatch(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -10864,10 +10844,8 @@ func TestDispatchRideRechecksHeartbeatAfterCandidateRanking(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -11470,10 +11448,8 @@ func TestDispatchRideRechecksAssignmentAfterCandidateRanking(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -12106,10 +12082,8 @@ func TestDispatchRideRechecksVehicleActivityAfterCandidateRanking(t *testing.T) 
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
@@ -12717,10 +12691,8 @@ func TestDispatchRideRechecksVehicleTypeAfterCandidateRanking(t *testing.T) {
 			  AND is_active = TRUE
 			  AND deleted_at IS NULL
 			  AND status NOT IN (
-				'COMPLETED',
-				'CANCELLED',
-				'NO_DRIVER_AVAILABLE',
-				'EXPIRED'
+			        'COMPLETED',
+			        'CANCELLED'
 			  )
 		`,
 		johnUserID,
