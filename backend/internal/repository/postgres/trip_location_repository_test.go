@@ -181,6 +181,7 @@ func TestTripLocationRepositoryCreateAndListByTripID(t *testing.T) {
 				fleet_id,
 				status,
 				assigned_at,
+				driver_arrived_at,
 				started_at,
 				created_at,
 				updated_at
@@ -197,6 +198,7 @@ func TestTripLocationRepositoryCreateAndListByTripID(t *testing.T) {
 				$8,
 				'IN_PROGRESS',
 				$9,
+				$10,
 				$10,
 				$9,
 				$10

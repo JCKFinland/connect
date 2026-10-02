@@ -286,6 +286,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 				fleet_id,
 				status,
 				assigned_at,
+				driver_arrived_at,
 				started_at,
 				is_active,
 				created_at,
@@ -302,6 +303,7 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 				$7,
 				$8,
 				'IN_PROGRESS',
+				$9,
 				$9,
 				$9,
 				TRUE,
@@ -794,7 +796,12 @@ func TestRecordTripLocationPersistsAuthenticatedDriverEvidence(
 		ctx,
 		`
 			UPDATE trips
-			SET status = $1
+			SET
+				status = $1,
+				driver_arrived_at = NULL,
+				started_at = NULL,
+				completed_at = NULL,
+				cancelled_at = NULL
 			WHERE id = $2
 		`,
 		StatusAssigned,
@@ -1127,6 +1134,7 @@ func TestRecordTripLocationSerializesAgainstTripCompletion(
 				fleet_id,
 				status,
 				assigned_at,
+				driver_arrived_at,
 				started_at,
 				is_active,
 				created_at,
@@ -1143,6 +1151,7 @@ func TestRecordTripLocationSerializesAgainstTripCompletion(
 				$7,
 				$8,
 				'IN_PROGRESS',
+				$9,
 				$9,
 				$9,
 				TRUE,
