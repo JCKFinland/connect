@@ -36,16 +36,10 @@ func (s *tripService) AssignDriver(
 		)
 	}
 
-	switch currentTrip.Status {
-
-	case StatusCompleted:
+	if currentTrip.Status != StatusAssigned {
 		return fmt.Errorf(
-			"cannot assign driver to completed trip",
-		)
-
-	case StatusCancelled:
-		return fmt.Errorf(
-			"cannot assign driver to cancelled trip",
+			"cannot assign driver to trip in status %s",
+			currentTrip.Status,
 		)
 	}
 

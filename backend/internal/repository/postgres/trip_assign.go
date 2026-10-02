@@ -25,6 +25,7 @@ func (r *TripRepository) AssignDriver(
 		WHERE id = $3
 		  AND deleted_at IS NULL
 		  AND is_active = TRUE
+		  AND status = 'ASSIGNED'
 	`
 
 	result, err := r.db.Exec(
