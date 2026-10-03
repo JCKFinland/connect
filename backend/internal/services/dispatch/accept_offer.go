@@ -401,15 +401,20 @@ func (s *Service) AcceptOffer(
 			// Presence uses users.id.
 			// ---------------------------------------------------------
 
-			if err := presence.UpdateAvailability(
+			claimed, err := presence.ClaimForTrip(
 				ctx,
 				driver.UserID,
-				driverStatusBusy,
-				true,
-			); err != nil {
+				trip.ID,
+			)
+			if err != nil {
 				return fmt.Errorf(
-					"mark accepted driver busy: %w",
+					"claim accepted driver for trip: %w",
 					err,
+				)
+			}
+			if !claimed {
+				return fmt.Errorf(
+					"claim accepted driver for trip: lifecycle authorization failed",
 				)
 			}
 

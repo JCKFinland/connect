@@ -53,12 +53,27 @@ type DriverPresenceRepository interface {
 		accuracy float64,
 	) (bool, error)
 
-	UpdateAvailability(
+	// ClaimForTrip transitions the driver to BUSY only when the specified trip
+	// is an active non-terminal trip owned by that driver.
+	//
+	// It returns false without modifying presence when the trip does not
+	// authorize the claim.
+	ClaimForTrip(
 		ctx context.Context,
 		driverID string,
-		status string,
-		isOnline bool,
-	) error
+		tripID string,
+	) (bool, error)
+
+	// ReleaseFromTrip transitions the driver to AVAILABLE only when the
+	// specified trip is terminal and inactive and no other active non-terminal
+	// trip still commits that driver.
+	//
+	// It returns false without modifying presence when release is unsafe.
+	ReleaseFromTrip(
+		ctx context.Context,
+		driverID string,
+		tripID string,
+	) (bool, error)
 
 	// UpdateAvailabilityIfIdle updates a driver's manually controlled
 	// availability only when the driver is not committed to an active trip.
@@ -93,11 +108,6 @@ type DriverPresenceRepository interface {
 		ctx context.Context,
 		staleBefore time.Time,
 	) (int64, error)
-
-	SetOffline(
-		ctx context.Context,
-		driverID string,
-	) error
 
 	Delete(
 		ctx context.Context,

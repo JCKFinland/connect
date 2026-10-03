@@ -541,15 +541,20 @@ func (s *Service) DispatchRide(
 			// 6. Mark selected driver BUSY
 			// ---------------------------------------------------------
 
-			if err := presence.UpdateAvailability(
+			claimed, err := presence.ClaimForTrip(
 				ctx,
 				selected.DriverID,
-				driverStatusBusy,
-				true,
-			); err != nil {
+				trip.ID,
+			)
+			if err != nil {
 				return fmt.Errorf(
-					"mark selected driver busy: %w",
+					"claim selected driver for trip: %w",
 					err,
+				)
+			}
+			if !claimed {
+				return fmt.Errorf(
+					"claim selected driver for trip: lifecycle authorization failed",
 				)
 			}
 

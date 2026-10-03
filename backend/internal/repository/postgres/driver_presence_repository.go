@@ -180,46 +180,6 @@ func (r *DriverPresenceRepository) UpdateHeartbeat(
 	return nil
 }
 
-func (r *DriverPresenceRepository) UpdateAvailability(
-	ctx context.Context,
-	driverID string,
-	status string,
-	isOnline bool,
-) error {
-
-	query := `
-	UPDATE driver_presence
-	SET
-		is_online=$2,
-		availability_status=$3,
-		updated_at=NOW()
-	WHERE driver_id=$1
-	`
-
-	_, err := r.db.Exec(
-		ctx,
-		query,
-		driverID,
-		isOnline,
-		status,
-	)
-
-	return err
-}
-
-func (r *DriverPresenceRepository) SetOffline(
-	ctx context.Context,
-	driverID string,
-) error {
-
-	return r.UpdateAvailability(
-		ctx,
-		driverID,
-		"OFFLINE",
-		false,
-	)
-}
-
 func (r *DriverPresenceRepository) Delete(
 	ctx context.Context,
 	driverID string,

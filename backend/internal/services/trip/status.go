@@ -216,15 +216,20 @@ func (s *tripService) UpdateStatus(
 			// ---------------------------------------------------------
 
 			if currentTrip.DriverID != "" {
-				if err := presence.UpdateAvailability(
+				released, err := presence.ReleaseFromTrip(
 					ctx,
 					currentTrip.DriverID,
-					driverAvailabilityAvailable,
-					true,
-				); err != nil {
+					currentTrip.ID,
+				)
+				if err != nil {
 					return fmt.Errorf(
 						"release driver after terminal trip: %w",
 						err,
+					)
+				}
+				if !released {
+					return fmt.Errorf(
+						"release driver after terminal trip: lifecycle authorization failed",
 					)
 				}
 			}
