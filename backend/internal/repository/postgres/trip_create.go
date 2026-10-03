@@ -7,11 +7,32 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 )
 
-// Create persists a new trip.
+// Create persists a new trip in the canonical initial lifecycle state.
 func (r *TripRepository) Create(
 	ctx context.Context,
 	trip *models.Trip,
 ) error {
+	if trip == nil {
+		return fmt.Errorf("trip is required")
+	}
+
+	if trip.AssignedAt.IsZero() {
+		return fmt.Errorf("trip assigned-at time is required")
+	}
+
+	trip.Status = "ASSIGNED"
+	trip.DriverArrivedAt = nil
+	trip.StartedAt = nil
+	trip.CompletedAt = nil
+	trip.CancelledAt = nil
+	trip.CancelledBy = nil
+	trip.CancellationReason = nil
+	trip.IsActive = true
+	trip.ActualDistanceKM = nil
+	trip.ActualDurationMinutes = nil
+	trip.ActualDistanceMeters = nil
+	trip.ActualDurationSeconds = nil
+
 	const query = `
 		INSERT INTO trips (
 			id,
@@ -20,11 +41,11 @@ func (r *TripRepository) Create(
 			driver_id,
 			vehicle_id,
 			company_id,
-            branch_id,
-            service_category_id,
-            pricing_profile_id,
-            fleet_id,
-            status,
+			branch_id,
+			service_category_id,
+			pricing_profile_id,
+			fleet_id,
+			status,
 			estimated_distance_km,
 			estimated_duration_minutes,
 			actual_distance_km,
@@ -51,41 +72,41 @@ func (r *TripRepository) Create(
 			actual_duration_seconds
 		)
 		VALUES (
-				$1,
-				$2,
-				$3,
-				$4,
-				$5,
-				$6,
-				$7,
-				$8,
-				$9,
-				$10,
-				$11,
-				$12,
-				$13,
-				$14,
-				$15,
-				$16,
-				$17,
-				$18,
-				$19,
-				$20,
-				$21,
-				$22,
-				$23,
-				$24,
-				$25,
-				$26,
-				$27,
-				$28,
-				$29,
-				$30,
-				$31,
-				$32,
-				$33,
-				$34,
-				$35
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			$6,
+			$7,
+			$8,
+			$9,
+			$10,
+			'ASSIGNED',
+			$11,
+			$12,
+			NULL,
+			NULL,
+			$13,
+			$14,
+			$15,
+			$16,
+			$17,
+			$18,
+			$19,
+			$20,
+			$21,
+			NULL,
+			NULL,
+			NULL,
+			NULL,
+			NULL,
+			NULL,
+			TRUE,
+			$22,
+			$23,
+			NULL,
+			NULL
 		)
 		RETURNING
 			created_at,
@@ -105,11 +126,8 @@ func (r *TripRepository) Create(
 		trip.ServiceCategoryID,
 		trip.PricingProfileID,
 		trip.FleetID,
-		trip.Status,
 		trip.EstimatedDistanceKM,
 		trip.EstimatedDurationMinutes,
-		trip.ActualDistanceKM,
-		trip.ActualDurationMinutes,
 		trip.AssignedAt,
 		trip.ScheduledAt,
 		trip.PickupAddress,
@@ -119,17 +137,8 @@ func (r *TripRepository) Create(
 		trip.DropoffLatitude,
 		trip.DropoffLongitude,
 		trip.PassengerNote,
-		trip.DriverArrivedAt,
-		trip.StartedAt,
-		trip.CompletedAt,
-		trip.CancelledAt,
-		trip.CancelledBy,
-		trip.CancellationReason,
-		trip.IsActive,
 		trip.EstimatedDistanceMeters,
 		trip.EstimatedDurationSeconds,
-		trip.ActualDistanceMeters,
-		trip.ActualDurationSeconds,
 	).Scan(
 		&trip.CreatedAt,
 		&trip.UpdatedAt,
