@@ -57,8 +57,6 @@ func (r *TripRepository) List(
 			passenger_note,
 
 			driver_arrived_at,
-			passenger_on_board_at,
-			pickup_at,
 			started_at,
 			completed_at,
 			cancelled_at,
@@ -207,8 +205,6 @@ func (r *TripRepository) List(
 			&trip.PassengerNote,
 
 			&trip.DriverArrivedAt,
-			&trip.PassengerOnBoardAt,
-			&trip.PickupAt,
 			&trip.StartedAt,
 			&trip.CompletedAt,
 			&trip.CancelledAt,

@@ -60,11 +60,14 @@ func (s *tripService) Create(
 	trip.AssignedAt = now
 
 	trip.DriverArrivedAt = nil
-	trip.PassengerOnBoardAt = nil
-	trip.PickupAt = nil
 	trip.StartedAt = nil
 	trip.CompletedAt = nil
 	trip.CancelledAt = nil
+
+	trip.ActualDistanceKM = nil
+	trip.ActualDurationMinutes = nil
+	trip.ActualDistanceMeters = nil
+	trip.ActualDurationSeconds = nil
 
 	trip.CancelledBy = nil
 	trip.CancellationReason = nil

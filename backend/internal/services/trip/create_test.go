@@ -142,6 +142,10 @@ func TestCreateCanonicalizesInitialLifecycleState(t *testing.T) {
 	}()
 
 	progressedAt := now.Add(-5 * time.Minute)
+	actualDistanceKM := 12.5
+	actualDurationMinutes := 18
+	actualDistanceMeters := int64(12500)
+	actualDurationSeconds := int64(1080)
 	cancelledBy := driver.UserID
 	cancellationReason := "caller-supplied lifecycle evidence"
 
@@ -157,12 +161,15 @@ func TestCreateCanonicalizesInitialLifecycleState(t *testing.T) {
 		Status:     StatusCompleted,
 		AssignedAt: progressedAt,
 
-		DriverArrivedAt:    &progressedAt,
-		PassengerOnBoardAt: &progressedAt,
-		PickupAt:           &progressedAt,
-		StartedAt:          &progressedAt,
-		CompletedAt:        &progressedAt,
-		CancelledAt:        &progressedAt,
+		DriverArrivedAt: &progressedAt,
+		StartedAt:       &progressedAt,
+		CompletedAt:     &progressedAt,
+		CancelledAt:     &progressedAt,
+
+		ActualDistanceKM:      &actualDistanceKM,
+		ActualDurationMinutes: &actualDurationMinutes,
+		ActualDistanceMeters:  &actualDistanceMeters,
+		ActualDurationSeconds: &actualDurationSeconds,
 
 		CancelledBy:        &cancelledBy,
 		CancellationReason: &cancellationReason,
@@ -207,14 +214,19 @@ func TestCreateCanonicalizesInitialLifecycleState(t *testing.T) {
 	}
 
 	if newTrip.DriverArrivedAt != nil ||
-		newTrip.PassengerOnBoardAt != nil ||
-		newTrip.PickupAt != nil ||
 		newTrip.StartedAt != nil ||
 		newTrip.CompletedAt != nil ||
 		newTrip.CancelledAt != nil {
 		t.Fatal(
 			"expected progressed operational timestamps to be cleared",
 		)
+	}
+
+	if newTrip.ActualDistanceKM != nil ||
+		newTrip.ActualDurationMinutes != nil ||
+		newTrip.ActualDistanceMeters != nil ||
+		newTrip.ActualDurationSeconds != nil {
+		t.Fatal("expected actual trip metrics to be cleared")
 	}
 
 	if newTrip.CancelledBy != nil ||
@@ -229,17 +241,19 @@ func TestCreateCanonicalizesInitialLifecycleState(t *testing.T) {
 	}
 
 	var (
-		persistedStatus           string
-		persistedAssignedAt       time.Time
-		persistedDriverArrivedAt  *time.Time
-		persistedPassengerOnBoard *time.Time
-		persistedPickupAt         *time.Time
-		persistedStartedAt        *time.Time
-		persistedCompletedAt      *time.Time
-		persistedCancelledAt      *time.Time
-		persistedCancelledBy      *string
-		persistedCancelReason     *string
-		persistedIsActive         bool
+		persistedStatus                string
+		persistedAssignedAt            time.Time
+		persistedDriverArrivedAt       *time.Time
+		persistedStartedAt             *time.Time
+		persistedCompletedAt           *time.Time
+		persistedCancelledAt           *time.Time
+		persistedActualDistanceKM      *float64
+		persistedActualDurationMinutes *int
+		persistedActualDistanceMeters  *int64
+		persistedActualDurationSeconds *int64
+		persistedCancelledBy           *string
+		persistedCancelReason          *string
+		persistedIsActive              bool
 	)
 
 	err = db.QueryRow(
@@ -249,11 +263,13 @@ func TestCreateCanonicalizesInitialLifecycleState(t *testing.T) {
 				status,
 				assigned_at,
 				driver_arrived_at,
-				passenger_on_board_at,
-				pickup_at,
 				started_at,
 				completed_at,
 				cancelled_at,
+				actual_distance_km,
+				actual_duration_minutes,
+				actual_distance_meters,
+				actual_duration_seconds,
 				cancelled_by,
 				cancellation_reason,
 				is_active
@@ -265,11 +281,13 @@ func TestCreateCanonicalizesInitialLifecycleState(t *testing.T) {
 		&persistedStatus,
 		&persistedAssignedAt,
 		&persistedDriverArrivedAt,
-		&persistedPassengerOnBoard,
-		&persistedPickupAt,
 		&persistedStartedAt,
 		&persistedCompletedAt,
 		&persistedCancelledAt,
+		&persistedActualDistanceKM,
+		&persistedActualDurationMinutes,
+		&persistedActualDistanceMeters,
+		&persistedActualDurationSeconds,
 		&persistedCancelledBy,
 		&persistedCancelReason,
 		&persistedIsActive,
@@ -300,14 +318,19 @@ func TestCreateCanonicalizesInitialLifecycleState(t *testing.T) {
 	}
 
 	if persistedDriverArrivedAt != nil ||
-		persistedPassengerOnBoard != nil ||
-		persistedPickupAt != nil ||
 		persistedStartedAt != nil ||
 		persistedCompletedAt != nil ||
 		persistedCancelledAt != nil {
 		t.Fatal(
 			"expected persisted progressed operational timestamps to be NULL",
 		)
+	}
+
+	if persistedActualDistanceKM != nil ||
+		persistedActualDurationMinutes != nil ||
+		persistedActualDistanceMeters != nil ||
+		persistedActualDurationSeconds != nil {
+		t.Fatal("expected persisted actual trip metrics to be NULL")
 	}
 
 	if persistedCancelledBy != nil ||

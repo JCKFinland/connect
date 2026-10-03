@@ -39,8 +39,6 @@ func (r *TripRepository) Create(
 			dropoff_longitude,
 			passenger_note,
 			driver_arrived_at,
-			passenger_on_board_at,
-			pickup_at,
 			started_at,
 			completed_at,
 			cancelled_at,
@@ -87,9 +85,7 @@ func (r *TripRepository) Create(
 				$32,
 				$33,
 				$34,
-				$35,
-				$36,
-				$37
+				$35
 		)
 		RETURNING
 			created_at,
@@ -124,8 +120,6 @@ func (r *TripRepository) Create(
 		trip.DropoffLongitude,
 		trip.PassengerNote,
 		trip.DriverArrivedAt,
-		trip.PassengerOnBoardAt,
-		trip.PickupAt,
 		trip.StartedAt,
 		trip.CompletedAt,
 		trip.CancelledAt,

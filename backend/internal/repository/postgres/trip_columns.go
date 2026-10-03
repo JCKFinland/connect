@@ -27,8 +27,6 @@ const tripColumns = `
     scheduled_at,
 
     driver_arrived_at,
-    passenger_on_board_at,
-    pickup_at,
     started_at,
     completed_at,
     cancelled_at,

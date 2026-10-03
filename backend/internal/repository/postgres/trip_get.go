@@ -41,8 +41,6 @@ func (r *TripRepository) GetByID(
 			scheduled_at,
 
 			driver_arrived_at,
-			passenger_on_board_at,
-			pickup_at,
 			started_at,
 			completed_at,
 			cancelled_at,
@@ -103,8 +101,6 @@ func (r *TripRepository) GetByID(
 		&trip.ScheduledAt,
 
 		&trip.DriverArrivedAt,
-		&trip.PassengerOnBoardAt,
-		&trip.PickupAt,
 		&trip.StartedAt,
 		&trip.CompletedAt,
 		&trip.CancelledAt,

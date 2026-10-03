@@ -59,8 +59,6 @@ func (r *TripRepository) GetByIDForUpdate(
 			actual_duration_seconds,
 
 			driver_arrived_at,
-			passenger_on_board_at,
-			pickup_at,
 			started_at,
 			completed_at,
 			cancelled_at,
@@ -122,8 +120,6 @@ func (r *TripRepository) GetByIDForUpdate(
 		&trip.ActualDurationSeconds,
 
 		&trip.DriverArrivedAt,
-		&trip.PassengerOnBoardAt,
-		&trip.PickupAt,
 		&trip.StartedAt,
 		&trip.CompletedAt,
 		&trip.CancelledAt,
