@@ -81,7 +81,7 @@ func (s *Service) Unassign(
 			//    lifecycle lock has been acquired.
 			// ---------------------------------------------------------
 
-			_, err :=
+			activeAssignment, err :=
 				assignments.GetActiveByDriver(
 					ctx,
 					req.DriverID,
@@ -135,7 +135,7 @@ func (s *Service) Unassign(
 
 			if err := assignments.CloseAssignment(
 				ctx,
-				req.DriverID,
+				activeAssignment.ID,
 			); err != nil {
 
 				if errors.Is(

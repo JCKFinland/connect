@@ -254,7 +254,7 @@ func (r *DriverAssignmentRepository) ListByVehicle(
 
 func (r *DriverAssignmentRepository) CloseAssignment(
 	ctx context.Context,
-	driverID string,
+	assignmentID string,
 ) error {
 
 	now := time.Now().UTC()
@@ -266,10 +266,10 @@ func (r *DriverAssignmentRepository) CloseAssignment(
 		SET
 			unassigned_at=$2,
 			updated_at=NOW()
-		WHERE driver_id=$1
+		WHERE id=$1
 		AND unassigned_at IS NULL
 		`,
-		driverID,
+		assignmentID,
 		now,
 	)
 	if err != nil {

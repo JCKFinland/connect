@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/repository"
 	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
@@ -256,6 +258,90 @@ func TestDriverAssignmentChronologyConstraintRejectsImpossibleHistory(
 			"expected chronology constraint violation, got %q: %v",
 			pgErr.ConstraintName,
 			err,
+		)
+	}
+}
+
+func TestDriverAssignmentRepositoryCloseAssignmentTargetsExactAssignment(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Close()
+	})
+
+	fixture, cleanupFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create driver fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		if cleanupErr := cleanupFixture(
+			context.Background(),
+		); cleanupErr != nil {
+			t.Logf("cleanup driver fixture: %v", cleanupErr)
+		}
+	})
+
+	repo := NewDriverAssignmentRepository(db)
+
+	// Closing an unrelated assignment identity must not fall back to
+	// driver-scoped lifecycle authority.
+	unrelatedAssignmentID := uuid.NewString()
+
+	err = repo.CloseAssignment(
+		ctx,
+		unrelatedAssignmentID,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound for unrelated assignment ID, got %v",
+			err,
+		)
+	}
+
+	var persistedUnassignedAt *time.Time
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT unassigned_at
+			FROM driver_assignments
+			WHERE id = $1
+		`,
+		fixture.AssignmentID,
+	).Scan(&persistedUnassignedAt)
+	if err != nil {
+		t.Fatalf("read fixture assignment lifecycle: %v", err)
+	}
+
+	if persistedUnassignedAt != nil {
+		t.Fatalf(
+			"expected active assignment %s to remain open, got unassigned_at=%v",
+			fixture.AssignmentID,
+			*persistedUnassignedAt,
 		)
 	}
 }

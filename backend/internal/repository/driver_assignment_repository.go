@@ -39,6 +39,6 @@ type DriverAssignmentRepository interface {
 
 	CloseAssignment(
 		ctx context.Context,
-		driverID string,
+		assignmentID string,
 	) error
 }
