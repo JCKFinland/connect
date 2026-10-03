@@ -135,51 +135,6 @@ func (r *DriverPresenceRepository) GetByDriverID(
 	return &p, nil
 }
 
-func (r *DriverPresenceRepository) Update(
-	ctx context.Context,
-	p *models.DriverPresence,
-) error {
-
-	query := `
-	UPDATE driver_presence
-	SET
-		company_id=$2,
-		branch_id=$3,
-		vehicle_id=$4,
-		assignment_id=$5,
-		is_online=$6,
-		availability_status=$7,
-		latitude=$8,
-		longitude=$9,
-		heading=$10,
-		speed=$11,
-		accuracy=$12,
-		last_heartbeat_at=$13,
-		updated_at=NOW()
-	WHERE driver_id=$1
-	`
-
-	_, err := r.db.Exec(
-		ctx,
-		query,
-		p.DriverID,
-		p.CompanyID,
-		p.BranchID,
-		p.VehicleID,
-		p.AssignmentID,
-		p.IsOnline,
-		p.AvailabilityStatus,
-		p.Latitude,
-		p.Longitude,
-		p.Heading,
-		p.Speed,
-		p.Accuracy,
-		p.LastHeartbeatAt,
-	)
-
-	return err
-}
-
 func (r *DriverPresenceRepository) UpdateHeartbeat(
 	ctx context.Context,
 	driverID string,

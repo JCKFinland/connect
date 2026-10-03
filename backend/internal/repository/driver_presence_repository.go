@@ -28,11 +28,6 @@ type DriverPresenceRepository interface {
 		driverID string,
 	) (*models.DriverPresence, error)
 
-	Update(
-		ctx context.Context,
-		presence *models.DriverPresence,
-	) error
-
 	UpdateHeartbeat(
 		ctx context.Context,
 		driverID string,
