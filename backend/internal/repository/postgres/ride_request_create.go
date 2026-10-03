@@ -12,6 +12,17 @@ func (r *RideRequestRepository) Create(
 	ctx context.Context,
 	request *models.RideRequest,
 ) error {
+	if request == nil {
+		return fmt.Errorf("ride request is required")
+	}
+
+	// Persistence is the final authority for a newly created ride request.
+	// Dispatch lifecycle state can only be established after creation.
+	request.Status = "PENDING"
+	request.DispatchRetryCount = 0
+	request.NextDispatchAttemptAt = nil
+	request.LastDispatchAttemptAt = nil
+
 	const query = `
 	INSERT INTO ride_requests (
 		id,
@@ -29,6 +40,9 @@ func (r *RideRequestRepository) Create(
 		notes,
 		requested_at,
 		expires_at,
+		dispatch_retry_count,
+		next_dispatch_attempt_at,
+		last_dispatch_attempt_at,
 		created_at,
 		updated_at
 	)
@@ -44,12 +58,15 @@ func (r *RideRequestRepository) Create(
 			$9,
 			$10,
 			$11,
+			'PENDING',
 			$12,
 			$13,
 			$14,
+			0,
+			NULL,
+			NULL,
 			$15,
-			$16,
-			$17
+			$16
 		)
 		RETURNING
 			created_at,
@@ -70,7 +87,6 @@ func (r *RideRequestRepository) Create(
 		request.RequestedVehicleType,
 		request.ServiceCategoryID,
 		request.PassengerCount,
-		request.Status,
 		request.Notes,
 		request.RequestedAt,
 		request.ExpiresAt,
