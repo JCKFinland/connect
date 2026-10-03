@@ -26,6 +26,8 @@ func (r *TripRepository) UpdateActualMetrics(
 			updated_at = NOW()
 		WHERE id = $3
 		  AND deleted_at IS NULL
+		  AND status = 'IN_PROGRESS'
+		  AND is_active = TRUE
 	`
 
 	result, err := r.db.Exec(
