@@ -6,6 +6,7 @@ import (
 	// Imports Gin to extract incoming JSON payloads and handle request contexts.
 	"github.com/gin-gonic/gin"
 
+	"github.com/JCKFinland/connect/backend/internal/middleware"
 	// Accesses the core driver matching and assignment business workflows.
 	assignment "github.com/JCKFinland/connect/backend/internal/services/assignment"
 	"github.com/JCKFinland/connect/backend/pkg/response"
@@ -32,39 +33,43 @@ func (h *DriverAssignmentHandler) Assign(
 	c *gin.Context,
 ) {
 
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(
+			c,
+			"authenticated user not found",
+		)
+		return
+	}
+
 	var req assignment.AssignDriverRequest
 
-	// Validates and decodes the JSON payload sent by the user application.
+	// Only vehicle selection and notes come from the client. Driver and
+	// organizational identity are resolved authoritatively by the service.
 	if err := c.ShouldBindJSON(&req); err != nil {
-
 		response.BadRequest(
 			c,
 			"Invalid request body",
 		)
-
 		return
 	}
 
-	// Forwards the pairing transaction down to the core assignment logic engine.
 	driverAssignment, err := h.service.Assign(
 		c.Request.Context(),
+		user.ID,
 		req,
 	)
 
-	// Handles assignment constraints failures (e.g., driver already busy, vehicle unavailable).
 	if err != nil {
-
 		response.Error(
 			c,
 			http.StatusBadRequest,
 			err.Error(),
 			nil,
 		)
-
 		return
 	}
 
-	// Returns an HTTP 200 OK along with the metadata confirming the newly minted pairing details.
 	response.Success(
 		c,
 		http.StatusOK,
@@ -78,36 +83,30 @@ func (h *DriverAssignmentHandler) Unassign(
 	c *gin.Context,
 ) {
 
-	var req assignment.UnassignDriverRequest
-
-	// Validates that the unassignment request structure matches expected properties.
-	if err := c.ShouldBindJSON(&req); err != nil {
-
-		response.BadRequest(
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(
 			c,
-			"Invalid request body",
+			"authenticated user not found",
 		)
-
 		return
 	}
 
-	// Commands the logic engine to sever the operational linkage.
+	// Self-unassignment has no client-controlled driver identity. The
+	// authenticated users.id is the operational driver identity.
 	if err := h.service.Unassign(
 		c.Request.Context(),
-		req,
+		user.ID,
 	); err != nil {
-
 		response.Error(
 			c,
 			http.StatusBadRequest,
 			err.Error(),
 			nil,
 		)
-
 		return
 	}
 
-	// Sends an HTTP 200 OK indicating successful isolation of driver from task/vehicle.
 	response.Success(
 		c,
 		http.StatusOK,

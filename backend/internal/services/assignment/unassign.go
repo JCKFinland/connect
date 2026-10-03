@@ -13,7 +13,7 @@ import (
 
 func (s *Service) Unassign(
 	ctx context.Context,
-	req UnassignDriverRequest,
+	userID string,
 ) error {
 
 	if s == nil {
@@ -28,9 +28,9 @@ func (s *Service) Unassign(
 		)
 	}
 
-	if req.DriverID == "" {
+	if userID == "" {
 		return errors.New(
-			"driver ID is required",
+			"authenticated user ID is required",
 		)
 	}
 
@@ -50,7 +50,7 @@ func (s *Service) Unassign(
 				)
 
 			// ---------------------------------------------------------
-			// 1. Lock the driver's presence row.
+			// 1. Lock the authenticated driver's presence row.
 			//
 			// AcceptOffer() also locks this row before committing a
 			// driver to a trip. Sharing this lock serializes acceptance
@@ -60,7 +60,7 @@ func (s *Service) Unassign(
 			if _, err :=
 				presenceRepo.GetByDriverIDForUpdate(
 					ctx,
-					req.DriverID,
+					userID,
 				); err != nil {
 
 				if errors.Is(
@@ -84,7 +84,7 @@ func (s *Service) Unassign(
 			activeAssignment, err :=
 				assignments.GetActiveByDriver(
 					ctx,
-					req.DriverID,
+					userID,
 				)
 
 			if errors.Is(
@@ -112,7 +112,7 @@ func (s *Service) Unassign(
 			detached, err :=
 				presenceRepo.DetachAssignmentIfIdle(
 					ctx,
-					req.DriverID,
+					userID,
 				)
 
 			if err != nil {
@@ -127,10 +127,8 @@ func (s *Service) Unassign(
 			}
 
 			// ---------------------------------------------------------
-			// 4. Close the assignment.
-			//
-			// Both this update and the presence detachment are inside
-			// the same PostgreSQL transaction.
+			// 4. Close the exact assignment selected under the same
+			//    driver lifecycle lock.
 			// ---------------------------------------------------------
 
 			if err := assignments.CloseAssignment(

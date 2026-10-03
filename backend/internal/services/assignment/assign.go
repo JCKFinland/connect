@@ -15,6 +15,7 @@ import (
 
 func (s *Service) Assign(
 	ctx context.Context,
+	userID string,
 	req AssignDriverRequest,
 ) (*models.DriverAssignment, error) {
 
@@ -30,9 +31,9 @@ func (s *Service) Assign(
 		)
 	}
 
-	if req.DriverID == "" {
+	if userID == "" {
 		return nil, errors.New(
-			"driver ID is required",
+			"authenticated user ID is required",
 		)
 	}
 
@@ -59,17 +60,81 @@ func (s *Service) Assign(
 					tx,
 				)
 
+			drivers :=
+				postgresrepo.NewDriverRepositoryWithDB(
+					tx,
+				)
+
+			vehicles :=
+				postgresrepo.NewVehicleRepositoryWithDB(
+					tx,
+				)
+
 			// ---------------------------------------------------------
-			// 1. Lock driver lifecycle state.
+			// 1. Resolve authoritative organizational relationships.
+			//
+			// The authenticated users.id is the operational driver
+			// identity used by assignment and presence. Company and
+			// branch come from the driver's registration. Fleet comes
+			// from the selected vehicle. None of these relationships
+			// are accepted from the client request.
+			// ---------------------------------------------------------
+
+			driver, err := drivers.GetByUserID(
+				ctx,
+				userID,
+			)
+
+			if errors.Is(
+				err,
+				repository.ErrNotFound,
+			) {
+				return ErrDriverNotFound
+			}
+
+			if err != nil {
+				return fmt.Errorf(
+					"get authenticated driver: %w",
+					err,
+				)
+			}
+
+			vehicle, err := vehicles.GetByID(
+				ctx,
+				req.VehicleID,
+			)
+
+			if errors.Is(
+				err,
+				repository.ErrNotFound,
+			) {
+				return ErrVehicleNotFound
+			}
+
+			if err != nil {
+				return fmt.Errorf(
+					"get assignment vehicle: %w",
+					err,
+				)
+			}
+
+			if vehicle.CompanyID != driver.CompanyID ||
+				vehicle.BranchID != driver.BranchID {
+
+				return ErrVehicleOutsideDriverScope
+			}
+
+			// ---------------------------------------------------------
+			// 2. Lock driver lifecycle state.
 			//
 			// AcceptOffer() and Unassign() use the same presence row
 			// as their driver-level serialization point.
 			// ---------------------------------------------------------
 
-			_, err :=
+			_, err =
 				presenceRepo.GetByDriverIDForUpdate(
 					ctx,
-					req.DriverID,
+					userID,
 				)
 
 			if errors.Is(
@@ -89,13 +154,13 @@ func (s *Service) Assign(
 			}
 
 			// ---------------------------------------------------------
-			// 2. Driver must not already have an active assignment.
+			// 3. Driver must not already have an active assignment.
 			// ---------------------------------------------------------
 
 			_, err =
 				assignments.GetActiveByDriver(
 					ctx,
-					req.DriverID,
+					userID,
 				)
 
 			if err == nil {
@@ -113,13 +178,13 @@ func (s *Service) Assign(
 			}
 
 			// ---------------------------------------------------------
-			// 3. Vehicle must not already have an active assignment.
+			// 4. Vehicle must not already have an active assignment.
 			// ---------------------------------------------------------
 
 			_, err =
 				assignments.GetActiveByVehicle(
 					ctx,
-					req.VehicleID,
+					vehicle.ID,
 				)
 
 			if err == nil {
@@ -137,19 +202,19 @@ func (s *Service) Assign(
 			}
 
 			// ---------------------------------------------------------
-			// 4. Create assignment.
+			// 5. Create assignment from authoritative relationships.
 			//
 			// PostgreSQL partial unique indexes remain the final
 			// concurrency backstop for driver and vehicle uniqueness.
 			// ---------------------------------------------------------
 
 			assignment := &models.DriverAssignment{
-				CompanyID: req.CompanyID,
-				BranchID:  req.BranchID,
-				FleetID:   req.FleetID,
+				CompanyID: driver.CompanyID,
+				BranchID:  driver.BranchID,
+				FleetID:   vehicle.FleetID,
 
-				DriverID:  req.DriverID,
-				VehicleID: req.VehicleID,
+				DriverID:  userID,
+				VehicleID: vehicle.ID,
 
 				AssignedAt: time.Now().UTC(),
 				Notes:      req.Notes,
@@ -166,7 +231,7 @@ func (s *Service) Assign(
 			}
 
 			// ---------------------------------------------------------
-			// 5. Attach assignment to presence only if the driver is
+			// 6. Attach assignment to presence only if the driver is
 			//    still operationally idle.
 			//
 			// Failure here rolls back assignment creation as well.
@@ -175,10 +240,10 @@ func (s *Service) Assign(
 			attached, err :=
 				presenceRepo.AttachAssignmentIfIdle(
 					ctx,
-					req.DriverID,
-					req.CompanyID,
-					req.BranchID,
-					req.VehicleID,
+					userID,
+					driver.CompanyID,
+					driver.BranchID,
+					vehicle.ID,
 					assignment.ID,
 				)
 

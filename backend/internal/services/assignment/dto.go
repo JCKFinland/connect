@@ -1,19 +1,7 @@
 package assignment
 
 type AssignDriverRequest struct {
-	CompanyID string
+	VehicleID string `json:"vehicle_id" binding:"required"`
 
-	BranchID string
-
-	FleetID string
-
-	DriverID string
-
-	VehicleID string
-
-	Notes string
-}
-
-type UnassignDriverRequest struct {
-	DriverID string
+	Notes string `json:"notes"`
 }

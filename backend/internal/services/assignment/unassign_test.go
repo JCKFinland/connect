@@ -527,9 +527,7 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 
 	err = service.Unassign(
 		ctx,
-		UnassignDriverRequest{
-			DriverID: driverID,
-		},
+		driverID,
 	)
 
 	if !errors.Is(
@@ -1193,11 +1191,8 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 
 	createdAssignment, err := service.Assign(
 		ctx,
+		driverID,
 		AssignDriverRequest{
-			CompanyID: originalAssignment.CompanyID,
-			BranchID:  originalAssignment.BranchID,
-			FleetID:   originalAssignment.FleetID,
-			DriverID:  driverID,
 			VehicleID: originalAssignment.VehicleID,
 			Notes:     "must roll back because driver has active trip",
 		},
@@ -1349,6 +1344,429 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 			"expected driver status %s, got %s",
 			presence.StatusBusy,
 			persistedAvailabilityStatus,
+		)
+	}
+}
+
+func TestAssignDerivesAuthenticatedDriverScopeAndRejectsForeignVehicle(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	// ---------------------------------------------------------
+	// 1. Connect using the same integration-test configuration.
+	// ---------------------------------------------------------
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf(
+			"get working directory: %v",
+			err,
+		)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf(
+			"change to backend root: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf(
+			"load CONNECT configuration: %v",
+			err,
+		)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf(
+			"connect database: %v",
+			err,
+		)
+	}
+	defer db.Close()
+
+	// ---------------------------------------------------------
+	// 2. Serialize fixture-backed assignment integration tests.
+	// ---------------------------------------------------------
+
+	releaseFixtureLock, err :=
+		testutil.AcquirePostgresFixtureLock(
+			ctx,
+			db,
+			"dispatch-fixture:john",
+		)
+	if err != nil {
+		t.Fatalf(
+			"acquire assignment fixture lock: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := releaseFixtureLock(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"release assignment fixture lock: %v",
+				err,
+			)
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// 3. Create two completely isolated organizational scopes.
+	// ---------------------------------------------------------
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create authenticated driver fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup authenticated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	foreignFixture, cleanupForeignFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create foreign vehicle fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupForeignFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup foreign vehicle fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	if driverFixture.CompanyID == foreignFixture.CompanyID {
+		t.Fatal(
+			"authority regression requires distinct companies",
+		)
+	}
+
+	if driverFixture.BranchID == foreignFixture.BranchID {
+		t.Fatal(
+			"authority regression requires distinct branches",
+		)
+	}
+
+	assignmentRepo :=
+		postgresrepo.NewDriverAssignmentRepository(db)
+
+	// ---------------------------------------------------------
+	// 4. Close fixture A's initial assignment so its authenticated
+	//    user can exercise the real Assign workflow.
+	// ---------------------------------------------------------
+
+	if err := assignmentRepo.CloseAssignment(
+		ctx,
+		driverFixture.AssignmentID,
+	); err != nil {
+		t.Fatalf(
+			"close authenticated driver's fixture assignment: %v",
+			err,
+		)
+	}
+
+	// Assign requires the driver's presence row as its lifecycle
+	// serialization point. Start it idle and unassigned.
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO driver_presence (
+				driver_id,
+				company_id,
+				branch_id,
+				vehicle_id,
+				assignment_id,
+				is_online,
+				availability_status,
+				last_heartbeat_at
+			)
+			VALUES (
+				$1,
+				$2,
+				$3,
+				NULL,
+				NULL,
+				FALSE,
+				'AVAILABLE',
+				NOW()
+			)
+		`,
+		driverFixture.UserID,
+		driverFixture.CompanyID,
+		driverFixture.BranchID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"create idle authenticated driver presence: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`
+				DELETE FROM driver_presence
+				WHERE driver_id = $1
+			`,
+			driverFixture.UserID,
+		); err != nil {
+			t.Logf(
+				"cleanup authenticated driver presence: %v",
+				err,
+			)
+		}
+	}()
+
+	service := NewService(
+		Dependencies{
+			DB:          db,
+			Assignments: assignmentRepo,
+		},
+	)
+
+	// ---------------------------------------------------------
+	// 5. Authenticated driver must not be able to select a
+	//    vehicle belonging to another company/branch.
+	// ---------------------------------------------------------
+
+	var assignmentCountBefore int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM driver_assignments
+			WHERE driver_id = $1
+		`,
+		driverFixture.UserID,
+	).Scan(&assignmentCountBefore); err != nil {
+		t.Fatalf(
+			"count assignments before foreign vehicle attempt: %v",
+			err,
+		)
+	}
+
+	createdAssignment, err := service.Assign(
+		ctx,
+		driverFixture.UserID,
+		AssignDriverRequest{
+			VehicleID: foreignFixture.VehicleID,
+			Notes:     "must reject foreign organizational scope",
+		},
+	)
+
+	if !errors.Is(
+		err,
+		ErrVehicleOutsideDriverScope,
+	) {
+		t.Fatalf(
+			"expected ErrVehicleOutsideDriverScope, got %v",
+			err,
+		)
+	}
+
+	if createdAssignment != nil {
+		t.Fatalf(
+			"expected no foreign-scope assignment, got %+v",
+			createdAssignment,
+		)
+	}
+
+	var assignmentCountAfterRejected int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM driver_assignments
+			WHERE driver_id = $1
+		`,
+		driverFixture.UserID,
+	).Scan(&assignmentCountAfterRejected); err != nil {
+		t.Fatalf(
+			"count assignments after foreign vehicle attempt: %v",
+			err,
+		)
+	}
+
+	if assignmentCountAfterRejected != assignmentCountBefore {
+		t.Fatalf(
+			"foreign vehicle attempt changed assignment history: before=%d after=%d",
+			assignmentCountBefore,
+			assignmentCountAfterRejected,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 6. The driver's own vehicle must succeed, with every
+	//    relationship persisted from authoritative server data.
+	// ---------------------------------------------------------
+
+	createdAssignment, err = service.Assign(
+		ctx,
+		driverFixture.UserID,
+		AssignDriverRequest{
+			VehicleID: driverFixture.VehicleID,
+			Notes:     "authoritative relationship regression",
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"assign authoritative vehicle: %v",
+			err,
+		)
+	}
+
+	if createdAssignment == nil ||
+		createdAssignment.ID == "" {
+		t.Fatal(
+			"expected created authoritative assignment",
+		)
+	}
+
+	// The successful assignment is additional history beyond the fixture's
+	// original assignment. Remove it before fixture cleanup so its RESTRICT
+	// vehicle foreign key cannot strand the disposable hierarchy.
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`
+				DELETE FROM driver_assignments
+				WHERE id = $1
+			`,
+			createdAssignment.ID,
+		); err != nil {
+			t.Logf(
+				"cleanup authoritative assignment: %v",
+				err,
+			)
+		}
+	}()
+
+	if createdAssignment.DriverID != driverFixture.UserID {
+		t.Fatalf(
+			"created driver identity mismatch: got %q want %q",
+			createdAssignment.DriverID,
+			driverFixture.UserID,
+		)
+	}
+
+	if createdAssignment.CompanyID != driverFixture.CompanyID {
+		t.Fatalf(
+			"created company mismatch: got %q want %q",
+			createdAssignment.CompanyID,
+			driverFixture.CompanyID,
+		)
+	}
+
+	if createdAssignment.BranchID != driverFixture.BranchID {
+		t.Fatalf(
+			"created branch mismatch: got %q want %q",
+			createdAssignment.BranchID,
+			driverFixture.BranchID,
+		)
+	}
+
+	if createdAssignment.FleetID != driverFixture.FleetID {
+		t.Fatalf(
+			"created fleet mismatch: got %q want %q",
+			createdAssignment.FleetID,
+			driverFixture.FleetID,
+		)
+	}
+
+	if createdAssignment.VehicleID != driverFixture.VehicleID {
+		t.Fatalf(
+			"created vehicle mismatch: got %q want %q",
+			createdAssignment.VehicleID,
+			driverFixture.VehicleID,
+		)
+	}
+
+	var (
+		persistedCompanyID string
+		persistedBranchID  string
+		persistedFleetID   string
+		persistedDriverID  string
+		persistedVehicleID string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				company_id,
+				branch_id,
+				fleet_id,
+				driver_id,
+				vehicle_id
+			FROM driver_assignments
+			WHERE id = $1
+		`,
+		createdAssignment.ID,
+	).Scan(
+		&persistedCompanyID,
+		&persistedBranchID,
+		&persistedFleetID,
+		&persistedDriverID,
+		&persistedVehicleID,
+	); err != nil {
+		t.Fatalf(
+			"load persisted authoritative assignment: %v",
+			err,
+		)
+	}
+
+	if persistedCompanyID != driverFixture.CompanyID ||
+		persistedBranchID != driverFixture.BranchID ||
+		persistedFleetID != driverFixture.FleetID ||
+		persistedDriverID != driverFixture.UserID ||
+		persistedVehicleID != driverFixture.VehicleID {
+
+		t.Fatalf(
+			"persisted assignment relationships are not authoritative: company=%q branch=%q fleet=%q driver=%q vehicle=%q",
+			persistedCompanyID,
+			persistedBranchID,
+			persistedFleetID,
+			persistedDriverID,
+			persistedVehicleID,
 		)
 	}
 }
