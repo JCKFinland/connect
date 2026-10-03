@@ -30,6 +30,10 @@ func (r *DriverAssignmentRepository) Create(
 	assignment *models.DriverAssignment,
 ) error {
 
+	// A newly created assignment is always active. UnassignedAt is
+	// lifecycle evidence owned exclusively by CloseAssignment.
+	assignment.UnassignedAt = nil
+
 	query := `
 	INSERT INTO driver_assignments
 	(
@@ -44,7 +48,7 @@ func (r *DriverAssignmentRepository) Create(
 	)
 	VALUES
 	(
-		$1,$2,$3,$4,$5,$6,$7,$8
+		$1,$2,$3,$4,$5,$6,NULL,$7
 	)
 	RETURNING id, created_at, updated_at
 	`
@@ -58,7 +62,6 @@ func (r *DriverAssignmentRepository) Create(
 		assignment.DriverID,
 		assignment.VehicleID,
 		assignment.AssignedAt,
-		assignment.UnassignedAt,
 		assignment.Notes,
 	).Scan(
 		&assignment.ID,
