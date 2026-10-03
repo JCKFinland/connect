@@ -99,11 +99,6 @@ type DriverPresenceRepository interface {
 		staleBefore time.Time,
 	) (int64, error)
 
-	Delete(
-		ctx context.Context,
-		driverID string,
-	) error
-
 	ListAvailable(
 		ctx context.Context,
 		companyID string,

@@ -134,20 +134,6 @@ func (r *DriverPresenceRepository) GetByDriverID(
 	return &p, nil
 }
 
-func (r *DriverPresenceRepository) Delete(
-	ctx context.Context,
-	driverID string,
-) error {
-
-	_, err := r.db.Exec(
-		ctx,
-		`DELETE FROM driver_presence WHERE driver_id=$1`,
-		driverID,
-	)
-
-	return err
-}
-
 func (r *DriverPresenceRepository) ListAvailable(
 	ctx context.Context,
 	companyID string,
