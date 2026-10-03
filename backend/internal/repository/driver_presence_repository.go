@@ -8,11 +8,6 @@ import (
 )
 
 type DriverPresenceRepository interface {
-	Create(
-		ctx context.Context,
-		presence *models.DriverPresence,
-	) error
-
 	GetByDriverID(
 		ctx context.Context,
 		driverID string,

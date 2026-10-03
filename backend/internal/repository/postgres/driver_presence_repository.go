@@ -22,57 +22,6 @@ func NewDriverPresenceRepository(
 	}
 }
 
-func (r *DriverPresenceRepository) Create(
-	ctx context.Context,
-	p *models.DriverPresence,
-) error {
-
-	query := `
-	INSERT INTO driver_presence
-	(
-		driver_id,
-		company_id,
-		branch_id,
-		vehicle_id,
-		assignment_id,
-		is_online,
-		availability_status,
-		latitude,
-		longitude,
-		heading,
-		speed,
-		accuracy,
-		last_heartbeat_at
-	)
-	VALUES
-	(
-		$1,$2,$3,$4,$5,
-		$6,$7,$8,$9,$10,
-		$11,$12,$13
-	)
-	`
-
-	_, err := r.db.Exec(
-		ctx,
-		query,
-		p.DriverID,
-		p.CompanyID,
-		p.BranchID,
-		p.VehicleID,
-		p.AssignmentID,
-		p.IsOnline,
-		p.AvailabilityStatus,
-		p.Latitude,
-		p.Longitude,
-		p.Heading,
-		p.Speed,
-		p.Accuracy,
-		p.LastHeartbeatAt,
-	)
-
-	return err
-}
-
 func (r *DriverPresenceRepository) GetByDriverID(
 	ctx context.Context,
 	driverID string,

@@ -8,7 +8,6 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
-	"github.com/JCKFinland/connect/backend/internal/models"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
@@ -52,15 +51,25 @@ func TestGetCurrentReturnsPersistedPresence(t *testing.T) {
 
 	heartbeatAt := time.Now().UTC().Truncate(time.Microsecond)
 
-	err = presenceRepo.Create(ctx, &models.DriverPresence{
-		DriverID:           fixture.UserID,
-		CompanyID:          fixture.CompanyID,
-		IsOnline:           true,
-		AvailabilityStatus: "AVAILABLE",
-		LastHeartbeatAt:    &heartbeatAt,
-	})
+	_, err = db.Exec(
+		ctx,
+		`
+		INSERT INTO driver_presence
+		(
+			driver_id,
+			company_id,
+			is_online,
+			availability_status,
+			last_heartbeat_at
+		)
+		VALUES ($1, $2, TRUE, 'AVAILABLE', $3)
+		`,
+		fixture.UserID,
+		fixture.CompanyID,
+		heartbeatAt,
+	)
 	if err != nil {
-		t.Fatalf("create driver presence: %v", err)
+		t.Fatalf("create driver presence fixture: %v", err)
 	}
 
 	service := NewService(Dependencies{
