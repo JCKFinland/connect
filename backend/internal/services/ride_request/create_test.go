@@ -131,6 +131,7 @@ func (r *createRideRequestTestRepository) ScheduleDispatchRetry(
 func (r *createRideRequestTestRepository) ResetDispatchRetry(
 	ctx context.Context,
 	rideRequestID string,
+	expectedStatus string,
 ) error {
 
 	return nil

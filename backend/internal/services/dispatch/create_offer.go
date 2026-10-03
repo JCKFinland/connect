@@ -208,6 +208,7 @@ func (s *Service) CreateOffer(
 					if err := rideRequests.ResetDispatchRetry(
 						ctx,
 						expiredRequest.ID,
+						rideRequestStatusExpired,
 					); err != nil {
 						return fmt.Errorf(
 							"reset expired ride dispatch retry state: %w",
@@ -324,6 +325,7 @@ func (s *Service) CreateOffer(
 					if err := rideRequests.ResetDispatchRetry(
 						ctx,
 						request.ID,
+						rideRequestStatusExpired,
 					); err != nil {
 						return fmt.Errorf(
 							"reset expired ride dispatch retry state: %w",
@@ -800,6 +802,7 @@ func (s *Service) CreateOffer(
 			if err := rideRequests.ResetDispatchRetry(
 				ctx,
 				request.ID,
+				rideRequestStatusPending,
 			); err != nil {
 				return fmt.Errorf(
 					"reset ride dispatch retry state: %w",

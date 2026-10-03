@@ -125,17 +125,25 @@ func (r *RideRequestRepository) ScheduleDispatchRetry(
 
 // ResetDispatchRetry clears automatic redispatch backoff state.
 //
-// This should happen after CONNECT successfully creates a new dispatch
-// offer for the ride. The reset remains part of the same dispatch
-// transaction, so it is rolled back if offer creation fails.
+// The caller must provide the lifecycle status under which the reset is
+// authorized. This supports both successful redispatch from PENDING and
+// terminal cleanup after transition to EXPIRED while preventing stale
+// callers from clearing retry evidence in an unexpected lifecycle state.
 func (r *RideRequestRepository) ResetDispatchRetry(
 	ctx context.Context,
 	rideRequestID string,
+	expectedStatus string,
 ) error {
 
 	if rideRequestID == "" {
 		return fmt.Errorf(
 			"ride request ID is required",
+		)
+	}
+
+	if expectedStatus == "" {
+		return fmt.Errorf(
+			"expected ride request status is required",
 		)
 	}
 
@@ -147,12 +155,14 @@ func (r *RideRequestRepository) ResetDispatchRetry(
 			last_dispatch_attempt_at = NULL,
 			updated_at = NOW()
 		WHERE id = $1
+		  AND status = $2
 	`
 
 	result, err := r.db.Exec(
 		ctx,
 		query,
 		rideRequestID,
+		expectedStatus,
 	)
 	if err != nil {
 		return fmt.Errorf(

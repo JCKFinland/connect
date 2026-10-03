@@ -53,6 +53,7 @@ type RideRequestRepository interface {
 	ResetDispatchRetry(
 		ctx context.Context,
 		rideRequestID string,
+		expectedStatus string,
 	) error
 
 	ExpireDispatchableRideRequests(

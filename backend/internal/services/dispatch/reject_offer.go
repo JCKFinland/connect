@@ -186,6 +186,7 @@ func (s *Service) RejectOffer(
 					if err := rideRequests.ResetDispatchRetry(
 						ctx,
 						request.ID,
+						rideRequestStatusExpired,
 					); err != nil {
 						return fmt.Errorf(
 							"reset expired ride dispatch retry state: %w",

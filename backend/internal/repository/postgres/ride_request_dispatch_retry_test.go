@@ -686,3 +686,231 @@ func TestScheduleDispatchRetryDoesNotTerminateOnHighRetryCount(t *testing.T) {
 		)
 	}
 }
+
+func TestResetDispatchRetryRequiresExpectedCurrentStatus(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	rideRequestID := uuid.NewString()
+	now := time.Now().UTC()
+	expiresAt := now.Add(10 * time.Minute)
+	nextAttemptAt := now.Add(30 * time.Second)
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO ride_requests
+			(
+				id,
+				customer_id,
+				pickup_address,
+				pickup_latitude,
+				pickup_longitude,
+				destination_address,
+				destination_latitude,
+				destination_longitude,
+				requested_vehicle_type,
+				passenger_count,
+				status,
+				notes,
+				requested_at,
+				expires_at,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at,
+				created_at,
+				updated_at
+			)
+			VALUES
+			(
+				$1,
+				$2,
+				'Retry Reset Authority Pickup',
+				60.2055,
+				24.6559,
+				'Retry Reset Authority Destination',
+				60.1719,
+				24.9414,
+				'STANDARD',
+				1,
+				'PENDING',
+				'Retry reset must require expected lifecycle state',
+				$3,
+				$4,
+				3,
+				$5,
+				$3,
+				$3,
+				$3
+			)
+		`,
+		rideRequestID,
+		customerID,
+		now,
+		expiresAt,
+		nextAttemptAt,
+	)
+	if err != nil {
+		t.Fatalf("create retry-reset authority ride: %v", err)
+	}
+
+	defer func() {
+		if _, cleanupErr := db.Exec(
+			context.Background(),
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup retry-reset authority ride: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	repo := NewRideRequestRepository(db)
+
+	err = repo.ResetDispatchRetry(
+		ctx,
+		rideRequestID,
+		"EXPIRED",
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected stale reset to return repository.ErrNotFound, got %v",
+			err,
+		)
+	}
+
+	var (
+		status               string
+		retryCount           int
+		persistedNextAttempt *time.Time
+		persistedLastAttempt *time.Time
+	)
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				status,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&status,
+		&retryCount,
+		&persistedNextAttempt,
+		&persistedLastAttempt,
+	)
+	if err != nil {
+		t.Fatalf("read retry-reset authority state: %v", err)
+	}
+
+	if status != "PENDING" {
+		t.Fatalf("expected status PENDING, got %s", status)
+	}
+
+	if retryCount != 3 {
+		t.Fatalf(
+			"expected stale reset to preserve retry count 3, got %d",
+			retryCount,
+		)
+	}
+
+	if persistedNextAttempt == nil {
+		t.Fatal("expected stale reset to preserve next dispatch attempt")
+	}
+
+	if persistedLastAttempt == nil {
+		t.Fatal("expected stale reset to preserve last dispatch attempt")
+	}
+
+	if err := repo.ResetDispatchRetry(
+		ctx,
+		rideRequestID,
+		"PENDING",
+	); err != nil {
+		t.Fatalf("reset retry state with correct status: %v", err)
+	}
+
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT
+				status,
+				dispatch_retry_count,
+				next_dispatch_attempt_at,
+				last_dispatch_attempt_at
+			FROM ride_requests
+			WHERE id = $1
+		`,
+		rideRequestID,
+	).Scan(
+		&status,
+		&retryCount,
+		&persistedNextAttempt,
+		&persistedLastAttempt,
+	)
+	if err != nil {
+		t.Fatalf("read reset retry state: %v", err)
+	}
+
+	if status != "PENDING" {
+		t.Fatalf(
+			"expected reset to preserve status PENDING, got %s",
+			status,
+		)
+	}
+
+	if retryCount != 0 {
+		t.Fatalf(
+			"expected retry count 0 after reset, got %d",
+			retryCount,
+		)
+	}
+
+	if persistedNextAttempt != nil {
+		t.Fatalf(
+			"expected next dispatch attempt NULL after reset, got %v",
+			persistedNextAttempt,
+		)
+	}
+
+	if persistedLastAttempt != nil {
+		t.Fatalf(
+			"expected last dispatch attempt NULL after reset, got %v",
+			persistedLastAttempt,
+		)
+	}
+}
