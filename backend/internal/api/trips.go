@@ -426,14 +426,8 @@ func (h *TripHandler) UpdateTrip(c *gin.Context) {
 	existingTrip.EstimatedDistanceKM = req.EstimatedDistanceKM
 	existingTrip.EstimatedDurationMinutes = req.EstimatedDurationMinutes
 
-	existingTrip.ActualDistanceKM = req.ActualDistanceKM
-	existingTrip.ActualDurationMinutes = req.ActualDurationMinutes
-
 	existingTrip.EstimatedDistanceMeters = req.EstimatedDistanceMeters
 	existingTrip.EstimatedDurationSeconds = req.EstimatedDurationSeconds
-
-	existingTrip.ActualDistanceMeters = req.ActualDistanceMeters
-	existingTrip.ActualDurationSeconds = req.ActualDurationSeconds
 
 	if err := h.service.UpdateAuthorized(
 		c.Request.Context(),
@@ -502,6 +496,14 @@ func (h *TripHandler) DeleteTrip(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"success": false,
 				"message": "You are not authorized to delete trips",
+			})
+			return
+		}
+
+		if errors.Is(err, trip.ErrTripDeleteRequiresTerminalStatus) {
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"message": "Trip must be completed or cancelled before deletion",
 			})
 			return
 		}

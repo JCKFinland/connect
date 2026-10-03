@@ -54,14 +54,8 @@ type UpdateTripRequest struct {
 	EstimatedDistanceKM      *float64 `json:"estimated_distance_km,omitempty"`
 	EstimatedDurationMinutes *int     `json:"estimated_duration_minutes,omitempty"`
 
-	ActualDistanceKM      *float64 `json:"actual_distance_km,omitempty"`
-	ActualDurationMinutes *int     `json:"actual_duration_minutes,omitempty"`
-
 	EstimatedDistanceMeters  *int64 `json:"estimated_distance_meters,omitempty"`
 	EstimatedDurationSeconds *int64 `json:"estimated_duration_seconds,omitempty"`
-
-	ActualDistanceMeters  *int64 `json:"actual_distance_meters,omitempty"`
-	ActualDurationSeconds *int64 `json:"actual_duration_seconds,omitempty"`
 }
 
 // UpdateTripStatusRequest represents a trip lifecycle transition.

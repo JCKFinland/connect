@@ -51,23 +51,33 @@ func (s *tripService) Create(
 		trip.ID = uuid.NewString()
 	}
 
-	if trip.Status == "" {
-		trip.Status = "ASSIGNED"
-	}
+	// A newly created trip always enters the canonical initial lifecycle
+	// state. Progressed lifecycle evidence must be established only by
+	// dedicated lifecycle mutation paths.
+	now := time.Now().UTC()
 
-	if trip.AssignedAt.IsZero() {
-		trip.AssignedAt = time.Now().UTC()
-	}
+	trip.Status = StatusAssigned
+	trip.AssignedAt = now
+
+	trip.DriverArrivedAt = nil
+	trip.PassengerOnBoardAt = nil
+	trip.PickupAt = nil
+	trip.StartedAt = nil
+	trip.CompletedAt = nil
+	trip.CancelledAt = nil
+
+	trip.CancelledBy = nil
+	trip.CancellationReason = nil
+
+	trip.IsActive = true
 
 	if trip.CreatedAt.IsZero() {
-		trip.CreatedAt = time.Now().UTC()
+		trip.CreatedAt = now
 	}
 
 	if trip.UpdatedAt.IsZero() {
-		trip.UpdatedAt = time.Now().UTC()
+		trip.UpdatedAt = now
 	}
-
-	trip.IsActive = true
 
 	return s.repo.Create(ctx, trip)
 }

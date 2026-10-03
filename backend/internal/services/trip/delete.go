@@ -2,7 +2,15 @@ package trip
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/jackc/pgx/v5"
+)
+
+var ErrTripDeleteRequiresTerminalStatus = errors.New(
+	"trip must be completed or cancelled before deletion",
 )
 
 // Delete soft-deletes a trip.
@@ -21,7 +29,7 @@ func (s *tripService) Delete(
 	)
 }
 
-// DeleteAuthorized soft-deletes a trip only when the authenticated
+// DeleteAuthorized soft-deletes a terminal trip only when the authenticated
 // user has operational trip-management privileges.
 func (s *tripService) DeleteAuthorized(
 	ctx context.Context,
@@ -40,16 +48,44 @@ func (s *tripService) DeleteAuthorized(
 		return err
 	}
 
-	// Confirm that the trip exists before attempting deletion.
-	if _, err := s.repo.GetByID(
-		ctx,
-		id,
-	); err != nil {
-		return err
+	if s.db == nil {
+		return fmt.Errorf("trip database is not configured")
 	}
 
-	return s.repo.Delete(
+	return postgresrepo.RunInTransaction(
 		ctx,
-		id,
+		s.db,
+		func(tx pgx.Tx) error {
+
+			trips := postgresrepo.NewTripRepositoryWithDB(tx)
+
+			currentTrip, err := trips.GetByIDForUpdate(
+				ctx,
+				id,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"get trip for deletion: %w",
+					err,
+				)
+			}
+
+			if currentTrip.Status != StatusCompleted &&
+				currentTrip.Status != StatusCancelled {
+				return ErrTripDeleteRequiresTerminalStatus
+			}
+
+			if err := trips.Delete(
+				ctx,
+				currentTrip.ID,
+			); err != nil {
+				return fmt.Errorf(
+					"delete terminal trip: %w",
+					err,
+				)
+			}
+
+			return nil
+		},
 	)
 }

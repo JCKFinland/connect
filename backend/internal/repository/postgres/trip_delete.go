@@ -21,6 +21,7 @@ func (r *TripRepository) Delete(
 			updated_at = NOW()
 		WHERE id = $2
 		  AND deleted_at IS NULL
+                  AND status IN ('COMPLETED', 'CANCELLED')
 	`
 
 	result, err := r.db.Exec(

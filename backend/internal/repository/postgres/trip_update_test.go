@@ -140,6 +140,10 @@ func TestTripRepositoryUpdatePreservesLifecycleFields(t *testing.T) {
 				assigned_at,
 				driver_arrived_at,
 				started_at,
+				actual_distance_km,
+				actual_duration_minutes,
+				actual_distance_meters,
+				actual_duration_seconds,
 				is_active,
 				passenger_note,
 				created_at,
@@ -159,6 +163,10 @@ func TestTripRepositoryUpdatePreservesLifecycleFields(t *testing.T) {
 				$9,
 				$10,
 				$10,
+				12.5,
+				18,
+				12500,
+				1080,
 				TRUE,
 				'original note',
 				$9,
@@ -227,6 +235,18 @@ func TestTripRepositoryUpdatePreservesLifecycleFields(t *testing.T) {
 	trip.CancellationReason = &cancellationReason
 	trip.IsActive = false
 
+	// Actual trip metrics are completion evidence and must not be writable
+	// through the generic Update path.
+	poisonDistanceKM := 99.9
+	poisonDurationMinutes := 99
+	poisonDistanceMeters := int64(99999)
+	poisonDurationSeconds := int64(9999)
+
+	trip.ActualDistanceKM = &poisonDistanceKM
+	trip.ActualDurationMinutes = &poisonDurationMinutes
+	trip.ActualDistanceMeters = &poisonDistanceMeters
+	trip.ActualDurationSeconds = &poisonDurationSeconds
+
 	// Editable fields must still be persisted.
 	trip.PassengerNote = &updatedNote
 	trip.PickupAddress = &updatedPickup
@@ -244,6 +264,10 @@ func TestTripRepositoryUpdatePreservesLifecycleFields(t *testing.T) {
 		persistedCancelledBy        *string
 		persistedCancellationReason *string
 		persistedIsActive           bool
+		persistedActualDistanceKM   *float64
+		persistedActualDurationMin  *int
+		persistedActualDistanceM    *int64
+		persistedActualDurationSec  *int64
 		persistedPassengerNote      *string
 		persistedPickupAddress      *string
 	)
@@ -260,6 +284,10 @@ func TestTripRepositoryUpdatePreservesLifecycleFields(t *testing.T) {
 				cancelled_by,
 				cancellation_reason,
 				is_active,
+				actual_distance_km,
+				actual_duration_minutes,
+				actual_distance_meters,
+				actual_duration_seconds,
 				passenger_note,
 				pickup_address
 			FROM trips
@@ -275,6 +303,10 @@ func TestTripRepositoryUpdatePreservesLifecycleFields(t *testing.T) {
 		&persistedCancelledBy,
 		&persistedCancellationReason,
 		&persistedIsActive,
+		&persistedActualDistanceKM,
+		&persistedActualDurationMin,
+		&persistedActualDistanceM,
+		&persistedActualDurationSec,
 		&persistedPassengerNote,
 		&persistedPickupAddress,
 	)
@@ -335,6 +367,38 @@ func TestTripRepositoryUpdatePreservesLifecycleFields(t *testing.T) {
 		t.Fatalf(
 			"expected cancellation_reason to remain NULL, got %q",
 			*persistedCancellationReason,
+		)
+	}
+
+	if persistedActualDistanceKM == nil ||
+		*persistedActualDistanceKM != 12.5 {
+		t.Fatalf(
+			"expected actual_distance_km 12.5 to be preserved, got %v",
+			persistedActualDistanceKM,
+		)
+	}
+
+	if persistedActualDurationMin == nil ||
+		*persistedActualDurationMin != 18 {
+		t.Fatalf(
+			"expected actual_duration_minutes 18 to be preserved, got %v",
+			persistedActualDurationMin,
+		)
+	}
+
+	if persistedActualDistanceM == nil ||
+		*persistedActualDistanceM != 12500 {
+		t.Fatalf(
+			"expected actual_distance_meters 12500 to be preserved, got %v",
+			persistedActualDistanceM,
+		)
+	}
+
+	if persistedActualDurationSec == nil ||
+		*persistedActualDurationSec != 1080 {
+		t.Fatalf(
+			"expected actual_duration_seconds 1080 to be preserved, got %v",
+			persistedActualDurationSec,
 		)
 	}
 
