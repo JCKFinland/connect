@@ -243,7 +243,6 @@ func (h *RideRequestHandler) Update(c *gin.Context) {
 	request.RequestedVehicleType = req.RequestedVehicleType
 	request.PassengerCount = req.PassengerCount
 	request.Notes = req.Notes
-	request.ExpiresAt = req.ExpiresAt
 
 	if err := h.service.UpdateAuthorized(
 		c.Request.Context(),

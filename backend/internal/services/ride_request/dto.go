@@ -37,8 +37,6 @@ type UpdateRideRequestRequest struct {
 	PassengerCount       int    `json:"passenger_count"`
 
 	Notes string `json:"notes"`
-
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // UpdateRideRequestStatusRequest changes the lifecycle state.

@@ -25,9 +25,8 @@ func (r *RideRequestRepository) Update(
 		service_category_id = $8,
 		passenger_count = $9,
 		notes = $10,
-		expires_at = $11,
 		updated_at = NOW()
-	WHERE id = $12
+	WHERE id = $11
 	`
 
 	result, err := r.db.Exec(
@@ -43,7 +42,6 @@ func (r *RideRequestRepository) Update(
 		request.ServiceCategoryID,
 		request.PassengerCount,
 		request.Notes,
-		request.ExpiresAt,
 		request.ID,
 	)
 
