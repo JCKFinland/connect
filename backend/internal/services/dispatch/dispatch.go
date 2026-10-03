@@ -560,6 +560,7 @@ func (s *Service) DispatchRide(
 			if err := rideRequests.UpdateStatus(
 				ctx,
 				request.ID,
+				rideRequestStatusPending,
 				rideRequestStatusAccepted,
 			); err != nil {
 				return fmt.Errorf(

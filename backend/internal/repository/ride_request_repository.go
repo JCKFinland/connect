@@ -30,11 +30,13 @@ type RideRequestRepository interface {
 	// Delete performs a soft delete where supported.
 	Delete(ctx context.Context, id string) error
 
-	// UpdateStatus changes the lifecycle status of a ride request.
+	// UpdateStatus atomically changes lifecycle status only when the request
+	// still has the expected current status.
 	UpdateStatus(
 		ctx context.Context,
 		id string,
-		status string,
+		expectedStatus string,
+		newStatus string,
 	) error
 
 	GetByIDForUpdate(

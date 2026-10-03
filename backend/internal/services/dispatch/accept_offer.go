@@ -231,6 +231,7 @@ func (s *Service) AcceptOffer(
 					if err := rideRequests.UpdateStatus(
 						ctx,
 						request.ID,
+						request.Status,
 						rideRequestStatusExpired,
 					); err != nil {
 						return fmt.Errorf(
@@ -418,6 +419,7 @@ func (s *Service) AcceptOffer(
 			if err := rideRequests.UpdateStatus(
 				ctx,
 				request.ID,
+				rideRequestStatusMatching,
 				rideRequestStatusAccepted,
 			); err != nil {
 				return fmt.Errorf(

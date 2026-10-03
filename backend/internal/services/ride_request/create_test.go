@@ -104,7 +104,8 @@ func (r *createRideRequestTestRepository) Delete(
 func (r *createRideRequestTestRepository) UpdateStatus(
 	ctx context.Context,
 	id string,
-	status string,
+	expectedStatus string,
+	newStatus string,
 ) error {
 
 	return nil

@@ -32,9 +32,15 @@ func (s *Service) UpdateStatus(
 	status string,
 ) error {
 
+	current, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
 	return s.repo.UpdateStatus(
 		ctx,
 		id,
+		current.Status,
 		status,
 	)
 }
@@ -83,6 +89,7 @@ func (s *Service) UpdateStatusAuthorized(
 		return s.repo.UpdateStatus(
 			ctx,
 			id,
+			current.Status,
 			newStatus,
 		)
 	}
@@ -104,6 +111,7 @@ func (s *Service) UpdateStatusAuthorized(
 	return s.repo.UpdateStatus(
 		ctx,
 		id,
+		current.Status,
 		StatusCancelled,
 	)
 }

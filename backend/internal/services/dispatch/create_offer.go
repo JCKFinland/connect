@@ -196,6 +196,7 @@ func (s *Service) CreateOffer(
 					if err := rideRequests.UpdateStatus(
 						ctx,
 						expiredRequest.ID,
+						rideRequestStatusMatching,
 						rideRequestStatusExpired,
 					); err != nil {
 						return fmt.Errorf(
@@ -220,6 +221,7 @@ func (s *Service) CreateOffer(
 				if err := rideRequests.UpdateStatus(
 					ctx,
 					expiredRequest.ID,
+					rideRequestStatusMatching,
 					rideRequestStatusPending,
 				); err != nil {
 					return fmt.Errorf(
@@ -310,6 +312,7 @@ func (s *Service) CreateOffer(
 					if err := rideRequests.UpdateStatus(
 						ctx,
 						request.ID,
+						request.Status,
 						rideRequestStatusExpired,
 					); err != nil {
 						return fmt.Errorf(
@@ -814,6 +817,7 @@ func (s *Service) CreateOffer(
 			if err := rideRequests.UpdateStatus(
 				ctx,
 				request.ID,
+				rideRequestStatusPending,
 				rideRequestStatusMatching,
 			); err != nil {
 				return fmt.Errorf(

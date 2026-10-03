@@ -459,6 +459,7 @@ func resetRideRequestAfterOfferResolution(
 	if err := rideRequests.UpdateStatus(
 		ctx,
 		request.ID,
+		"MATCHING",
 		"PENDING",
 	); err != nil {
 		return fmt.Errorf(

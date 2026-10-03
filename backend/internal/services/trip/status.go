@@ -244,6 +244,7 @@ func (s *tripService) UpdateStatus(
 				if err := rideRequests.UpdateStatus(
 					ctx,
 					currentTrip.RideRequestID,
+					"ACCEPTED",
 					rideRequestStatusCancelled,
 				); err != nil {
 					return fmt.Errorf(
