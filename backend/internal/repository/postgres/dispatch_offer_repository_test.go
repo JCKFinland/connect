@@ -194,3 +194,256 @@ func TestDispatchOfferRepositoryGetPendingByDriverExcludesExpiredOffer(
 		)
 	}
 }
+
+func TestDispatchOfferRepositoryUpdateStatusOnlyResolvesPendingOnce(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(
+			ctx,
+			db,
+		)
+	if err != nil {
+		t.Fatalf(
+			"create isolated driver fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Logf(
+				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
+
+	rideRequestID := uuid.NewString()
+	offerID := uuid.NewString()
+	now := time.Now().UTC()
+
+	_, err = db.Exec(
+		ctx,
+		`
+                        INSERT INTO ride_requests (
+                                id,
+                                customer_id,
+                                pickup_address,
+                                pickup_latitude,
+                                pickup_longitude,
+                                destination_address,
+                                destination_latitude,
+                                destination_longitude,
+                                requested_vehicle_type,
+                                passenger_count,
+                                status,
+                                requested_at,
+                                expires_at,
+                                created_at,
+                                updated_at
+                        )
+                        VALUES (
+                                $1,
+                                $2,
+                                'Offer Status Authority Pickup',
+                                60.2055,
+                                24.6559,
+                                'Offer Status Authority Destination',
+                                60.1719,
+                                24.9414,
+                                'STANDARD',
+                                1,
+                                'MATCHING',
+                                $3,
+                                $4,
+                                $3,
+                                $3
+                        )
+                `,
+		rideRequestID,
+		driverFixture.UserID,
+		now,
+		now.Add(20*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf(
+			"create status-authority ride request: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, err := db.Exec(
+			cleanupCtx,
+			`DELETE FROM dispatch_offers WHERE id = $1`,
+			offerID,
+		); err != nil {
+			t.Logf(
+				"cleanup status-authority dispatch offer: %v",
+				err,
+			)
+		}
+
+		if _, err := db.Exec(
+			cleanupCtx,
+			`DELETE FROM ride_requests WHERE id = $1`,
+			rideRequestID,
+		); err != nil {
+			t.Logf(
+				"cleanup status-authority ride request: %v",
+				err,
+			)
+		}
+	}()
+
+	repo := NewDispatchOfferRepository(db)
+	createdBy := driverFixture.UserID
+
+	offer := &models.DispatchOffer{
+		ID:            offerID,
+		RideRequestID: rideRequestID,
+		DriverID:      driverFixture.DriverID,
+		VehicleID:     driverFixture.VehicleID,
+		CompanyID:     driverFixture.CompanyID,
+		BranchID:      driverFixture.BranchID,
+		FleetID:       driverFixture.FleetID,
+		Status:        "PENDING",
+		OfferedAt:     now,
+		ExpiresAt:     now.Add(2 * time.Minute),
+		CreatedBy:     &createdBy,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	if err := repo.Create(ctx, offer); err != nil {
+		t.Fatalf(
+			"create pending dispatch offer: %v",
+			err,
+		)
+	}
+
+	acceptedAt := now.Add(30 * time.Second)
+
+	if err := repo.UpdateStatus(
+		ctx,
+		offerID,
+		"ACCEPTED",
+		&acceptedAt,
+		nil,
+	); err != nil {
+		t.Fatalf(
+			"resolve PENDING offer as ACCEPTED: %v",
+			err,
+		)
+	}
+
+	rejectedAt := now.Add(45 * time.Second)
+	rejectionReason := "stale rewrite must fail"
+
+	err = repo.UpdateStatus(
+		ctx,
+		offerID,
+		"REJECTED",
+		&rejectedAt,
+		&rejectionReason,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound when rewriting resolved offer, got %v",
+			err,
+		)
+	}
+
+	var (
+		persistedStatus          string
+		persistedRespondedAt     *time.Time
+		persistedRejectionReason *string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+                        SELECT
+                                status,
+                                responded_at,
+                                rejection_reason
+                        FROM dispatch_offers
+                        WHERE id = $1
+                `,
+		offerID,
+	).Scan(
+		&persistedStatus,
+		&persistedRespondedAt,
+		&persistedRejectionReason,
+	); err != nil {
+		t.Fatalf(
+			"read resolved dispatch offer: %v",
+			err,
+		)
+	}
+
+	if persistedStatus != "ACCEPTED" {
+		t.Fatalf(
+			"stale rewrite changed resolved status: got %s want ACCEPTED",
+			persistedStatus,
+		)
+	}
+
+	if persistedRespondedAt == nil {
+		t.Fatal("expected accepted responded_at to remain set")
+	}
+
+	const timestampTolerance = time.Microsecond
+
+	respondedAtDifference :=
+		persistedRespondedAt.Sub(acceptedAt)
+	if respondedAtDifference < 0 {
+		respondedAtDifference = -respondedAtDifference
+	}
+
+	if respondedAtDifference > timestampTolerance {
+		t.Fatalf(
+			"stale rewrite changed responded_at: got %v want %v",
+			persistedRespondedAt,
+			acceptedAt,
+		)
+	}
+
+	if persistedRejectionReason != nil {
+		t.Fatalf(
+			"stale rewrite changed rejection reason: got %q want nil",
+			*persistedRejectionReason,
+		)
+	}
+}

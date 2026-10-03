@@ -317,6 +317,7 @@ func (r *DispatchOfferRepository) UpdateStatus(
 			rejection_reason = $4,
 			updated_at = NOW()
 		WHERE id = $1
+                  AND status = 'PENDING'
 	`
 
 	result, err := r.db.Exec(
