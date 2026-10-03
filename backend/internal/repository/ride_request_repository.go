@@ -27,9 +27,6 @@ type RideRequestRepository interface {
 	// Update persists changes to a ride request.
 	Update(ctx context.Context, request *models.RideRequest) error
 
-	// Delete performs a soft delete where supported.
-	Delete(ctx context.Context, id string) error
-
 	// UpdateStatus atomically changes lifecycle status only when the request
 	// still has the expected current status.
 	UpdateStatus(

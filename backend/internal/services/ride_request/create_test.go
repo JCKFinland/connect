@@ -93,14 +93,6 @@ func (r *createRideRequestTestRepository) Update(
 	return nil
 }
 
-func (r *createRideRequestTestRepository) Delete(
-	ctx context.Context,
-	id string,
-) error {
-
-	return nil
-}
-
 func (r *createRideRequestTestRepository) UpdateStatus(
 	ctx context.Context,
 	id string,
