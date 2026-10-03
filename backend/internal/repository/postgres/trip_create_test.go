@@ -347,4 +347,56 @@ func TestTripRepositoryCreateCanonicalizesInitialLifecycle(t *testing.T) {
 			persistedActualDurationSeconds,
 		)
 	}
+
+	// ride_request_id is the persistence identity of a trip's originating
+	// booking. Service-level row locks serialize normal dispatch, while the
+	// database unique index is the final backstop against stale or future
+	// callers creating a second trip for the same ride request.
+	duplicateTrip := &models.Trip{
+		BaseModel: models.BaseModel{
+			ID: uuid.NewString(),
+		},
+
+		RideRequestID: rideRequestID,
+		CustomerID:    customerID,
+
+		DriverID:  driverFixture.UserID,
+		VehicleID: driverFixture.VehicleID,
+		FleetID:   driverFixture.FleetID,
+
+		CompanyID: driverFixture.CompanyID,
+		BranchID:  driverFixture.BranchID,
+
+		AssignedAt: now,
+	}
+
+	if err := repo.Create(ctx, duplicateTrip); err == nil {
+		t.Fatal(
+			"expected second trip for the same ride request to be rejected",
+		)
+	}
+
+	var tripCount int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM trips
+			WHERE ride_request_id = $1
+		`,
+		rideRequestID,
+	).Scan(&tripCount); err != nil {
+		t.Fatalf(
+			"count trips after duplicate creation attempt: %v",
+			err,
+		)
+	}
+
+	if tripCount != 1 {
+		t.Fatalf(
+			"expected exactly one trip for ride request, got %d",
+			tripCount,
+		)
+	}
 }
