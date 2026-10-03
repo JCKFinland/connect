@@ -53,6 +53,12 @@ func (r *DispatchOfferRepository) Create(
 		offer.ID = uuid.NewString()
 	}
 
+	// A newly persisted offer has exactly one valid lifecycle shape.
+	// Resolution evidence is owned by UpdateStatus, never by Create.
+	offer.Status = "PENDING"
+	offer.RespondedAt = nil
+	offer.RejectionReason = nil
+
 	const query = `
 		INSERT INTO dispatch_offers
 		(
@@ -75,8 +81,8 @@ func (r *DispatchOfferRepository) Create(
 		VALUES
 		(
 			$1,$2,$3,$4,$5,
-			$6,$7,$8,$9,$10,
-			$11,$12,$13,$14,$15
+			$6,$7,'PENDING',$8,$9,
+			NULL,NULL,$10,$11,$12
 		)
 	`
 
@@ -90,11 +96,8 @@ func (r *DispatchOfferRepository) Create(
 		offer.CompanyID,
 		offer.BranchID,
 		offer.FleetID,
-		offer.Status,
 		offer.OfferedAt,
 		offer.ExpiresAt,
-		offer.RespondedAt,
-		offer.RejectionReason,
 		offer.CreatedBy,
 		offer.CreatedAt,
 		offer.UpdatedAt,
