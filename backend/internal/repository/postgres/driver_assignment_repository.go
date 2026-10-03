@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,6 +30,14 @@ func (r *DriverAssignmentRepository) Create(
 	ctx context.Context,
 	assignment *models.DriverAssignment,
 ) error {
+
+	if assignment == nil {
+		return fmt.Errorf("driver assignment is required")
+	}
+
+	if assignment.AssignedAt.IsZero() {
+		return fmt.Errorf("driver assignment assigned-at time is required")
+	}
 
 	// A newly created assignment is always active. UnassignedAt is
 	// lifecycle evidence owned exclusively by CloseAssignment.

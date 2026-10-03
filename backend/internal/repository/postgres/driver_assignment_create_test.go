@@ -345,3 +345,37 @@ func TestDriverAssignmentRepositoryCloseAssignmentTargetsExactAssignment(
 		)
 	}
 }
+
+func TestDriverAssignmentRepositoryCreateRejectsNilAssignment(t *testing.T) {
+	repo := &DriverAssignmentRepository{}
+
+	err := repo.Create(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected nil driver assignment to be rejected")
+	}
+
+	if err.Error() != "driver assignment is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDriverAssignmentRepositoryCreateRejectsZeroAssignedAt(t *testing.T) {
+	repo := &DriverAssignmentRepository{}
+
+	assignment := &models.DriverAssignment{
+		CompanyID: "company",
+		BranchID:  "branch",
+		FleetID:   "fleet",
+		DriverID:  "driver",
+		VehicleID: "vehicle",
+	}
+
+	err := repo.Create(context.Background(), assignment)
+	if err == nil {
+		t.Fatal("expected zero assigned-at time to be rejected")
+	}
+
+	if err.Error() != "driver assignment assigned-at time is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
