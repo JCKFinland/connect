@@ -7,13 +7,7 @@ import (
 )
 
 type DriverAssignmentRepository interface {
-
 	Create(
-		ctx context.Context,
-		assignment *models.DriverAssignment,
-	) error
-
-	Update(
 		ctx context.Context,
 		assignment *models.DriverAssignment,
 	) error
@@ -46,10 +40,5 @@ type DriverAssignmentRepository interface {
 	CloseAssignment(
 		ctx context.Context,
 		driverID string,
-	) error
-
-	Delete(
-		ctx context.Context,
-		id string,
 	) error
 }

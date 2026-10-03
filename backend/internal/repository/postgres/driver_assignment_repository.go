@@ -67,50 +67,6 @@ func (r *DriverAssignmentRepository) Create(
 	)
 }
 
-func (r *DriverAssignmentRepository) Update(
-	ctx context.Context,
-	assignment *models.DriverAssignment,
-) error {
-
-	query := `
-	UPDATE driver_assignments
-	SET
-		company_id=$2,
-		branch_id=$3,
-		fleet_id=$4,
-		driver_id=$5,
-		vehicle_id=$6,
-		assigned_at=$7,
-		unassigned_at=$8,
-		notes=$9,
-		updated_at=NOW()
-	WHERE id=$1
-	`
-
-	cmd, err := r.db.Exec(
-		ctx,
-		query,
-		assignment.ID,
-		assignment.CompanyID,
-		assignment.BranchID,
-		assignment.FleetID,
-		assignment.DriverID,
-		assignment.VehicleID,
-		assignment.AssignedAt,
-		assignment.UnassignedAt,
-		assignment.Notes,
-	)
-	if err != nil {
-		return err
-	}
-
-	if cmd.RowsAffected() == 0 {
-		return repository.ErrNotFound
-	}
-
-	return nil
-}
-
 func (r *DriverAssignmentRepository) GetByID(
 	ctx context.Context,
 	id string,
@@ -312,27 +268,6 @@ func (r *DriverAssignmentRepository) CloseAssignment(
 		`,
 		driverID,
 		now,
-	)
-	if err != nil {
-		return err
-	}
-
-	if cmd.RowsAffected() == 0 {
-		return repository.ErrNotFound
-	}
-
-	return nil
-}
-
-func (r *DriverAssignmentRepository) Delete(
-	ctx context.Context,
-	id string,
-) error {
-
-	cmd, err := r.db.Exec(
-		ctx,
-		`DELETE FROM driver_assignments WHERE id=$1`,
-		id,
 	)
 	if err != nil {
 		return err
