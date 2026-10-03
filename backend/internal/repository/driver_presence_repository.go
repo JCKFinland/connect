@@ -28,16 +28,6 @@ type DriverPresenceRepository interface {
 		driverID string,
 	) (*models.DriverPresence, error)
 
-	UpdateHeartbeat(
-		ctx context.Context,
-		driverID string,
-		latitude float64,
-		longitude float64,
-		heading float64,
-		speed float64,
-		accuracy float64,
-	) error
-
 	// UpdateHeartbeatIfOnline updates live driver location only when the
 	// driver currently has an online operational presence.
 	//

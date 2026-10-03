@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
@@ -133,51 +132,6 @@ func (r *DriverPresenceRepository) GetByDriverID(
 	}
 
 	return &p, nil
-}
-
-func (r *DriverPresenceRepository) UpdateHeartbeat(
-	ctx context.Context,
-	driverID string,
-	latitude float64,
-	longitude float64,
-	heading float64,
-	speed float64,
-	accuracy float64,
-) error {
-
-	query := `
-	UPDATE driver_presence
-	SET
-		latitude=$2,
-		longitude=$3,
-		heading=$4,
-		speed=$5,
-		accuracy=$6,
-		last_heartbeat_at=$7,
-		updated_at=NOW()
-	WHERE driver_id=$1
-	`
-
-	tag, err := r.db.Exec(
-		ctx,
-		query,
-		driverID,
-		latitude,
-		longitude,
-		heading,
-		speed,
-		accuracy,
-		time.Now().UTC(),
-	)
-	if err != nil {
-		return err
-	}
-
-	if tag.RowsAffected() == 0 {
-		return repository.ErrNotFound
-	}
-
-	return nil
 }
 
 func (r *DriverPresenceRepository) Delete(
