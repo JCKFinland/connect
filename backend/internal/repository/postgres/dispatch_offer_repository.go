@@ -312,6 +312,19 @@ func (r *DispatchOfferRepository) UpdateStatus(
 	rejectionReason *string,
 ) error {
 
+	// A PENDING offer may only resolve into a terminal state owned by
+	// the current dispatch-offer lifecycle. PENDING is not a resolution,
+	// and CANCELLED has no production resolution workflow.
+	switch status {
+	case "ACCEPTED", "REJECTED", "EXPIRED":
+		// Valid terminal resolution.
+	default:
+		return fmt.Errorf(
+			"invalid dispatch offer resolution status: %s",
+			status,
+		)
+	}
+
 	const query = `
 		UPDATE dispatch_offers
 		SET

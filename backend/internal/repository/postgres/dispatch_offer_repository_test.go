@@ -353,6 +353,89 @@ func TestDispatchOfferRepositoryUpdateStatusOnlyResolvesPendingOnce(
 		)
 	}
 
+	for _, invalidStatus := range []string{
+		"PENDING",
+		"CANCELLED",
+		"UNKNOWN",
+	} {
+		t.Run(
+			"reject target "+invalidStatus,
+			func(t *testing.T) {
+				invalidRespondedAt :=
+					now.Add(15 * time.Second)
+				invalidReason :=
+					"invalid resolution must not persist"
+
+				err := repo.UpdateStatus(
+					ctx,
+					offerID,
+					invalidStatus,
+					&invalidRespondedAt,
+					&invalidReason,
+				)
+				if err == nil {
+					t.Fatalf(
+						"expected target status %s to be rejected",
+						invalidStatus,
+					)
+				}
+
+				var (
+					status          string
+					respondedAt     *time.Time
+					rejectionReason *string
+				)
+
+				if err := db.QueryRow(
+					ctx,
+					`
+						SELECT
+							status,
+							responded_at,
+							rejection_reason
+						FROM dispatch_offers
+						WHERE id = $1
+					`,
+					offerID,
+				).Scan(
+					&status,
+					&respondedAt,
+					&rejectionReason,
+				); err != nil {
+					t.Fatalf(
+						"read offer after rejected target %s: %v",
+						invalidStatus,
+						err,
+					)
+				}
+
+				if status != "PENDING" {
+					t.Fatalf(
+						"invalid target %s changed status to %s",
+						invalidStatus,
+						status,
+					)
+				}
+
+				if respondedAt != nil {
+					t.Fatalf(
+						"invalid target %s changed responded_at to %v",
+						invalidStatus,
+						respondedAt,
+					)
+				}
+
+				if rejectionReason != nil {
+					t.Fatalf(
+						"invalid target %s changed rejection_reason to %q",
+						invalidStatus,
+						*rejectionReason,
+					)
+				}
+			},
+		)
+	}
+
 	acceptedAt := now.Add(30 * time.Second)
 
 	if err := repo.UpdateStatus(
