@@ -10,6 +10,7 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
+	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 )
 
@@ -301,6 +302,213 @@ func TestFleetRepositoryEnforcesCompanyMembershipReadAuthority(
 			"global repository read must retain both test fleets: fleetOne=%t fleetTwo=%t",
 			foundOne,
 			foundTwo,
+		)
+	}
+
+	// Membership-guarded descriptive update succeeds for the member's company.
+	err = repo.UpdateDetailsForCompanyMember(
+		ctx,
+		memberUserID,
+		&models.Fleet{
+			BaseModel: models.BaseModel{ID: fleetOneID},
+
+			// Deliberately hostile authority/lifecycle values. The repository
+			// operation must be structurally incapable of persisting them.
+			CompanyID:   companyTwoID,
+			BranchID:    branchTwoID,
+			Code:        "FL-UPDATED-ONE",
+			Name:        "Fleet Updated One",
+			Description: "membership guarded update",
+			IsActive:    false,
+		},
+	)
+	if err != nil {
+		t.Fatalf("update own-company fleet: %v", err)
+	}
+
+	var (
+		companyID   string
+		branchID    string
+		code        string
+		name        string
+		description string
+		isActive    bool
+	)
+
+	err = tx.QueryRow(
+		ctx,
+		`
+			SELECT
+				company_id,
+				branch_id,
+				code,
+				name,
+				description,
+				is_active
+			FROM fleets
+			WHERE id=$1
+		`,
+		fleetOneID,
+	).Scan(
+		&companyID,
+		&branchID,
+		&code,
+		&name,
+		&description,
+		&isActive,
+	)
+	if err != nil {
+		t.Fatalf("read updated own-company fleet: %v", err)
+	}
+
+	if companyID != companyOneID {
+		t.Fatalf(
+			"membership update changed company authority: want %s got %s",
+			companyOneID,
+			companyID,
+		)
+	}
+	if branchID != branchOneID {
+		t.Fatalf(
+			"membership update changed branch authority: want %s got %s",
+			branchOneID,
+			branchID,
+		)
+	}
+	if !isActive {
+		t.Fatal("membership update changed fleet activation state")
+	}
+	if code != "FL-UPDATED-ONE" ||
+		name != "Fleet Updated One" ||
+		description != "membership guarded update" {
+		t.Fatalf(
+			"membership update did not persist descriptive fields: code=%q name=%q description=%q",
+			code,
+			name,
+			description,
+		)
+	}
+
+	// The same member cannot mutate a fleet owned by another company.
+	err = repo.UpdateDetailsForCompanyMember(
+		ctx,
+		memberUserID,
+		&models.Fleet{
+			BaseModel:   models.BaseModel{ID: fleetTwoID},
+			Code:        "CROSS-TENANT",
+			Name:        "Cross Tenant Mutation",
+			Description: "must not persist",
+		},
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound for cross-company update, got %v",
+			err,
+		)
+	}
+
+	var fleetTwoName string
+	err = tx.QueryRow(
+		ctx,
+		`SELECT name FROM fleets WHERE id=$1`,
+		fleetTwoID,
+	).Scan(&fleetTwoName)
+	if err != nil {
+		t.Fatalf("read cross-company target after denied update: %v", err)
+	}
+	if fleetTwoName != "Fleet Read Fleet Two" {
+		t.Fatalf(
+			"cross-company fleet was mutated: got name %q",
+			fleetTwoName,
+		)
+	}
+
+	// A user with no company membership receives the same not-found result.
+	err = repo.UpdateDetailsForCompanyMember(
+		ctx,
+		noMembershipUserID,
+		&models.Fleet{
+			BaseModel: models.BaseModel{ID: fleetOneID},
+			Code:      "NO-MEMBERSHIP",
+			Name:      "No Membership Mutation",
+		},
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound without membership, got %v",
+			err,
+		)
+	}
+
+	// The unrestricted repository surface can modify descriptive fields, but
+	// is still structurally incapable of changing tenant/branch/active state.
+	err = repo.UpdateDetails(
+		ctx,
+		&models.Fleet{
+			BaseModel:   models.BaseModel{ID: fleetTwoID},
+			CompanyID:   companyOneID,
+			BranchID:    branchOneID,
+			Code:        "FL-GLOBAL-TWO",
+			Name:        "Fleet Global Two",
+			Description: "global descriptive update",
+			IsActive:    false,
+		},
+	)
+	if err != nil {
+		t.Fatalf("global descriptive update: %v", err)
+	}
+
+	err = tx.QueryRow(
+		ctx,
+		`
+			SELECT
+				company_id,
+				branch_id,
+				code,
+				name,
+				description,
+				is_active
+			FROM fleets
+			WHERE id=$1
+		`,
+		fleetTwoID,
+	).Scan(
+		&companyID,
+		&branchID,
+		&code,
+		&name,
+		&description,
+		&isActive,
+	)
+	if err != nil {
+		t.Fatalf("read globally updated fleet: %v", err)
+	}
+
+	if companyID != companyTwoID {
+		t.Fatalf(
+			"global descriptive update changed company authority: want %s got %s",
+			companyTwoID,
+			companyID,
+		)
+	}
+	if branchID != branchTwoID {
+		t.Fatalf(
+			"global descriptive update changed branch authority: want %s got %s",
+			branchTwoID,
+			branchID,
+		)
+	}
+	if !isActive {
+		t.Fatal("global descriptive update changed fleet activation state")
+	}
+	if code != "FL-GLOBAL-TWO" ||
+		name != "Fleet Global Two" ||
+		description != "global descriptive update" {
+		t.Fatalf(
+			"global update did not persist descriptive fields: code=%q name=%q description=%q",
+			code,
+			name,
+			description,
 		)
 	}
 }

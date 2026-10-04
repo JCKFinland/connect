@@ -62,9 +62,17 @@ func (r *fleetCreateRepositoryStub) ListActiveByCompanyAndBranch(
 	return nil, nil
 }
 
-func (r *fleetCreateRepositoryStub) Update(
-	context.Context,
-	*models.Fleet,
+func (r *fleetCreateRepositoryStub) UpdateDetails(
+	ctx context.Context,
+	fleet *models.Fleet,
+) error {
+	return nil
+}
+
+func (r *fleetCreateRepositoryStub) UpdateDetailsForCompanyMember(
+	ctx context.Context,
+	userID string,
+	fleet *models.Fleet,
 ) error {
 	return nil
 }

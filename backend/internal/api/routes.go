@@ -375,7 +375,11 @@ func RegisterRoutes(
 				fleetHandler.GetByID,
 			)
 
-			fleets.PUT("/:id", fleetHandler.Update)
+			fleets.PUT(
+				"/:id",
+				rbacMiddleware.RequirePermission("fleets.manage"),
+				fleetHandler.Update,
+			)
 
 			fleets.DELETE("/:id", fleetHandler.Delete)
 		}

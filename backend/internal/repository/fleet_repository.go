@@ -44,8 +44,18 @@ type FleetRepository interface {
 		branchID string,
 	) ([]*models.Fleet, error)
 
-	Update(
+	// UpdateDetails modifies descriptive fleet fields only. Tenant, branch, and
+	// activation authority cannot be changed through this operation.
+	UpdateDetails(
 		ctx context.Context,
+		fleet *models.Fleet,
+	) error
+
+	// UpdateDetailsForCompanyMember modifies descriptive fleet fields only when
+	// the user has explicit membership in the fleet's current company.
+	UpdateDetailsForCompanyMember(
+		ctx context.Context,
+		userID string,
 		fleet *models.Fleet,
 	) error
 

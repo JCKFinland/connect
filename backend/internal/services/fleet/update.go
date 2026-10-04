@@ -2,27 +2,23 @@ package fleet
 
 import (
 	"context"
+	"errors"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 )
 
+// Update modifies descriptive fields of a fleet within the authenticated
+// caller's tenant authority. Tenant, branch, and activation authority are
+// immutable through this operation.
 func (s *Service) Update(
 	ctx context.Context,
+	userID string,
 	id string,
 	req UpdateFleetRequest,
 ) error {
-
-	_, err := s.fleets.GetByID(
-		ctx,
-		id,
-	)
+	systemAdmin, err := s.isSystemAdmin(ctx, userID)
 	if err != nil {
-
-		if err == repository.ErrNotFound {
-			return ErrFleetNotFound
-		}
-
 		return err
 	}
 
@@ -30,25 +26,24 @@ func (s *Service) Update(
 		BaseModel: models.BaseModel{
 			ID: id,
 		},
-		CompanyID:   req.CompanyID,
-		BranchID:    req.BranchID,
 		Code:        req.Code,
 		Name:        req.Name,
 		Description: req.Description,
-		IsActive:    req.IsActive,
 	}
 
-	if err := s.fleets.Update(
-		ctx,
-		fleet,
-	); err != nil {
-
-		if err == repository.ErrNotFound {
-			return ErrFleetNotFound
-		}
-
-		return err
+	if systemAdmin {
+		err = s.fleets.UpdateDetails(ctx, fleet)
+	} else {
+		err = s.fleets.UpdateDetailsForCompanyMember(
+			ctx,
+			userID,
+			fleet,
+		)
 	}
 
-	return nil
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrFleetNotFound
+	}
+
+	return err
 }

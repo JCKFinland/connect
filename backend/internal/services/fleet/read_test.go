@@ -13,13 +13,17 @@ type fleetReadRepositoryStub struct {
 	fleet  *models.Fleet
 	fleets []*models.Fleet
 
-	globalGetCalls  int
-	memberGetCalls  int
-	globalListCalls int
-	memberListCalls int
+	globalGetCalls    int
+	memberGetCalls    int
+	globalListCalls   int
+	memberListCalls   int
+	globalUpdateCalls int
+	memberUpdateCalls int
 
 	memberUserID string
+	updated      *models.Fleet
 	err          error
+	updateErr    error
 }
 
 func (r *fleetReadRepositoryStub) Create(
@@ -91,11 +95,23 @@ func (r *fleetReadRepositoryStub) ListActiveByCompanyAndBranch(
 	return nil, nil
 }
 
-func (r *fleetReadRepositoryStub) Update(
+func (r *fleetReadRepositoryStub) UpdateDetails(
 	context.Context,
 	*models.Fleet,
 ) error {
-	return nil
+	r.globalUpdateCalls++
+	return r.updateErr
+}
+
+func (r *fleetReadRepositoryStub) UpdateDetailsForCompanyMember(
+	_ context.Context,
+	userID string,
+	fleet *models.Fleet,
+) error {
+	r.memberUpdateCalls++
+	r.memberUserID = userID
+	r.updated = fleet
+	return r.updateErr
 }
 
 func (r *fleetReadRepositoryStub) Delete(

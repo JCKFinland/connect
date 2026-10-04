@@ -372,41 +372,82 @@ func (r *FleetRepository) ListActiveByCompanyAndBranch(
 	return fleets, nil
 }
 
-func (r *FleetRepository) Update(
+// UpdateDetails modifies descriptive fleet fields only. Tenant, branch, and
+// activation authority cannot be changed through this repository operation.
+func (r *FleetRepository) UpdateDetails(
 	ctx context.Context,
 	fleet *models.Fleet,
 ) error {
-
-	query := `
-	UPDATE fleets
-	SET
-		company_id=$1,
-		branch_id=$2,
-		code=$3,
-		name=$4,
-		description=$5,
-		is_active=$6,
-		updated_at=NOW()
-	WHERE id=$7
-	AND deleted_at IS NULL;
+	const query = `
+		UPDATE fleets
+		SET
+			code=$2,
+			name=$3,
+			description=$4,
+			updated_at=NOW()
+		WHERE id=$1
+		  AND deleted_at IS NULL
 	`
 
-	cmd, err := r.db.Exec(
+	result, err := r.db.Exec(
 		ctx,
 		query,
-		fleet.CompanyID,
-		fleet.BranchID,
+		fleet.ID,
 		fleet.Code,
 		fleet.Name,
 		fleet.Description,
-		fleet.IsActive,
-		fleet.ID,
 	)
 	if err != nil {
 		return err
 	}
 
-	if cmd.RowsAffected() == 0 {
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateDetailsForCompanyMember modifies descriptive fleet fields only when
+// the user has explicit membership in the fleet's current company. The
+// membership check is part of the UPDATE so authorization cannot become stale
+// between a preceding read and the mutation.
+func (r *FleetRepository) UpdateDetailsForCompanyMember(
+	ctx context.Context,
+	userID string,
+	fleet *models.Fleet,
+) error {
+	const query = `
+		UPDATE fleets AS f
+		SET
+			code=$3,
+			name=$4,
+			description=$5,
+			updated_at=NOW()
+		WHERE f.id=$1
+		  AND f.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM company_memberships AS cm
+			WHERE cm.user_id=$2
+			  AND cm.company_id=f.company_id
+		  )
+	`
+
+	result, err := r.db.Exec(
+		ctx,
+		query,
+		fleet.ID,
+		userID,
+		fleet.Code,
+		fleet.Name,
+		fleet.Description,
+	)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
 		return repository.ErrNotFound
 	}
 

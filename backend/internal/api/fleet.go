@@ -231,44 +231,52 @@ func (h *FleetHandler) ListForDriver(
 func (h *FleetHandler) Update(
 	c *gin.Context,
 ) {
+	user, exists := middleware.CurrentUser(c)
+	if !exists || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
 
-	// Extracts target entity key from URL route parameter.
 	id := c.Param("id")
 
 	var req fleetservice.UpdateFleetRequest
 
-	// Extracts partial structural changes from incoming request payload body.
 	if err := c.ShouldBindJSON(&req); err != nil {
-
 		response.Error(
 			c,
 			http.StatusBadRequest,
 			"Invalid request body",
 			nil,
 		)
-
 		return
 	}
 
-	// Injects structural mutations straight to business database logic.
 	err := h.service.Update(
 		c.Request.Context(),
+		user.ID,
 		id,
 		req,
 	)
 	if err != nil {
+		if errors.Is(err, fleetservice.ErrFleetNotFound) {
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Fleet not found",
+				nil,
+			)
+			return
+		}
 
 		response.Error(
 			c,
 			http.StatusInternalServerError,
-			err.Error(),
+			"Failed to update fleet",
 			nil,
 		)
-
 		return
 	}
 
-	// Acknowledges success with HTTP 200 Status OK.
 	response.Success(
 		c,
 		http.StatusOK,

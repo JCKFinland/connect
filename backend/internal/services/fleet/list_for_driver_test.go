@@ -116,9 +116,17 @@ func (s *listForDriverFleetRepoStub) ListActiveByCompanyAndBranch(
 	return s.fleets, s.err
 }
 
-func (s *listForDriverFleetRepoStub) Update(
-	context.Context,
-	*models.Fleet,
+func (s *listForDriverFleetRepoStub) UpdateDetails(
+	ctx context.Context,
+	fleet *models.Fleet,
+) error {
+	return nil
+}
+
+func (s *listForDriverFleetRepoStub) UpdateDetailsForCompanyMember(
+	ctx context.Context,
+	userID string,
+	fleet *models.Fleet,
 ) error {
 	return nil
 }

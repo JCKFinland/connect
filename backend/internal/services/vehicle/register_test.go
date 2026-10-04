@@ -276,8 +276,16 @@ func (s *vehicleFleetRepositoryStub) ListActiveByCompanyAndBranch(
 	return nil, nil
 }
 
-func (r *vehicleFleetRepositoryStub) Update(
+func (r *vehicleFleetRepositoryStub) UpdateDetails(
 	ctx context.Context,
+	fleet *models.Fleet,
+) error {
+	return nil
+}
+
+func (r *vehicleFleetRepositoryStub) UpdateDetailsForCompanyMember(
+	ctx context.Context,
+	userID string,
 	fleet *models.Fleet,
 ) error {
 	return nil
