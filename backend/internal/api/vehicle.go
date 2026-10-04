@@ -93,12 +93,17 @@ func (h *VehicleHandler) GetByID(
 	c *gin.Context,
 ) {
 
-	// Extracts the unique ID variable dynamically from the request path (e.g., /companies/:id).
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
 	id := c.Param("id")
 
-	// Queries the service layer to locate the company record.
 	vehicle, err := h.service.GetByID(
 		c.Request.Context(),
+		user.ID,
 		id,
 	)
 	if err != nil {
@@ -128,9 +133,15 @@ func (h *VehicleHandler) List(
 	c *gin.Context,
 ) {
 
-	// Commands the service layer to fetch all available records.
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
 	vehicles, err := h.service.List(
 		c.Request.Context(),
+		user.ID,
 	)
 	if err != nil {
 

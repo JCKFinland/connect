@@ -13,6 +13,15 @@ import (
 type vehicleRepositoryStub struct {
 	created   *models.Vehicle
 	createErr error
+
+	vehicle         *models.Vehicle
+	vehicles        []models.Vehicle
+	getErr          error
+	listErr         error
+	globalGetCalls  int
+	memberGetCalls  int
+	globalListCalls int
+	memberListCalls int
 }
 
 func (r *vehicleRepositoryStub) Create(
@@ -33,13 +42,50 @@ func (r *vehicleRepositoryStub) GetByID(
 	ctx context.Context,
 	id string,
 ) (*models.Vehicle, error) {
-	return nil, repository.ErrNotFound
+	r.globalGetCalls++
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	if r.vehicle == nil {
+		return nil, repository.ErrNotFound
+	}
+	return r.vehicle, nil
+}
+
+func (r *vehicleRepositoryStub) GetByIDForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) (*models.Vehicle, error) {
+	r.memberGetCalls++
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	if r.vehicle == nil {
+		return nil, repository.ErrNotFound
+	}
+	return r.vehicle, nil
 }
 
 func (r *vehicleRepositoryStub) List(
 	ctx context.Context,
 ) ([]models.Vehicle, error) {
-	return nil, nil
+	r.globalListCalls++
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	return r.vehicles, nil
+}
+
+func (r *vehicleRepositoryStub) ListForCompanyMember(
+	ctx context.Context,
+	userID string,
+) ([]models.Vehicle, error) {
+	r.memberListCalls++
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	return r.vehicles, nil
 }
 
 func (r *vehicleRepositoryStub) Update(

@@ -146,6 +146,74 @@ func (r *VehicleRepository) GetByID(
 	return &vehicle, nil
 }
 
+// GetByIDForCompanyMember retrieves a vehicle only when the user has
+// explicit membership in the vehicle's company.
+func (r *VehicleRepository) GetByIDForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) (*models.Vehicle, error) {
+
+	query := `
+		SELECT
+			v.id,
+			v.company_id,
+			v.branch_id,
+			v.fleet_id,
+			v.registration_number,
+			v.vin,
+			v.make,
+			v.model,
+			v.model_year,
+			v.color,
+			v.vehicle_type,
+			v.fuel_type,
+			v.seating_capacity,
+			v.is_active,
+			v.created_at,
+			v.updated_at,
+			v.deleted_at
+		FROM vehicles v
+		INNER JOIN company_memberships cm
+			ON cm.company_id = v.company_id
+		   AND cm.user_id = $1
+		WHERE v.id = $2
+		  AND v.deleted_at IS NULL
+	`
+
+	var vehicle models.Vehicle
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		userID,
+		id,
+	).Scan(
+		&vehicle.ID,
+		&vehicle.CompanyID,
+		&vehicle.BranchID,
+		&vehicle.FleetID,
+		&vehicle.RegistrationNumber,
+		&vehicle.VIN,
+		&vehicle.Make,
+		&vehicle.Model,
+		&vehicle.ModelYear,
+		&vehicle.Color,
+		&vehicle.VehicleType,
+		&vehicle.FuelType,
+		&vehicle.SeatingCapacity,
+		&vehicle.IsActive,
+		&vehicle.CreatedAt,
+		&vehicle.UpdatedAt,
+		&vehicle.DeletedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &vehicle, nil
+}
+
 // List returns all active vehicles.
 func (r *VehicleRepository) List(
 	ctx context.Context,
@@ -207,6 +275,79 @@ func (r *VehicleRepository) List(
 			&vehicle.DeletedAt,
 		)
 		if err != nil {
+			return nil, err
+		}
+
+		vehicles = append(vehicles, vehicle)
+	}
+
+	return vehicles, rows.Err()
+}
+
+// ListForCompanyMember returns vehicles only from companies in which the
+// user has explicit membership.
+func (r *VehicleRepository) ListForCompanyMember(
+	ctx context.Context,
+	userID string,
+) ([]models.Vehicle, error) {
+
+	query := `
+		SELECT
+			v.id,
+			v.company_id,
+			v.branch_id,
+			v.fleet_id,
+			v.registration_number,
+			v.vin,
+			v.make,
+			v.model,
+			v.model_year,
+			v.color,
+			v.vehicle_type,
+			v.fuel_type,
+			v.seating_capacity,
+			v.is_active,
+			v.created_at,
+			v.updated_at,
+			v.deleted_at
+		FROM vehicles v
+		INNER JOIN company_memberships cm
+			ON cm.company_id = v.company_id
+		   AND cm.user_id = $1
+		WHERE v.deleted_at IS NULL
+		ORDER BY v.created_at DESC
+	`
+
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	vehicles := make([]models.Vehicle, 0)
+
+	for rows.Next() {
+		var vehicle models.Vehicle
+
+		if err := rows.Scan(
+			&vehicle.ID,
+			&vehicle.CompanyID,
+			&vehicle.BranchID,
+			&vehicle.FleetID,
+			&vehicle.RegistrationNumber,
+			&vehicle.VIN,
+			&vehicle.Make,
+			&vehicle.Model,
+			&vehicle.ModelYear,
+			&vehicle.Color,
+			&vehicle.VehicleType,
+			&vehicle.FuelType,
+			&vehicle.SeatingCapacity,
+			&vehicle.IsActive,
+			&vehicle.CreatedAt,
+			&vehicle.UpdatedAt,
+			&vehicle.DeletedAt,
+		); err != nil {
 			return nil, err
 		}
 
