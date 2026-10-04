@@ -26,6 +26,18 @@ type fleetReadRepositoryStub struct {
 	updateErr    error
 }
 
+func (r *fleetReadRepositoryStub) Deactivate(context.Context, string) error { return nil }
+func (r *fleetReadRepositoryStub) DeactivateForCompanyMember(context.Context, string, string) error {
+	return nil
+}
+func (r *fleetReadRepositoryStub) Reactivate(context.Context, string) error { return nil }
+func (r *fleetReadRepositoryStub) ReactivateForCompanyMember(context.Context, string, string) error {
+	return nil
+}
+func (r *fleetReadRepositoryStub) IsOwningBranchActive(context.Context, string) (bool, error) {
+	return true, nil
+}
+
 func (r *fleetReadRepositoryStub) Create(
 	context.Context,
 	*models.Fleet,

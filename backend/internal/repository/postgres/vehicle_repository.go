@@ -542,6 +542,30 @@ func (r *VehicleRepository) DeactivateForCompanyMember(
 	return nil
 }
 
+// GetOwningFleetID returns the current fleet ID for a non-deleted vehicle.
+func (r *VehicleRepository) GetOwningFleetID(
+	ctx context.Context,
+	vehicleID string,
+) (string, error) {
+	const query = `
+		SELECT fleet_id
+		FROM vehicles
+		WHERE id=$1
+		  AND deleted_at IS NULL
+	`
+
+	var fleetID string
+	err := r.db.QueryRow(ctx, query, vehicleID).Scan(&fleetID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", repository.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+
+	return fleetID, nil
+}
+
 // IsOwningFleetActive reports whether a non-deleted vehicle's current fleet
 // exists, is non-deleted, and is operationally active.
 func (r *VehicleRepository) IsOwningFleetActive(
@@ -680,6 +704,35 @@ func (r *VehicleRepository) HasNonDeletedByFleet(
 			SELECT 1
 			FROM vehicles
 			WHERE fleet_id=$1
+			  AND deleted_at IS NULL
+		)
+	`
+
+	var exists bool
+	if err := r.db.QueryRow(
+		ctx,
+		query,
+		fleetID,
+	).Scan(&exists); err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
+// HasActiveByFleet reports whether a fleet contains any active,
+// non-archived vehicle.
+func (r *VehicleRepository) HasActiveByFleet(
+	ctx context.Context,
+	fleetID string,
+) (bool, error) {
+
+	const query = `
+		SELECT EXISTS (
+			SELECT 1
+			FROM vehicles
+			WHERE fleet_id=$1
+			  AND is_active=TRUE
 			  AND deleted_at IS NULL
 		)
 	`

@@ -30,6 +30,18 @@ type vehicleRepositoryStub struct {
 	memberListCalls int
 }
 
+func (r *vehicleFleetRepositoryStub) Deactivate(context.Context, string) error { return nil }
+func (r *vehicleFleetRepositoryStub) DeactivateForCompanyMember(context.Context, string, string) error {
+	return nil
+}
+func (r *vehicleFleetRepositoryStub) Reactivate(context.Context, string) error { return nil }
+func (r *vehicleFleetRepositoryStub) ReactivateForCompanyMember(context.Context, string, string) error {
+	return nil
+}
+func (r *vehicleFleetRepositoryStub) IsOwningBranchActive(context.Context, string) (bool, error) {
+	return true, nil
+}
+
 func (r *vehicleRepositoryStub) Create(
 	ctx context.Context,
 	vehicle *models.Vehicle,
@@ -114,6 +126,13 @@ func (r *vehicleRepositoryStub) UpdateDetailsForCompanyMember(
 	return r.updateErr
 }
 
+func (r *vehicleRepositoryStub) GetOwningFleetID(
+	context.Context,
+	string,
+) (string, error) {
+	return "", nil
+}
+
 func (r *vehicleRepositoryStub) Deactivate(
 	ctx context.Context,
 	id string,
@@ -148,6 +167,10 @@ func (r *vehicleRepositoryStub) HasNonDeletedByFleet(
 	ctx context.Context,
 	fleetID string,
 ) (bool, error) {
+	return false, nil
+}
+
+func (r *vehicleRepositoryStub) HasActiveByFleet(context.Context, string) (bool, error) {
 	return false, nil
 }
 

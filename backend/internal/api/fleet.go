@@ -342,3 +342,117 @@ func (h *FleetHandler) Delete(
 		nil,
 	)
 }
+
+// Deactivate makes a fleet operationally inactive when it has no active,
+// non-archived vehicles.
+func (h *FleetHandler) Deactivate(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
+	id := c.Param("id")
+
+	err := h.service.Deactivate(
+		c.Request.Context(),
+		user.ID,
+		id,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(
+			err,
+			repository.ErrNotFound,
+		):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Fleet not found",
+				nil,
+			)
+
+		case errors.Is(
+			err,
+			fleetservice.ErrFleetHasActiveVehicles,
+		):
+			response.Error(
+				c,
+				http.StatusConflict,
+				err.Error(),
+				nil,
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
+
+		return
+	}
+
+	response.Success(
+		c,
+		http.StatusOK,
+		"Fleet deactivated successfully",
+		nil,
+	)
+}
+
+// Reactivate restores operational eligibility for a fleet whose owning branch
+// is itself active and non-archived.
+func (h *FleetHandler) Reactivate(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
+	id := c.Param("id")
+
+	err := h.service.Reactivate(
+		c.Request.Context(),
+		user.ID,
+		id,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(
+			err,
+			repository.ErrNotFound,
+		):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Fleet not found",
+				nil,
+			)
+
+		case errors.Is(
+			err,
+			fleetservice.ErrFleetBranchInactive,
+		):
+			response.Error(
+				c,
+				http.StatusConflict,
+				err.Error(),
+				nil,
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
+
+		return
+	}
+
+	response.Success(
+		c,
+		http.StatusOK,
+		"Fleet reactivated successfully",
+		nil,
+	)
+}

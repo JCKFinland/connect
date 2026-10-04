@@ -525,3 +525,149 @@ func (r *FleetRepository) ArchiveForCompanyMember(
 
 	return nil
 }
+
+// Deactivate marks a non-deleted fleet operationally inactive.
+func (r *FleetRepository) Deactivate(
+	ctx context.Context,
+	id string,
+) error {
+	const query = `
+		UPDATE fleets
+		SET is_active=FALSE, updated_at=NOW()
+		WHERE id=$1
+		  AND deleted_at IS NULL
+	`
+
+	result, err := r.db.Exec(ctx, query, id)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
+// DeactivateForCompanyMember marks a non-deleted fleet inactive only when the
+// authenticated user has explicit membership in its current company.
+func (r *FleetRepository) DeactivateForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+	const query = `
+		UPDATE fleets AS f
+		SET is_active=FALSE, updated_at=NOW()
+		WHERE f.id=$1
+		  AND f.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM company_memberships AS cm
+			WHERE cm.company_id=f.company_id
+			  AND cm.user_id=$2
+		  )
+	`
+
+	result, err := r.db.Exec(ctx, query, id, userID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
+// IsOwningBranchActive reports whether a non-deleted fleet's owning branch
+// exists, is non-deleted, and is operationally active.
+func (r *FleetRepository) IsOwningBranchActive(
+	ctx context.Context,
+	fleetID string,
+) (bool, error) {
+	const query = `
+		SELECT b.is_active
+		FROM fleets AS f
+		JOIN branches AS b ON b.id=f.branch_id
+		WHERE f.id=$1
+		  AND f.deleted_at IS NULL
+		  AND b.deleted_at IS NULL
+	`
+
+	var active bool
+	err := r.db.QueryRow(ctx, query, fleetID).Scan(&active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, repository.ErrNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	return active, nil
+}
+
+// Reactivate marks a non-deleted fleet operationally active only while its
+// owning branch remains active and non-deleted.
+func (r *FleetRepository) Reactivate(
+	ctx context.Context,
+	id string,
+) error {
+	const query = `
+		UPDATE fleets AS f
+		SET is_active=TRUE, updated_at=NOW()
+		WHERE f.id=$1
+		  AND f.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM branches AS b
+			WHERE b.id=f.branch_id
+			  AND b.is_active=TRUE
+			  AND b.deleted_at IS NULL
+		  )
+	`
+
+	result, err := r.db.Exec(ctx, query, id)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
+// ReactivateForCompanyMember marks a non-deleted fleet active only when the
+// authenticated user has explicit membership in its current company and its
+// owning branch remains active and non-deleted.
+func (r *FleetRepository) ReactivateForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+	const query = `
+		UPDATE fleets AS f
+		SET is_active=TRUE, updated_at=NOW()
+		WHERE f.id=$1
+		  AND f.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM company_memberships AS cm
+			WHERE cm.company_id=f.company_id
+			  AND cm.user_id=$2
+		  )
+		  AND EXISTS (
+			SELECT 1
+			FROM branches AS b
+			WHERE b.id=f.branch_id
+			  AND b.is_active=TRUE
+			  AND b.deleted_at IS NULL
+		  )
+	`
+
+	result, err := r.db.Exec(ctx, query, id, userID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}

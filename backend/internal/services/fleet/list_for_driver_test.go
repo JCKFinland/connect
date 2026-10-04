@@ -14,6 +14,18 @@ type listForDriverDriverRepoStub struct {
 	err    error
 }
 
+func (r *listForDriverFleetRepoStub) Deactivate(context.Context, string) error { return nil }
+func (r *listForDriverFleetRepoStub) DeactivateForCompanyMember(context.Context, string, string) error {
+	return nil
+}
+func (r *listForDriverFleetRepoStub) Reactivate(context.Context, string) error { return nil }
+func (r *listForDriverFleetRepoStub) ReactivateForCompanyMember(context.Context, string, string) error {
+	return nil
+}
+func (r *listForDriverFleetRepoStub) IsOwningBranchActive(context.Context, string) (bool, error) {
+	return true, nil
+}
+
 func (s *listForDriverDriverRepoStub) Create(
 	context.Context,
 	*models.Driver,

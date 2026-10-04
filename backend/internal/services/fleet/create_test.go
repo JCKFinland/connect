@@ -14,6 +14,18 @@ type fleetCreateRepositoryStub struct {
 	err     error
 }
 
+func (r *fleetCreateRepositoryStub) Deactivate(context.Context, string) error { return nil }
+func (r *fleetCreateRepositoryStub) DeactivateForCompanyMember(context.Context, string, string) error {
+	return nil
+}
+func (r *fleetCreateRepositoryStub) Reactivate(context.Context, string) error { return nil }
+func (r *fleetCreateRepositoryStub) ReactivateForCompanyMember(context.Context, string, string) error {
+	return nil
+}
+func (r *fleetCreateRepositoryStub) IsOwningBranchActive(context.Context, string) (bool, error) {
+	return true, nil
+}
+
 func (r *fleetCreateRepositoryStub) Create(
 	_ context.Context,
 	fleet *models.Fleet,

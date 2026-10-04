@@ -74,4 +74,41 @@ type FleetRepository interface {
 		userID string,
 		id string,
 	) error
+
+	// Deactivate marks a non-deleted fleet operationally inactive.
+	Deactivate(
+		ctx context.Context,
+		id string,
+	) error
+
+	// DeactivateForCompanyMember marks a fleet inactive only when the user has
+	// explicit membership in the fleet's current company.
+	DeactivateForCompanyMember(
+		ctx context.Context,
+		userID string,
+		id string,
+	) error
+
+	// Reactivate marks a non-deleted fleet operationally active only when its
+	// owning branch remains active and non-deleted.
+	Reactivate(
+		ctx context.Context,
+		id string,
+	) error
+
+	// ReactivateForCompanyMember marks a fleet active only when the user has
+	// explicit membership in its current company and its owning branch remains
+	// active and non-deleted.
+	ReactivateForCompanyMember(
+		ctx context.Context,
+		userID string,
+		id string,
+	) error
+
+	// IsOwningBranchActive reports whether the fleet's current branch exists,
+	// is non-deleted, and is operationally active.
+	IsOwningBranchActive(
+		ctx context.Context,
+		fleetID string,
+	) (bool, error)
 }

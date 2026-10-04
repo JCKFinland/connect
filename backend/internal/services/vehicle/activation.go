@@ -133,6 +133,7 @@ func (s *Service) Reactivate(
 
 	if s == nil ||
 		s.db == nil ||
+		s.vehicles == nil ||
 		s.userRoles == nil ||
 		userID == "" ||
 		id == "" {
@@ -151,10 +152,31 @@ func (s *Service) Reactivate(
 		)
 	}
 
+	fleetID, err := s.vehicles.GetOwningFleetID(
+		ctx,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+
 	return postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
 		func(tx pgx.Tx) error {
+
+			// Fleet lifecycle decisions serialize before vehicle lifecycle
+			// decisions whenever both resources are involved.
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"fleet:"+fleetID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock owning fleet for vehicle reactivation: %w",
+					err,
+				)
+			}
 
 			if err := postgresrepo.AcquireTransactionAdvisoryLock(
 				ctx,
@@ -172,21 +194,35 @@ func (s *Service) Reactivate(
 					tx,
 				)
 
+			var vehicleFleetID string
+
 			if systemAdmin {
-				if _, err := vehicles.GetByID(
+				vehicle, err := vehicles.GetByID(
 					ctx,
 					id,
-				); err != nil {
+				)
+				if err != nil {
 					return err
 				}
+				vehicleFleetID = vehicle.FleetID
 			} else {
-				if _, err := vehicles.GetByIDForCompanyMember(
+				vehicle, err := vehicles.GetByIDForCompanyMember(
 					ctx,
 					userID,
 					id,
-				); err != nil {
+				)
+				if err != nil {
 					return err
 				}
+				vehicleFleetID = vehicle.FleetID
+			}
+
+			// Fail closed if the authoritative row no longer belongs to the
+			// fleet whose lifecycle lock was acquired.
+			if vehicleFleetID != fleetID {
+				return fmt.Errorf(
+					"vehicle fleet changed during reactivation",
+				)
 			}
 
 			fleetActive, err :=

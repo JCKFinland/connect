@@ -386,6 +386,18 @@ func RegisterRoutes(
 				rbacMiddleware.RequirePermission("fleets.manage"),
 				fleetHandler.Delete,
 			)
+
+			fleets.PATCH(
+				"/:id/deactivate",
+				rbacMiddleware.RequirePermission("fleets.manage"),
+				fleetHandler.Deactivate,
+			)
+
+			fleets.PATCH(
+				"/:id/reactivate",
+				rbacMiddleware.RequirePermission("fleets.manage"),
+				fleetHandler.Reactivate,
+			)
 		}
 
 		vehicles := v1.Group("/vehicles")

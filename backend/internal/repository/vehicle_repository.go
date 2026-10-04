@@ -56,6 +56,13 @@ type VehicleRepository interface {
 		vehicle *models.Vehicle,
 	) error
 
+	// GetOwningFleetID returns the current fleet ID for a non-deleted vehicle.
+	// Lifecycle services use it to establish fleet-before-vehicle lock ordering.
+	GetOwningFleetID(
+		ctx context.Context,
+		vehicleID string,
+	) (string, error)
+
 	// Deactivate marks a non-deleted vehicle operationally inactive.
 	Deactivate(
 		ctx context.Context,
@@ -89,6 +96,13 @@ type VehicleRepository interface {
 	// HasNonDeletedByFleet reports whether the fleet still contains at least
 	// one non-archived vehicle, regardless of operational activation state.
 	HasNonDeletedByFleet(
+		ctx context.Context,
+		fleetID string,
+	) (bool, error)
+
+	// HasActiveByFleet reports whether the fleet contains at least one active,
+	// non-archived vehicle.
+	HasActiveByFleet(
 		ctx context.Context,
 		fleetID string,
 	) (bool, error)
