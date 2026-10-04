@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
+	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/repository"
 )
 
 func TestVehicleRepositoryEnforcesCompanyMembershipReadAuthority(
@@ -268,9 +269,9 @@ func TestVehicleRepositoryEnforcesCompanyMembershipReadAuthority(
 		memberUserID,
 		vehicleTwoID,
 	)
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf(
-			"expected cross-company vehicle to be hidden as not found, got %v",
+			"expected repository.ErrNotFound for cross-company vehicle, got %v",
 			err,
 		)
 	}
@@ -339,6 +340,155 @@ func TestVehicleRepositoryEnforcesCompanyMembershipReadAuthority(
 			"global repository read must retain both test vehicles: vehicleOne=%t vehicleTwo=%t",
 			foundOne,
 			foundTwo,
+		)
+	}
+
+	// A membership-guarded descriptive update must change only descriptive
+	// fields. Hostile authority values on the model must never reach SQL.
+	hostileCompanyID := uuid.NewString()
+	hostileBranchID := uuid.NewString()
+	hostileFleetID := uuid.NewString()
+	updatedVIN := "UPDATEDVIN1234567"
+
+	err = repo.UpdateDetailsForCompanyMember(
+		ctx,
+		memberUserID,
+		&models.Vehicle{
+			BaseModel: models.BaseModel{
+				ID: vehicleOneID,
+			},
+			CompanyID:          hostileCompanyID,
+			BranchID:           hostileBranchID,
+			FleetID:            hostileFleetID,
+			RegistrationNumber: "UPD-123",
+			VIN:                &updatedVIN,
+			Make:               "Volvo",
+			Model:              "EX30",
+			ModelYear:          2026,
+			Color:              "Blue",
+			VehicleType:        "SUV",
+			FuelType:           "EV",
+			SeatingCapacity:    5,
+			IsActive:           false,
+		},
+	)
+	if err != nil {
+		t.Fatalf("membership-guarded descriptive update: %v", err)
+	}
+
+	updatedVehicle, err := repo.GetByID(ctx, vehicleOneID)
+	if err != nil {
+		t.Fatalf("get vehicle after descriptive update: %v", err)
+	}
+
+	if updatedVehicle.RegistrationNumber != "UPD-123" ||
+		updatedVehicle.VIN == nil ||
+		*updatedVehicle.VIN != updatedVIN ||
+		updatedVehicle.Make != "Volvo" ||
+		updatedVehicle.Model != "EX30" ||
+		updatedVehicle.ModelYear != 2026 ||
+		updatedVehicle.Color != "Blue" ||
+		updatedVehicle.VehicleType != "SUV" ||
+		updatedVehicle.FuelType != "EV" ||
+		updatedVehicle.SeatingCapacity != 5 {
+		t.Fatalf(
+			"descriptive fields were not updated as expected: %#v",
+			updatedVehicle,
+		)
+	}
+
+	if updatedVehicle.CompanyID != companyOneID {
+		t.Fatalf(
+			"company authority changed: expected %s, got %s",
+			companyOneID,
+			updatedVehicle.CompanyID,
+		)
+	}
+	if updatedVehicle.BranchID != branchOneID {
+		t.Fatalf(
+			"branch authority changed: expected %s, got %s",
+			branchOneID,
+			updatedVehicle.BranchID,
+		)
+	}
+	if updatedVehicle.FleetID != fleetOneID {
+		t.Fatalf(
+			"fleet authority changed: expected %s, got %s",
+			fleetOneID,
+			updatedVehicle.FleetID,
+		)
+	}
+	if !updatedVehicle.IsActive {
+		t.Fatal("activation authority changed through descriptive update")
+	}
+
+	// Membership in company one must not authorize mutation of company two.
+	err = repo.UpdateDetailsForCompanyMember(
+		ctx,
+		memberUserID,
+		&models.Vehicle{
+			BaseModel: models.BaseModel{
+				ID: vehicleTwoID,
+			},
+			RegistrationNumber: "DENIED-1",
+			Make:               "Denied",
+			Model:              "Denied",
+			ModelYear:          2026,
+			VehicleType:        "SEDAN",
+			FuelType:           "HYBRID",
+			SeatingCapacity:    4,
+		},
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound for cross-company update, got %v",
+			err,
+		)
+	}
+
+	vehicleTwoAfterDeniedUpdate, err := repo.GetByID(ctx, vehicleTwoID)
+	if err != nil {
+		t.Fatalf("get cross-company vehicle after denied update: %v", err)
+	}
+	if vehicleTwoAfterDeniedUpdate.RegistrationNumber != "VR-"+vehicleTwoID[:8] {
+		t.Fatalf(
+			"cross-company vehicle was mutated: registration=%s",
+			vehicleTwoAfterDeniedUpdate.RegistrationNumber,
+		)
+	}
+
+	// A user with no membership must not mutate even an otherwise valid target.
+	err = repo.UpdateDetailsForCompanyMember(
+		ctx,
+		noMembershipUserID,
+		&models.Vehicle{
+			BaseModel: models.BaseModel{
+				ID: vehicleOneID,
+			},
+			RegistrationNumber: "DENIED-2",
+			Make:               "Denied",
+			Model:              "Denied",
+			ModelYear:          2026,
+			VehicleType:        "SEDAN",
+			FuelType:           "HYBRID",
+			SeatingCapacity:    4,
+		},
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound without company membership, got %v",
+			err,
+		)
+	}
+
+	vehicleOneAfterDeniedUpdate, err := repo.GetByID(ctx, vehicleOneID)
+	if err != nil {
+		t.Fatalf("get own-company vehicle after denied update: %v", err)
+	}
+	if vehicleOneAfterDeniedUpdate.RegistrationNumber != "UPD-123" {
+		t.Fatalf(
+			"vehicle changed after no-membership update: registration=%s",
+			vehicleOneAfterDeniedUpdate.RegistrationNumber,
 		)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/JCKFinland/connect/backend/internal/middleware"
+	"github.com/JCKFinland/connect/backend/internal/repository"
 
 	// References the business logic package tailored explicitly to taxi fleet metadata.
 	"github.com/JCKFinland/connect/backend/internal/services/vehicle"
@@ -164,36 +165,52 @@ func (h *VehicleHandler) List(
 	)
 }
 
-// Update changes attributes (e.g., name, phone, status) of an existing company.
+// Update changes descriptive fields of a vehicle within the authenticated
+// user's tenant authority.
 func (h *VehicleHandler) Update(
 	c *gin.Context,
 ) {
+	user, exists := middleware.CurrentUser(c)
+	if !exists {
+		response.Error(
+			c,
+			http.StatusUnauthorized,
+			"Unauthorized",
+			nil,
+		)
+		return
+	}
 
-	// Extracts target entity key from URL route parameter.
 	id := c.Param("id")
 
 	var req vehicle.UpdateVehicleRequest
 
-	// Extracts partial structural changes from incoming request payload body.
 	if err := c.ShouldBindJSON(&req); err != nil {
-
 		response.Error(
 			c,
 			http.StatusBadRequest,
 			"Invalid request body",
 			nil,
 		)
-
 		return
 	}
 
-	// Injects structural mutations straight to business database logic.
 	err := h.service.Update(
 		c.Request.Context(),
+		user.ID,
 		id,
 		req,
 	)
 	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Vehicle not found",
+				nil,
+			)
+			return
+		}
 
 		response.Error(
 			c,
@@ -201,11 +218,9 @@ func (h *VehicleHandler) Update(
 			err.Error(),
 			nil,
 		)
-
 		return
 	}
 
-	// Acknowledges success with HTTP 200 Status OK.
 	response.Success(
 		c,
 		http.StatusOK,

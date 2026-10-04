@@ -6,20 +6,28 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 )
 
-// Update modifies an existing vehicle.
+// Update modifies descriptive fields of a vehicle within the authenticated
+// caller's tenant authority. Tenant, fleet, and activation authority are
+// immutable through this operation.
 func (s *Service) Update(
 	ctx context.Context,
+	userID string,
 	id string,
 	req UpdateVehicleRequest,
 ) error {
+	if userID == "" {
+		return ErrVehicleCreationAccessDenied
+	}
+
+	systemAdmin, err := s.isSystemAdmin(ctx, userID)
+	if err != nil {
+		return err
+	}
 
 	vehicle := &models.Vehicle{
 		BaseModel: models.BaseModel{
 			ID: id,
 		},
-		CompanyID:          req.CompanyID,
-		BranchID:           req.BranchID,
-		FleetID:            req.FleetID,
 		RegistrationNumber: req.RegistrationNumber,
 		VIN:                normalizeVIN(req.VIN),
 		Make:               req.Make,
@@ -29,11 +37,18 @@ func (s *Service) Update(
 		VehicleType:        req.VehicleType,
 		FuelType:           req.FuelType,
 		SeatingCapacity:    req.SeatingCapacity,
-		IsActive:           req.IsActive,
 	}
 
-	return s.vehicles.Update(
+	if systemAdmin {
+		return s.vehicles.UpdateDetails(
+			ctx,
+			vehicle,
+		)
+	}
+
+	return s.vehicles.UpdateDetailsForCompanyMember(
 		ctx,
+		userID,
 		vehicle,
 	)
 }

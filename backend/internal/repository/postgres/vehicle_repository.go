@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
@@ -140,6 +142,9 @@ func (r *VehicleRepository) GetByID(
 	)
 
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, repository.ErrNotFound
+		}
 		return nil, err
 	}
 
@@ -208,6 +213,9 @@ func (r *VehicleRepository) GetByIDForCompanyMember(
 		&vehicle.DeletedAt,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, repository.ErrNotFound
+		}
 		return nil, err
 	}
 
@@ -357,40 +365,33 @@ func (r *VehicleRepository) ListForCompanyMember(
 	return vehicles, rows.Err()
 }
 
-// Update modifies an existing vehicle.
-func (r *VehicleRepository) Update(
+// UpdateDetails modifies descriptive vehicle fields only. Tenant, fleet, and
+// activation authority cannot be changed through this repository operation.
+func (r *VehicleRepository) UpdateDetails(
 	ctx context.Context,
 	vehicle *models.Vehicle,
 ) error {
-
 	query := `
 		UPDATE vehicles
 		SET
-			company_id=$2,
-			branch_id=$3,
-			fleet_id=$4,
-			registration_number=$5,
-			vin=$6,
-			make=$7,
-			model=$8,
-			model_year=$9,
-			color=$10,
-			vehicle_type=$11,
-			fuel_type=$12,
-			seating_capacity=$13,
-			is_active=$14,
+			registration_number=$2,
+			vin=$3,
+			make=$4,
+			model=$5,
+			model_year=$6,
+			color=$7,
+			vehicle_type=$8,
+			fuel_type=$9,
+			seating_capacity=$10,
 			updated_at=NOW()
 		WHERE id=$1
 		  AND deleted_at IS NULL
 	`
 
-	_, err := r.db.Exec(
+	result, err := r.db.Exec(
 		ctx,
 		query,
 		vehicle.ID,
-		vehicle.CompanyID,
-		vehicle.BranchID,
-		vehicle.FleetID,
 		vehicle.RegistrationNumber,
 		vehicle.VIN,
 		vehicle.Make,
@@ -400,10 +401,74 @@ func (r *VehicleRepository) Update(
 		vehicle.VehicleType,
 		vehicle.FuelType,
 		vehicle.SeatingCapacity,
-		vehicle.IsActive,
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateDetailsForCompanyMember modifies descriptive vehicle fields only when
+// the user has explicit membership in the vehicle's current company. The
+// membership check is part of the UPDATE so authorization cannot become stale
+// between a preceding read and the mutation.
+func (r *VehicleRepository) UpdateDetailsForCompanyMember(
+	ctx context.Context,
+	userID string,
+	vehicle *models.Vehicle,
+) error {
+	query := `
+		UPDATE vehicles v
+		SET
+			registration_number=$3,
+			vin=$4,
+			make=$5,
+			model=$6,
+			model_year=$7,
+			color=$8,
+			vehicle_type=$9,
+			fuel_type=$10,
+			seating_capacity=$11,
+			updated_at=NOW()
+		WHERE v.id=$1
+		  AND v.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM company_memberships cm
+			WHERE cm.user_id=$2
+			  AND cm.company_id=v.company_id
+		  )
+	`
+
+	result, err := r.db.Exec(
+		ctx,
+		query,
+		vehicle.ID,
+		userID,
+		vehicle.RegistrationNumber,
+		vehicle.VIN,
+		vehicle.Make,
+		vehicle.Model,
+		vehicle.ModelYear,
+		vehicle.Color,
+		vehicle.VehicleType,
+		vehicle.FuelType,
+		vehicle.SeatingCapacity,
+	)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
 }
 
 // Delete performs a soft delete.

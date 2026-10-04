@@ -14,6 +14,12 @@ type vehicleRepositoryStub struct {
 	created   *models.Vehicle
 	createErr error
 
+	updated           *models.Vehicle
+	updateErr         error
+	globalUpdateCalls int
+	memberUpdateCalls int
+	updateUserID      string
+
 	vehicle         *models.Vehicle
 	vehicles        []models.Vehicle
 	getErr          error
@@ -88,11 +94,24 @@ func (r *vehicleRepositoryStub) ListForCompanyMember(
 	return r.vehicles, nil
 }
 
-func (r *vehicleRepositoryStub) Update(
+func (r *vehicleRepositoryStub) UpdateDetails(
 	ctx context.Context,
 	vehicle *models.Vehicle,
 ) error {
-	return nil
+	r.globalUpdateCalls++
+	r.updated = vehicle
+	return r.updateErr
+}
+
+func (r *vehicleRepositoryStub) UpdateDetailsForCompanyMember(
+	ctx context.Context,
+	userID string,
+	vehicle *models.Vehicle,
+) error {
+	r.memberUpdateCalls++
+	r.updateUserID = userID
+	r.updated = vehicle
+	return r.updateErr
 }
 
 func (r *vehicleRepositoryStub) Delete(

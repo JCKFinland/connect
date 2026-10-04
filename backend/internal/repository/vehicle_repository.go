@@ -42,9 +42,17 @@ type VehicleRepository interface {
 		userID string,
 	) ([]models.Vehicle, error)
 
-	// Update modifies an existing vehicle.
-	Update(
+	// UpdateDetails modifies descriptive vehicle fields only.
+	UpdateDetails(
 		ctx context.Context,
+		vehicle *models.Vehicle,
+	) error
+
+	// UpdateDetailsForCompanyMember modifies descriptive vehicle fields only
+	// when the user has explicit membership in the vehicle's company.
+	UpdateDetailsForCompanyMember(
+		ctx context.Context,
+		userID string,
 		vehicle *models.Vehicle,
 	) error
 

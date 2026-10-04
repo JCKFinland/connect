@@ -47,14 +47,9 @@ type CreateVehicleRequest struct {
 	SeatingCapacity int `json:"seating_capacity"`
 }
 
-// UpdateVehicleRequest contains editable vehicle fields.
+// UpdateVehicleRequest contains descriptive vehicle fields that may be
+// changed without mutating tenant, fleet, or activation authority.
 type UpdateVehicleRequest struct {
-	CompanyID string `json:"company_id"`
-
-	BranchID string `json:"branch_id"`
-
-	FleetID string `json:"fleet_id"`
-
 	RegistrationNumber string `json:"registration_number"`
 
 	VIN string `json:"vin"`
@@ -72,8 +67,6 @@ type UpdateVehicleRequest struct {
 	FuelType string `json:"fuel_type"`
 
 	SeatingCapacity int `json:"seating_capacity"`
-
-	IsActive bool `json:"is_active"`
 }
 
 // VehicleResponse represents a vehicle returned to API clients.
