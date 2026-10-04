@@ -179,6 +179,7 @@ func main() {
 
 	vehicleService := vehicleservice.NewService(
 		vehicleservice.Dependencies{
+			DB:                 db,
 			Vehicles:           vehicleRepo,
 			Drivers:            driverRepo,
 			Fleets:             fleetRepository,

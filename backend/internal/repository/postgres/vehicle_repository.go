@@ -471,13 +471,13 @@ func (r *VehicleRepository) UpdateDetailsForCompanyMember(
 	return nil
 }
 
-// Delete performs a soft delete.
-func (r *VehicleRepository) Delete(
+// Archive hides a non-deleted vehicle from active repository reads.
+func (r *VehicleRepository) Archive(
 	ctx context.Context,
 	id string,
 ) error {
 
-	query := `
+	const query = `
 		UPDATE vehicles
 		SET
 			deleted_at=NOW(),
@@ -486,11 +486,58 @@ func (r *VehicleRepository) Delete(
 		  AND deleted_at IS NULL
 	`
 
-	_, err := r.db.Exec(
+	result, err := r.db.Exec(
 		ctx,
 		query,
 		id,
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
+}
+
+// ArchiveForCompanyMember hides a vehicle only when the authenticated user has
+// explicit membership in the vehicle's company.
+func (r *VehicleRepository) ArchiveForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+
+	const query = `
+		UPDATE vehicles AS v
+		SET
+			deleted_at=NOW(),
+			updated_at=NOW()
+		WHERE v.id=$1
+		  AND v.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM company_memberships AS cm
+			WHERE cm.company_id=v.company_id
+			  AND cm.user_id=$2
+		  )
+	`
+
+	result, err := r.db.Exec(
+		ctx,
+		query,
+		id,
+		userID,
+	)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
 }

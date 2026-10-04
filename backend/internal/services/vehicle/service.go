@@ -2,9 +2,11 @@ package vehicle
 
 import (
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Dependencies struct {
+	DB                 *pgxpool.Pool
 	Vehicles           repository.VehicleRepository
 	Drivers            repository.DriverRepository
 	Fleets             repository.FleetRepository
@@ -13,6 +15,7 @@ type Dependencies struct {
 }
 
 type Service struct {
+	db                 *pgxpool.Pool
 	vehicles           repository.VehicleRepository
 	drivers            repository.DriverRepository
 	fleets             repository.FleetRepository
@@ -25,6 +28,7 @@ func NewService(
 ) *Service {
 
 	return &Service{
+		db:                 deps.DB,
 		vehicles:           deps.Vehicles,
 		drivers:            deps.Drivers,
 		fleets:             deps.Fleets,

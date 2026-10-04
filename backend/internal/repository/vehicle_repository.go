@@ -56,9 +56,20 @@ type VehicleRepository interface {
 		vehicle *models.Vehicle,
 	) error
 
-	// Delete performs a soft delete.
-	Delete(
+	// Archive hides a vehicle from active repository reads.
+	//
+	// This unrestricted mutation is reserved for callers that have already
+	// established platform-global authority.
+	Archive(
 		ctx context.Context,
+		id string,
+	) error
+
+	// ArchiveForCompanyMember hides a vehicle only when the authenticated user
+	// has explicit membership in the vehicle's company.
+	ArchiveForCompanyMember(
+		ctx context.Context,
+		userID string,
 		id string,
 	) error
 }

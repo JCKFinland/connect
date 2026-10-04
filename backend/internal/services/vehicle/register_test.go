@@ -114,8 +114,16 @@ func (r *vehicleRepositoryStub) UpdateDetailsForCompanyMember(
 	return r.updateErr
 }
 
-func (r *vehicleRepositoryStub) Delete(
+func (r *vehicleRepositoryStub) Archive(
 	ctx context.Context,
+	id string,
+) error {
+	return nil
+}
+
+func (r *vehicleRepositoryStub) ArchiveForCompanyMember(
+	ctx context.Context,
+	userID string,
 	id string,
 ) error {
 	return nil

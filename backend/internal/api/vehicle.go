@@ -229,36 +229,68 @@ func (h *VehicleHandler) Update(
 	)
 }
 
-// Delete strips an operating taxi company or fleet permanently out of the database.
+// Delete archives a vehicle within the authenticated user's tenant authority.
 func (h *VehicleHandler) Delete(
 	c *gin.Context,
 ) {
 
-	// Isolates structural ID parameter string out of path variables.
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
 	id := c.Param("id")
 
-	// Dispatches the deletion intent to the service layer.
 	err := h.service.Delete(
 		c.Request.Context(),
+		user.ID,
 		id,
 	)
 	if err != nil {
+		switch {
+		case errors.Is(
+			err,
+			repository.ErrNotFound,
+		):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Vehicle not found",
+				nil,
+			)
 
-		response.Error(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-			nil,
-		)
+		case errors.Is(
+			err,
+			vehicle.ErrVehicleHasActiveAssignment,
+		):
+			response.Error(
+				c,
+				http.StatusConflict,
+				err.Error(),
+				nil,
+			)
+
+		case errors.Is(
+			err,
+			vehicle.ErrVehicleCreationAccessDenied,
+		):
+			response.Forbidden(
+				c,
+				err.Error(),
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
 
 		return
 	}
 
-	// Formats an HTTP 200 Status OK response confirming the company is removed.
 	response.Success(
 		c,
 		http.StatusOK,
-		"Vehicle deleted successfully",
+		"Vehicle archived successfully",
 		nil,
 	)
 }

@@ -491,4 +491,146 @@ func TestVehicleRepositoryEnforcesCompanyMembershipReadAuthority(
 			vehicleOneAfterDeniedUpdate.RegistrationNumber,
 		)
 	}
+
+	// Membership in company one must not authorize archival of company two.
+	err = repo.ArchiveForCompanyMember(
+		ctx,
+		memberUserID,
+		vehicleTwoID,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound for cross-company archive, got %v",
+			err,
+		)
+	}
+
+	// A user without membership must not archive an otherwise valid target.
+	err = repo.ArchiveForCompanyMember(
+		ctx,
+		noMembershipUserID,
+		vehicleOneID,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound without company membership for archive, got %v",
+			err,
+		)
+	}
+
+	var (
+		vehicleOneDeletedBeforeArchive bool
+		vehicleOneActiveBeforeArchive  bool
+		vehicleTwoDeletedAfterDenial   bool
+	)
+
+	err = tx.QueryRow(
+		ctx,
+		`
+			SELECT
+				deleted_at IS NOT NULL,
+				is_active
+			FROM vehicles
+			WHERE id=$1
+		`,
+		vehicleOneID,
+	).Scan(
+		&vehicleOneDeletedBeforeArchive,
+		&vehicleOneActiveBeforeArchive,
+	)
+	if err != nil {
+		t.Fatalf("inspect vehicle before authorized archive: %v", err)
+	}
+
+	if vehicleOneDeletedBeforeArchive {
+		t.Fatal("denied archive unexpectedly archived own-company vehicle")
+	}
+
+	if !vehicleOneActiveBeforeArchive {
+		t.Fatal("vehicle must remain operationally active before archive")
+	}
+
+	err = tx.QueryRow(
+		ctx,
+		`
+			SELECT deleted_at IS NOT NULL
+			FROM vehicles
+			WHERE id=$1
+		`,
+		vehicleTwoID,
+	).Scan(&vehicleTwoDeletedAfterDenial)
+	if err != nil {
+		t.Fatalf("inspect cross-company vehicle after denied archive: %v", err)
+	}
+
+	if vehicleTwoDeletedAfterDenial {
+		t.Fatal("cross-company archive mutated the vehicle")
+	}
+
+	// An authorized membership may archive its own-company vehicle.
+	err = repo.ArchiveForCompanyMember(
+		ctx,
+		memberUserID,
+		vehicleOneID,
+	)
+	if err != nil {
+		t.Fatalf("membership-guarded archive: %v", err)
+	}
+
+	var (
+		vehicleOneArchived bool
+		vehicleOneActive   bool
+	)
+
+	err = tx.QueryRow(
+		ctx,
+		`
+			SELECT
+				deleted_at IS NOT NULL,
+				is_active
+			FROM vehicles
+			WHERE id=$1
+		`,
+		vehicleOneID,
+	).Scan(
+		&vehicleOneArchived,
+		&vehicleOneActive,
+	)
+	if err != nil {
+		t.Fatalf("inspect vehicle after archive: %v", err)
+	}
+
+	if !vehicleOneArchived {
+		t.Fatal("authorized archive did not set deleted_at")
+	}
+
+	if !vehicleOneActive {
+		t.Fatal("archive must not mutate operational is_active authority")
+	}
+
+	// Normal reads must hide the archived vehicle.
+	_, err = repo.GetByID(
+		ctx,
+		vehicleOneID,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound reading archived vehicle, got %v",
+			err,
+		)
+	}
+
+	// Re-archiving the same target must fail closed instead of reporting
+	// another successful mutation.
+	err = repo.ArchiveForCompanyMember(
+		ctx,
+		memberUserID,
+		vehicleOneID,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound re-archiving vehicle, got %v",
+			err,
+		)
+	}
 }

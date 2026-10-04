@@ -99,6 +99,23 @@ func (s *Service) Assign(
 				)
 			}
 
+			// Serialize assignment and archival decisions for this vehicle.
+			//
+			// Vehicle archival acquires the same transaction-scoped advisory
+			// lock before checking assignment state. Acquiring it before the
+			// vehicle read prevents assignment from proceeding with vehicle
+			// state made stale by a concurrent archive.
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"vehicle:"+req.VehicleID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock vehicle lifecycle for assignment: %w",
+					err,
+				)
+			}
+
 			vehicle, err := vehicles.GetByID(
 				ctx,
 				req.VehicleID,
