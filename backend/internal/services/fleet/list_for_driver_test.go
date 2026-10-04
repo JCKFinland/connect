@@ -84,10 +84,25 @@ func (s *listForDriverFleetRepoStub) GetByID(
 	return nil, repository.ErrNotFound
 }
 
+func (s *listForDriverFleetRepoStub) GetByIDForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) (*models.Fleet, error) {
+	return s.GetByID(ctx, id)
+}
+
 func (s *listForDriverFleetRepoStub) List(
 	context.Context,
 ) ([]*models.Fleet, error) {
 	return nil, nil
+}
+
+func (s *listForDriverFleetRepoStub) ListForCompanyMember(
+	ctx context.Context,
+	userID string,
+) ([]*models.Fleet, error) {
+	return s.List(ctx)
 }
 
 func (s *listForDriverFleetRepoStub) ListActiveByCompanyAndBranch(

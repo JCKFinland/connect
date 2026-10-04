@@ -363,9 +363,17 @@ func RegisterRoutes(
 				fleetHandler.Create,
 			)
 
-			fleets.GET("", fleetHandler.List)
+			fleets.GET(
+				"",
+				rbacMiddleware.RequirePermission("fleets.read"),
+				fleetHandler.List,
+			)
 
-			fleets.GET("/:id", fleetHandler.GetByID)
+			fleets.GET(
+				"/:id",
+				rbacMiddleware.RequirePermission("fleets.read"),
+				fleetHandler.GetByID,
+			)
 
 			fleets.PUT("/:id", fleetHandler.Update)
 

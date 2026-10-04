@@ -1,12 +1,30 @@
 package fleet
 
-import "context"
+import (
+	"context"
+
+	"github.com/JCKFinland/connect/backend/internal/models"
+)
 
 func (s *Service) List(
 	ctx context.Context,
+	userID string,
 ) ([]*FleetResponse, error) {
+	systemAdmin, err := s.isSystemAdmin(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 
-	fleets, err := s.fleets.List(ctx)
+	var fleets []*models.Fleet
+
+	if systemAdmin {
+		fleets, err = s.fleets.List(ctx)
+	} else {
+		fleets, err = s.fleets.ListForCompanyMember(
+			ctx,
+			userID,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -14,18 +32,7 @@ func (s *Service) List(
 	response := make([]*FleetResponse, 0, len(fleets))
 
 	for _, fleet := range fleets {
-
-		response = append(response, &FleetResponse{
-			ID:          fleet.ID,
-			CreatedAt:   fleet.CreatedAt,
-			UpdatedAt:   fleet.UpdatedAt,
-			CompanyID:   fleet.CompanyID,
-			BranchID:    fleet.BranchID,
-			Code:        fleet.Code,
-			Name:        fleet.Name,
-			Description: fleet.Description,
-			IsActive:    fleet.IsActive,
-		})
+		response = append(response, fleetResponse(fleet))
 	}
 
 	return response, nil

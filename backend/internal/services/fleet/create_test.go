@@ -33,10 +33,25 @@ func (r *fleetCreateRepositoryStub) GetByID(
 	return nil, repository.ErrNotFound
 }
 
+func (r *fleetCreateRepositoryStub) GetByIDForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) (*models.Fleet, error) {
+	return r.GetByID(ctx, id)
+}
+
 func (r *fleetCreateRepositoryStub) List(
 	context.Context,
 ) ([]*models.Fleet, error) {
 	return nil, nil
+}
+
+func (r *fleetCreateRepositoryStub) ListForCompanyMember(
+	ctx context.Context,
+	userID string,
+) ([]*models.Fleet, error) {
+	return r.List(ctx)
 }
 
 func (r *fleetCreateRepositoryStub) ListActiveByCompanyAndBranch(

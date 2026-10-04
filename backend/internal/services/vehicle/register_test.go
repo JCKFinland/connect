@@ -247,10 +247,25 @@ func (r *vehicleFleetRepositoryStub) GetByID(
 	return r.fleet, nil
 }
 
+func (r *vehicleFleetRepositoryStub) GetByIDForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) (*models.Fleet, error) {
+	return r.GetByID(ctx, id)
+}
+
 func (r *vehicleFleetRepositoryStub) List(
 	ctx context.Context,
 ) ([]*models.Fleet, error) {
 	return nil, nil
+}
+
+func (r *vehicleFleetRepositoryStub) ListForCompanyMember(
+	ctx context.Context,
+	userID string,
+) ([]*models.Fleet, error) {
+	return r.List(ctx)
 }
 
 func (s *vehicleFleetRepositoryStub) ListActiveByCompanyAndBranch(

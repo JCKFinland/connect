@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	// References the business logic package tailored explicitly to taxi fleet metadata.
-	"github.com/JCKFinland/connect/backend/internal/services/fleet"
+	fleetservice "github.com/JCKFinland/connect/backend/internal/services/fleet"
 
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 
@@ -19,12 +19,12 @@ import (
 // CompanyHandler bundles all available HTTP controllers managing company/fleet schemas.
 type FleetHandler struct {
 	// Points to the structural business engine that communicates with data repositories.
-	service *fleet.Service
+	service *fleetservice.Service
 }
 
 // NewCompanyHandler initializes the struct dependency during application bootstrap in main.go.
 func NewFleetHandler(
-	service *fleet.Service,
+	service *fleetservice.Service,
 ) *FleetHandler {
 
 	return &FleetHandler{
@@ -47,7 +47,7 @@ func (h *FleetHandler) Create(
 		return
 	}
 
-	var req fleet.CreateFleetRequest
+	var req fleetservice.CreateFleetRequest
 
 	// Validates and maps incoming JSON fields onto the expected request structure.
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -70,9 +70,9 @@ func (h *FleetHandler) Create(
 	)
 	if err != nil {
 		switch {
-		case errors.Is(err, fleet.ErrInvalidBranch):
+		case errors.Is(err, fleetservice.ErrInvalidBranch):
 			response.Error(c, http.StatusNotFound, err.Error(), nil)
-		case errors.Is(err, fleet.ErrFleetCreationAccessDenied):
+		case errors.Is(err, fleetservice.ErrFleetCreationAccessDenied):
 			response.Error(c, http.StatusForbidden, err.Error(), nil)
 		default:
 			response.Error(
@@ -98,29 +98,44 @@ func (h *FleetHandler) Create(
 func (h *FleetHandler) GetByID(
 	c *gin.Context,
 ) {
-
-	// Extracts the unique ID variable dynamically from the request path (e.g., /companies/:id).
-	id := c.Param("id")
-
-	// Queries the service layer to locate the company record.
-	fleet, err := h.service.GetByID(
-		c.Request.Context(),
-		id,
-	)
-	if err != nil {
-
-		// Returns an HTTP 404 Status Not Found if the company ID doesn't match an active record.
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
 		response.Error(
 			c,
-			http.StatusNotFound,
-			err.Error(),
+			http.StatusUnauthorized,
+			"Authentication required",
 			nil,
 		)
-
 		return
 	}
 
-	// Returns an HTTP 200 Status OK with the corresponding company metadata object.
+	id := c.Param("id")
+
+	fleet, err := h.service.GetByID(
+		c.Request.Context(),
+		user.ID,
+		id,
+	)
+	if err != nil {
+		if errors.Is(err, fleetservice.ErrFleetNotFound) {
+			response.Error(
+				c,
+				http.StatusNotFound,
+				err.Error(),
+				nil,
+			)
+			return
+		}
+
+		response.Error(
+			c,
+			http.StatusInternalServerError,
+			"Failed to retrieve fleet",
+			nil,
+		)
+		return
+	}
+
 	response.Success(
 		c,
 		http.StatusOK,
@@ -133,24 +148,31 @@ func (h *FleetHandler) GetByID(
 func (h *FleetHandler) List(
 	c *gin.Context,
 ) {
-
-	// Commands the service layer to fetch all available records.
-	fleets, err := h.service.List(
-		c.Request.Context(),
-	)
-	if err != nil {
-
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
 		response.Error(
 			c,
-			http.StatusInternalServerError,
-			err.Error(),
+			http.StatusUnauthorized,
+			"Authentication required",
 			nil,
 		)
-
 		return
 	}
 
-	// Returns an HTTP 200 Status OK containing the array of companies.
+	fleets, err := h.service.List(
+		c.Request.Context(),
+		user.ID,
+	)
+	if err != nil {
+		response.Error(
+			c,
+			http.StatusInternalServerError,
+			"Failed to retrieve fleets",
+			nil,
+		)
+		return
+	}
+
 	response.Success(
 		c,
 		http.StatusOK,
@@ -178,7 +200,7 @@ func (h *FleetHandler) ListForDriver(
 		user.ID,
 	)
 	if err != nil {
-		if errors.Is(err, fleet.ErrDriverNotEligible) {
+		if errors.Is(err, fleetservice.ErrDriverNotEligible) {
 			response.Error(
 				c,
 				http.StatusForbidden,
@@ -213,7 +235,7 @@ func (h *FleetHandler) Update(
 	// Extracts target entity key from URL route parameter.
 	id := c.Param("id")
 
-	var req fleet.UpdateFleetRequest
+	var req fleetservice.UpdateFleetRequest
 
 	// Extracts partial structural changes from incoming request payload body.
 	if err := c.ShouldBindJSON(&req); err != nil {

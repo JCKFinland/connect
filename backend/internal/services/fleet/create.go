@@ -90,19 +90,12 @@ func (s *Service) canCreateFleetForCompany(
 	userID string,
 	companyID string,
 ) (bool, error) {
-	if s.userRoles == nil {
-		return false, fmt.Errorf("user role repository is not configured")
-	}
-
-	roles, err := s.userRoles.GetUserRoles(ctx, userID)
+	systemAdmin, err := s.isSystemAdmin(ctx, userID)
 	if err != nil {
-		return false, fmt.Errorf("get user roles: %w", err)
+		return false, err
 	}
-
-	for _, role := range roles {
-		if role == "SYSTEM_ADMIN" {
-			return true, nil
-		}
+	if systemAdmin {
+		return true, nil
 	}
 
 	if s.companyMemberships == nil {

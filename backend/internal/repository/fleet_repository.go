@@ -17,8 +17,25 @@ type FleetRepository interface {
 		id string,
 	) (*models.Fleet, error)
 
+	// GetByIDForCompanyMember returns a fleet only when the user has
+	// explicit membership in the fleet's company.
+	GetByIDForCompanyMember(
+		ctx context.Context,
+		userID string,
+		id string,
+	) (*models.Fleet, error)
+
+	// List returns all non-deleted fleets across all companies.
+	// This global surface is reserved for explicitly authorized callers.
 	List(
 		ctx context.Context,
+	) ([]*models.Fleet, error)
+
+	// ListForCompanyMember returns non-deleted fleets belonging only to
+	// companies in which the user has explicit membership.
+	ListForCompanyMember(
+		ctx context.Context,
+		userID string,
 	) ([]*models.Fleet, error)
 
 	ListActiveByCompanyAndBranch(

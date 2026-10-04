@@ -11,9 +11,13 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/repository"
 )
 
+// FleetRepository implements repository.FleetRepository.
 type FleetRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
+
+// Compile-time interface check.
+var _ repository.FleetRepository = (*FleetRepository)(nil)
 
 func NewFleetRepository(
 	db *pgxpool.Pool,
@@ -117,6 +121,63 @@ func (r *FleetRepository) GetByID(
 	return &fleet, nil
 }
 
+// GetByIDForCompanyMember retrieves a fleet only when the user has
+// explicit membership in the fleet's company.
+func (r *FleetRepository) GetByIDForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) (*models.Fleet, error) {
+
+	query := `
+	SELECT
+		f.id,
+		f.company_id,
+		f.branch_id,
+		f.code,
+		f.name,
+		f.description,
+		f.is_active,
+		f.created_at,
+		f.updated_at,
+		f.deleted_at
+	FROM fleets f
+	INNER JOIN company_memberships cm
+		ON cm.company_id = f.company_id
+	   AND cm.user_id = $1
+	WHERE f.id = $2
+	  AND f.deleted_at IS NULL;
+	`
+
+	var fleet models.Fleet
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		userID,
+		id,
+	).Scan(
+		&fleet.ID,
+		&fleet.CompanyID,
+		&fleet.BranchID,
+		&fleet.Code,
+		&fleet.Name,
+		&fleet.Description,
+		&fleet.IsActive,
+		&fleet.CreatedAt,
+		&fleet.UpdatedAt,
+		&fleet.DeletedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, repository.ErrNotFound
+		}
+		return nil, err
+	}
+
+	return &fleet, nil
+}
+
 func (r *FleetRepository) List(
 	ctx context.Context,
 ) ([]*models.Fleet, error) {
@@ -172,6 +233,69 @@ func (r *FleetRepository) List(
 			fleets,
 			&fleet,
 		)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return fleets, nil
+}
+
+// ListForCompanyMember returns fleets only from companies in which the
+// user has explicit membership.
+func (r *FleetRepository) ListForCompanyMember(
+	ctx context.Context,
+	userID string,
+) ([]*models.Fleet, error) {
+
+	query := `
+	SELECT
+		f.id,
+		f.company_id,
+		f.branch_id,
+		f.code,
+		f.name,
+		f.description,
+		f.is_active,
+		f.created_at,
+		f.updated_at,
+		f.deleted_at
+	FROM fleets f
+	INNER JOIN company_memberships cm
+		ON cm.company_id = f.company_id
+	   AND cm.user_id = $1
+	WHERE f.deleted_at IS NULL
+	ORDER BY f.name;
+	`
+
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	fleets := make([]*models.Fleet, 0)
+
+	for rows.Next() {
+		var fleet models.Fleet
+
+		if err := rows.Scan(
+			&fleet.ID,
+			&fleet.CompanyID,
+			&fleet.BranchID,
+			&fleet.Code,
+			&fleet.Name,
+			&fleet.Description,
+			&fleet.IsActive,
+			&fleet.CreatedAt,
+			&fleet.UpdatedAt,
+			&fleet.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		fleets = append(fleets, &fleet)
 	}
 
 	if err := rows.Err(); err != nil {
