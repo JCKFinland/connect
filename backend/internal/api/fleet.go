@@ -36,6 +36,16 @@ func NewFleetHandler(
 func (h *FleetHandler) Create(
 	c *gin.Context,
 ) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
+		response.Error(
+			c,
+			http.StatusUnauthorized,
+			"Authentication required",
+			nil,
+		)
+		return
+	}
 
 	var req fleet.CreateFleetRequest
 
@@ -55,17 +65,23 @@ func (h *FleetHandler) Create(
 	// Forwards the data payload to the underlying business service layer.
 	createdFleet, err := h.service.Create(
 		c.Request.Context(),
+		user.ID,
 		req,
 	)
 	if err != nil {
-
-		response.Error(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-			nil,
-		)
-
+		switch {
+		case errors.Is(err, fleet.ErrInvalidBranch):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, fleet.ErrFleetCreationAccessDenied):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(
+				c,
+				http.StatusInternalServerError,
+				"Failed to create fleet",
+				nil,
+			)
+		}
 		return
 	}
 

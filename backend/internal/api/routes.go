@@ -357,7 +357,11 @@ func RegisterRoutes(
 		fleets.Use(authMiddleware.RequireAuth())
 
 		{
-			fleets.POST("", fleetHandler.Create)
+			fleets.POST(
+				"",
+				rbacMiddleware.RequirePermission("fleets.manage"),
+				fleetHandler.Create,
+			)
 
 			fleets.GET("", fleetHandler.List)
 

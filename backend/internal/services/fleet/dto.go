@@ -3,12 +3,10 @@ package fleet
 import "time"
 
 type CreateFleetRequest struct {
-	CompanyID   string `json:"company_id" binding:"required,uuid"`
 	BranchID    string `json:"branch_id" binding:"required,uuid"`
 	Code        string `json:"code" binding:"required,max=50"`
 	Name        string `json:"name" binding:"required,max=255"`
 	Description string `json:"description"`
-	IsActive    bool   `json:"is_active"`
 }
 
 type UpdateFleetRequest struct {
