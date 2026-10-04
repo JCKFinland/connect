@@ -77,8 +77,16 @@ func (r *fleetCreateRepositoryStub) UpdateDetailsForCompanyMember(
 	return nil
 }
 
-func (r *fleetCreateRepositoryStub) Delete(
+func (r *fleetCreateRepositoryStub) Archive(
 	context.Context,
+	string,
+) error {
+	return nil
+}
+
+func (r *fleetCreateRepositoryStub) ArchiveForCompanyMember(
+	context.Context,
+	string,
 	string,
 ) error {
 	return nil

@@ -2,6 +2,7 @@ package vehicle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
@@ -76,91 +77,10 @@ func (r *vehicleCompanyMembershipRepositoryStub) ListByUserID(
 	return nil, nil
 }
 
-func TestCreateDerivesTenantFromFleetAndCreatesActiveVehicle(t *testing.T) {
-	vehicleRepo := &vehicleRepositoryStub{}
-	fleetRepo := &vehicleFleetRepositoryStub{
-		fleet: &models.Fleet{
-			BaseModel: models.BaseModel{ID: "fleet-1"},
-			CompanyID: "company-1",
-			BranchID:  "branch-1",
-			IsActive:  true,
-		},
-	}
-
+func TestCanCreateVehicleForCompanyAllowsCompanyMember(
+	t *testing.T,
+) {
 	service := NewService(Dependencies{
-		Vehicles:  vehicleRepo,
-		Fleets:    fleetRepo,
-		UserRoles: &vehicleUserRoleRepositoryStub{roles: []string{"COMPANY_ADMIN"}},
-		CompanyMemberships: &vehicleCompanyMembershipRepositoryStub{
-			memberships: map[string]map[string]bool{
-				"user-1": {"company-1": true},
-			},
-		},
-	})
-
-	result, err := service.Create(
-		context.Background(),
-		"user-1",
-		CreateVehicleRequest{
-			FleetID:            "fleet-1",
-			RegistrationNumber: "ABC-123",
-			Make:               "Toyota",
-			Model:              "Corolla",
-			ModelYear:          2025,
-			VehicleType:        "SEDAN",
-			FuelType:           "HYBRID",
-			SeatingCapacity:    4,
-		},
-	)
-	if err != nil {
-		t.Fatalf("create vehicle: %v", err)
-	}
-
-	if vehicleRepo.created == nil {
-		t.Fatal("expected vehicle to be created")
-	}
-
-	if vehicleRepo.created.CompanyID != "company-1" {
-		t.Fatalf(
-			"expected company derived from fleet, got %q",
-			vehicleRepo.created.CompanyID,
-		)
-	}
-	if vehicleRepo.created.BranchID != "branch-1" {
-		t.Fatalf(
-			"expected branch derived from fleet, got %q",
-			vehicleRepo.created.BranchID,
-		)
-	}
-	if vehicleRepo.created.FleetID != "fleet-1" {
-		t.Fatalf(
-			"expected fleet fleet-1, got %q",
-			vehicleRepo.created.FleetID,
-		)
-	}
-	if !vehicleRepo.created.IsActive {
-		t.Fatal("expected service-owned initial active state")
-	}
-	if result.CompanyID != "company-1" ||
-		result.BranchID != "branch-1" ||
-		result.FleetID != "fleet-1" {
-		t.Fatalf("unexpected response tenant: %#v", result)
-	}
-}
-
-func TestCreateRejectsCrossTenantMembership(t *testing.T) {
-	vehicleRepo := &vehicleRepositoryStub{}
-
-	service := NewService(Dependencies{
-		Vehicles: vehicleRepo,
-		Fleets: &vehicleFleetRepositoryStub{
-			fleet: &models.Fleet{
-				BaseModel: models.BaseModel{ID: "fleet-2"},
-				CompanyID: "company-2",
-				BranchID:  "branch-2",
-				IsActive:  true,
-			},
-		},
 		UserRoles: &vehicleUserRoleRepositoryStub{
 			roles: []string{"COMPANY_ADMIN"},
 		},
@@ -171,106 +91,100 @@ func TestCreateRejectsCrossTenantMembership(t *testing.T) {
 		},
 	})
 
-	_, err := service.Create(
+	authorized, err := service.canCreateVehicleForCompany(
 		context.Background(),
 		"user-1",
-		CreateVehicleRequest{
-			FleetID:            "fleet-2",
-			RegistrationNumber: "ABC-123",
-			Make:               "Toyota",
-			Model:              "Corolla",
-			VehicleType:        "SEDAN",
-			FuelType:           "HYBRID",
-		},
-	)
-
-	if err != ErrVehicleCreationAccessDenied {
-		t.Fatalf(
-			"expected ErrVehicleCreationAccessDenied, got %v",
-			err,
-		)
-	}
-	if vehicleRepo.created != nil {
-		t.Fatal("cross-tenant vehicle must not be created")
-	}
-}
-
-func TestCreateAllowsSystemAdminWithoutCompanyMembership(t *testing.T) {
-	vehicleRepo := &vehicleRepositoryStub{}
-
-	service := NewService(Dependencies{
-		Vehicles: vehicleRepo,
-		Fleets: &vehicleFleetRepositoryStub{
-			fleet: &models.Fleet{
-				BaseModel: models.BaseModel{ID: "fleet-1"},
-				CompanyID: "company-1",
-				BranchID:  "branch-1",
-				IsActive:  true,
-			},
-		},
-		UserRoles: &vehicleUserRoleRepositoryStub{
-			roles: []string{"SYSTEM_ADMIN"},
-		},
-		CompanyMemberships: &vehicleCompanyMembershipRepositoryStub{},
-	})
-
-	_, err := service.Create(
-		context.Background(),
-		"system-admin",
-		CreateVehicleRequest{
-			FleetID:            "fleet-1",
-			RegistrationNumber: "ABC-123",
-			Make:               "Toyota",
-			Model:              "Corolla",
-			VehicleType:        "SEDAN",
-			FuelType:           "HYBRID",
-		},
+		"company-1",
 	)
 	if err != nil {
-		t.Fatalf("system admin create vehicle: %v", err)
+		t.Fatalf("check company vehicle creation authority: %v", err)
 	}
-	if vehicleRepo.created == nil {
-		t.Fatal("expected system admin vehicle creation")
+
+	if !authorized {
+		t.Fatal("expected explicit company member to be authorized")
 	}
 }
 
-func TestCreateRejectsInactiveFleet(t *testing.T) {
-	vehicleRepo := &vehicleRepositoryStub{}
-
+func TestCanCreateVehicleForCompanyRejectsCrossTenantMembership(
+	t *testing.T,
+) {
 	service := NewService(Dependencies{
-		Vehicles: vehicleRepo,
-		Fleets: &vehicleFleetRepositoryStub{
-			fleet: &models.Fleet{
-				BaseModel: models.BaseModel{ID: "fleet-1"},
-				CompanyID: "company-1",
-				BranchID:  "branch-1",
-				IsActive:  false,
+		UserRoles: &vehicleUserRoleRepositoryStub{
+			roles: []string{"COMPANY_ADMIN"},
+		},
+		CompanyMemberships: &vehicleCompanyMembershipRepositoryStub{
+			memberships: map[string]map[string]bool{
+				"user-1": {"company-1": true},
 			},
 		},
+	})
+
+	authorized, err := service.canCreateVehicleForCompany(
+		context.Background(),
+		"user-1",
+		"company-2",
+	)
+	if err != nil {
+		t.Fatalf("check cross-tenant vehicle creation authority: %v", err)
+	}
+
+	if authorized {
+		t.Fatal("cross-tenant company membership must not authorize creation")
+	}
+}
+
+func TestCanCreateVehicleForCompanyAllowsSystemAdminWithoutMembership(
+	t *testing.T,
+) {
+	service := NewService(Dependencies{
 		UserRoles: &vehicleUserRoleRepositoryStub{
 			roles: []string{"SYSTEM_ADMIN"},
 		},
 		CompanyMemberships: &vehicleCompanyMembershipRepositoryStub{},
 	})
 
-	_, err := service.Create(
+	authorized, err := service.canCreateVehicleForCompany(
 		context.Background(),
 		"system-admin",
-		CreateVehicleRequest{
-			FleetID:            "fleet-1",
-			RegistrationNumber: "ABC-123",
-			Make:               "Toyota",
-			Model:              "Corolla",
-			VehicleType:        "SEDAN",
-			FuelType:           "HYBRID",
-		},
+		"company-1",
 	)
-
-	if err != ErrInvalidFleet {
-		t.Fatalf("expected ErrInvalidFleet, got %v", err)
+	if err != nil {
+		t.Fatalf("check system admin vehicle creation authority: %v", err)
 	}
-	if vehicleRepo.created != nil {
-		t.Fatal("vehicle must not be created in inactive fleet")
+
+	if !authorized {
+		t.Fatal("SYSTEM_ADMIN must bypass company membership")
+	}
+}
+
+func TestCanCreateVehicleForCompanyPropagatesMembershipFailure(
+	t *testing.T,
+) {
+	expected := errors.New("membership lookup failed")
+
+	service := NewService(Dependencies{
+		UserRoles: &vehicleUserRoleRepositoryStub{
+			roles: []string{"COMPANY_ADMIN"},
+		},
+		CompanyMemberships: &vehicleCompanyMembershipRepositoryStub{
+			err: expected,
+		},
+	})
+
+	authorized, err := service.canCreateVehicleForCompany(
+		context.Background(),
+		"user-1",
+		"company-1",
+	)
+	if authorized {
+		t.Fatal("membership failure must not authorize creation")
+	}
+
+	if !errors.Is(err, expected) {
+		t.Fatalf(
+			"expected membership repository failure, got %v",
+			err,
+		)
 	}
 }
 

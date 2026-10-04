@@ -59,8 +59,19 @@ type FleetRepository interface {
 		fleet *models.Fleet,
 	) error
 
-	Delete(
+	// Archive hides a fleet from normal repository reads without changing its
+	// operational activation state. This unrestricted mutation is reserved for
+	// callers that have already established platform-global authority.
+	Archive(
 		ctx context.Context,
+		id string,
+	) error
+
+	// ArchiveForCompanyMember hides a fleet only when the authenticated user
+	// has explicit membership in the fleet's current company.
+	ArchiveForCompanyMember(
+		ctx context.Context,
+		userID string,
 		id string,
 	) error
 }

@@ -381,7 +381,11 @@ func RegisterRoutes(
 				fleetHandler.Update,
 			)
 
-			fleets.DELETE("/:id", fleetHandler.Delete)
+			fleets.DELETE(
+				"/:id",
+				rbacMiddleware.RequirePermission("fleets.manage"),
+				fleetHandler.Delete,
+			)
 		}
 
 		vehicles := v1.Group("/vehicles")

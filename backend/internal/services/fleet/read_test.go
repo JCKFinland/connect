@@ -114,8 +114,16 @@ func (r *fleetReadRepositoryStub) UpdateDetailsForCompanyMember(
 	return r.updateErr
 }
 
-func (r *fleetReadRepositoryStub) Delete(
+func (r *fleetReadRepositoryStub) Archive(
 	context.Context,
+	string,
+) error {
+	return nil
+}
+
+func (r *fleetReadRepositoryStub) ArchiveForCompanyMember(
+	context.Context,
+	string,
 	string,
 ) error {
 	return nil

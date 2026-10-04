@@ -511,4 +511,254 @@ func TestFleetRepositoryEnforcesCompanyMembershipReadAuthority(
 			description,
 		)
 	}
+
+	// Archive authority uses fresh fleets so these assertions cannot interfere
+	// with the read/update targets exercised above.
+	archiveOwnFleetID := uuid.NewString()
+	archiveCrossFleetID := uuid.NewString()
+	archiveGlobalFleetID := uuid.NewString()
+
+	createArchiveFleet := func(
+		fleetID string,
+		companyID string,
+		branchID string,
+		label string,
+		isActive bool,
+	) {
+		t.Helper()
+
+		_, err := tx.Exec(
+			ctx,
+			`
+				INSERT INTO fleets (
+					id,
+					company_id,
+					branch_id,
+					code,
+					name,
+					description,
+					is_active
+				)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`,
+			fleetID,
+			companyID,
+			branchID,
+			"AR-"+fleetID[:8],
+			"Fleet Archive "+label,
+			"fleet archive repository authority test",
+			isActive,
+		)
+		if err != nil {
+			t.Fatalf(
+				"create archive fleet %s: %v",
+				label,
+				err,
+			)
+		}
+	}
+
+	createArchiveFleet(
+		archiveOwnFleetID,
+		companyOneID,
+		branchOneID,
+		"Own",
+		true,
+	)
+	createArchiveFleet(
+		archiveCrossFleetID,
+		companyTwoID,
+		branchTwoID,
+		"Cross",
+		true,
+	)
+	createArchiveFleet(
+		archiveGlobalFleetID,
+		companyTwoID,
+		branchTwoID,
+		"Global Inactive",
+		false,
+	)
+
+	// Membership in company one must not authorize archival of company two.
+	err = repo.ArchiveForCompanyMember(
+		ctx,
+		memberUserID,
+		archiveCrossFleetID,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound for cross-company fleet archive, got %v",
+			err,
+		)
+	}
+
+	var crossArchived bool
+	err = tx.QueryRow(
+		ctx,
+		`
+			SELECT deleted_at IS NOT NULL
+			FROM fleets
+			WHERE id=$1
+		`,
+		archiveCrossFleetID,
+	).Scan(&crossArchived)
+	if err != nil {
+		t.Fatalf(
+			"inspect cross-company fleet after denied archive: %v",
+			err,
+		)
+	}
+	if crossArchived {
+		t.Fatal(
+			"cross-company archive mutated the fleet",
+		)
+	}
+
+	// No membership must fail with the same not-found result.
+	err = repo.ArchiveForCompanyMember(
+		ctx,
+		noMembershipUserID,
+		archiveOwnFleetID,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound without membership for fleet archive, got %v",
+			err,
+		)
+	}
+
+	// An authorized company member may archive its own fleet.
+	err = repo.ArchiveForCompanyMember(
+		ctx,
+		memberUserID,
+		archiveOwnFleetID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"membership-guarded fleet archive: %v",
+			err,
+		)
+	}
+
+	var (
+		ownArchived bool
+		ownActive   bool
+	)
+	err = tx.QueryRow(
+		ctx,
+		`
+			SELECT
+				deleted_at IS NOT NULL,
+				is_active
+			FROM fleets
+			WHERE id=$1
+		`,
+		archiveOwnFleetID,
+	).Scan(
+		&ownArchived,
+		&ownActive,
+	)
+	if err != nil {
+		t.Fatalf(
+			"inspect own-company fleet after archive: %v",
+			err,
+		)
+	}
+	if !ownArchived {
+		t.Fatal(
+			"authorized fleet archive did not set deleted_at",
+		)
+	}
+	if !ownActive {
+		t.Fatal(
+			"fleet archive must preserve active operational state",
+		)
+	}
+
+	_, err = repo.GetByID(
+		ctx,
+		archiveOwnFleetID,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound reading archived fleet, got %v",
+			err,
+		)
+	}
+
+	// Re-archiving fails closed.
+	err = repo.ArchiveForCompanyMember(
+		ctx,
+		memberUserID,
+		archiveOwnFleetID,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound re-archiving fleet, got %v",
+			err,
+		)
+	}
+
+	// The unrestricted repository surface is available to SYSTEM_ADMIN-level
+	// service authority, but archive still preserves lifecycle activation.
+	err = repo.Archive(
+		ctx,
+		archiveGlobalFleetID,
+	)
+	if err != nil {
+		t.Fatalf(
+			"global fleet archive: %v",
+			err,
+		)
+	}
+
+	var (
+		globalArchived bool
+		globalActive   bool
+	)
+	err = tx.QueryRow(
+		ctx,
+		`
+			SELECT
+				deleted_at IS NOT NULL,
+				is_active
+			FROM fleets
+			WHERE id=$1
+		`,
+		archiveGlobalFleetID,
+	).Scan(
+		&globalArchived,
+		&globalActive,
+	)
+	if err != nil {
+		t.Fatalf(
+			"inspect globally archived fleet: %v",
+			err,
+		)
+	}
+	if !globalArchived {
+		t.Fatal(
+			"global archive did not set deleted_at",
+		)
+	}
+	if globalActive {
+		t.Fatal(
+			"archive changed an inactive fleet to active",
+		)
+	}
+
+	// Unknown targets also fail closed.
+	err = repo.ArchiveForCompanyMember(
+		ctx,
+		memberUserID,
+		uuid.NewString(),
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf(
+			"expected repository.ErrNotFound for nonexistent fleet archive, got %v",
+			err,
+		)
+	}
+
 }

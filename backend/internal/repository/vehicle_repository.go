@@ -86,6 +86,13 @@ type VehicleRepository interface {
 		id string,
 	) error
 
+	// HasNonDeletedByFleet reports whether the fleet still contains at least
+	// one non-archived vehicle, regardless of operational activation state.
+	HasNonDeletedByFleet(
+		ctx context.Context,
+		fleetID string,
+	) (bool, error)
+
 	// Archive hides a vehicle from active repository reads.
 	//
 	// This unrestricted mutation is reserved for callers that have already

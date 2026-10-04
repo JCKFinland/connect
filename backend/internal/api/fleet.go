@@ -11,6 +11,7 @@ import (
 	fleetservice "github.com/JCKFinland/connect/backend/internal/services/fleet"
 
 	"github.com/JCKFinland/connect/backend/internal/middleware"
+	"github.com/JCKFinland/connect/backend/internal/repository"
 
 	// Leverages a shared response envelope utility format.
 	"github.com/JCKFinland/connect/backend/pkg/response"
@@ -285,36 +286,59 @@ func (h *FleetHandler) Update(
 	)
 }
 
-// Delete strips an operating taxi company or fleet permanently out of the database.
+// Delete archives a fleet after enforcing tenant and lifecycle authority.
 func (h *FleetHandler) Delete(
 	c *gin.Context,
 ) {
 
-	// Isolates structural ID parameter string out of path variables.
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
 	id := c.Param("id")
 
-	// Dispatches the deletion intent to the service layer.
 	err := h.service.Delete(
 		c.Request.Context(),
+		user.ID,
 		id,
 	)
 	if err != nil {
+		switch {
+		case errors.Is(
+			err,
+			repository.ErrNotFound,
+		):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Fleet not found",
+				nil,
+			)
 
-		response.Error(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-			nil,
-		)
+		case errors.Is(
+			err,
+			fleetservice.ErrFleetHasVehicles,
+		):
+			response.Error(
+				c,
+				http.StatusConflict,
+				err.Error(),
+				nil,
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
 
 		return
 	}
 
-	// Formats an HTTP 200 Status OK response confirming the company is removed.
 	response.Success(
 		c,
 		http.StatusOK,
-		"Fleet deleted successfully",
+		"Fleet archived successfully",
 		nil,
 	)
 }

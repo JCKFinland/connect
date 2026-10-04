@@ -14,6 +14,16 @@ func NewTripRepositoryWithDB(
 	}
 }
 
+// NewFleetRepositoryWithDB creates a fleet repository
+// using either a normal connection pool or an active transaction.
+func NewFleetRepositoryWithDB(
+	db DBTX,
+) *FleetRepository {
+	return &FleetRepository{
+		db: db,
+	}
+}
+
 // NewVehicleRepositoryWithDB creates a vehicle repository
 // using either a normal connection pool or an active transaction.
 func NewVehicleRepositoryWithDB(

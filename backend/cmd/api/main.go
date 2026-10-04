@@ -172,6 +172,7 @@ func main() {
 
 	fleetService := fleetservice.NewService(
 		fleetservice.Dependencies{
+			DB:                 db,
 			Fleets:             fleetRepository,
 			Drivers:            driverRepo,
 			Branches:           branchRepo,

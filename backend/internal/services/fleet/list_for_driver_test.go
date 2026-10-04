@@ -131,8 +131,16 @@ func (s *listForDriverFleetRepoStub) UpdateDetailsForCompanyMember(
 	return nil
 }
 
-func (s *listForDriverFleetRepoStub) Delete(
+func (s *listForDriverFleetRepoStub) Archive(
 	context.Context,
+	string,
+) error {
+	return nil
+}
+
+func (s *listForDriverFleetRepoStub) ArchiveForCompanyMember(
+	context.Context,
+	string,
 	string,
 ) error {
 	return nil

@@ -7,6 +7,8 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
 var ErrVehicleCreationAccessDenied = errors.New(
@@ -17,83 +19,126 @@ var ErrVehicleCreationAccessDenied = errors.New(
 //
 // Fleet ownership is the canonical source of company and branch authority.
 // Clients cannot choose company_id, branch_id, or initial activation state.
+//
+// Creation shares the owning fleet's transaction-scoped advisory lock with
+// fleet lifecycle operations. This prevents a vehicle from being inserted
+// from stale fleet state while the fleet is being archived or deactivated.
 func (s *Service) Create(
 	ctx context.Context,
 	userID string,
 	req CreateVehicleRequest,
 ) (*VehicleResponse, error) {
-	if userID == "" {
+	if s == nil ||
+		s.db == nil ||
+		s.userRoles == nil ||
+		userID == "" ||
+		req.FleetID == "" {
+
 		return nil, ErrVehicleCreationAccessDenied
 	}
 
-	if s.fleets == nil {
-		return nil, fmt.Errorf("fleet repository is not configured")
-	}
+	var created *models.Vehicle
 
-	fleet, err := s.fleets.GetByID(ctx, req.FleetID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrInvalidFleet
-		}
-
-		return nil, fmt.Errorf("get fleet: %w", err)
-	}
-
-	if fleet == nil ||
-		fleet.ID == "" ||
-		fleet.CompanyID == "" ||
-		fleet.BranchID == "" ||
-		!fleet.IsActive {
-		return nil, ErrInvalidFleet
-	}
-
-	authorized, err := s.canCreateVehicleForCompany(
+	err := postgresrepo.RunInTransaction(
 		ctx,
-		userID,
-		fleet.CompanyID,
+		s.db,
+		func(tx pgx.Tx) error {
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"fleet:"+req.FleetID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock fleet lifecycle for vehicle creation: %w",
+					err,
+				)
+			}
+
+			fleets := postgresrepo.NewFleetRepositoryWithDB(tx)
+			vehicles := postgresrepo.NewVehicleRepositoryWithDB(tx)
+
+			// Re-read the fleet only after acquiring its lifecycle lock.
+			// GetByID excludes archived fleets, so archived and nonexistent
+			// parents are both invalid creation targets.
+			fleet, err := fleets.GetByID(
+				ctx,
+				req.FleetID,
+			)
+			if err != nil {
+				if errors.Is(err, repository.ErrNotFound) {
+					return ErrInvalidFleet
+				}
+
+				return fmt.Errorf("get fleet: %w", err)
+			}
+
+			if fleet == nil ||
+				fleet.ID == "" ||
+				fleet.CompanyID == "" ||
+				fleet.BranchID == "" ||
+				!fleet.IsActive {
+
+				return ErrInvalidFleet
+			}
+
+			authorized, err := s.canCreateVehicleForCompany(
+				ctx,
+				userID,
+				fleet.CompanyID,
+			)
+			if err != nil {
+				return err
+			}
+			if !authorized {
+				return ErrVehicleCreationAccessDenied
+			}
+
+			vehicle := &models.Vehicle{
+				CompanyID:          fleet.CompanyID,
+				BranchID:           fleet.BranchID,
+				FleetID:            fleet.ID,
+				RegistrationNumber: req.RegistrationNumber,
+				VIN:                normalizeVIN(req.VIN),
+				Make:               req.Make,
+				Model:              req.Model,
+				ModelYear:          req.ModelYear,
+				Color:              req.Color,
+				VehicleType:        req.VehicleType,
+				FuelType:           req.FuelType,
+				SeatingCapacity:    req.SeatingCapacity,
+				IsActive:           true,
+			}
+
+			if err := vehicles.Create(
+				ctx,
+				vehicle,
+			); err != nil {
+				return err
+			}
+
+			created = vehicle
+			return nil
+		},
 	)
 	if err != nil {
 		return nil, err
 	}
-	if !authorized {
-		return nil, ErrVehicleCreationAccessDenied
-	}
-
-	vehicle := &models.Vehicle{
-		CompanyID:          fleet.CompanyID,
-		BranchID:           fleet.BranchID,
-		FleetID:            fleet.ID,
-		RegistrationNumber: req.RegistrationNumber,
-		VIN:                normalizeVIN(req.VIN),
-		Make:               req.Make,
-		Model:              req.Model,
-		ModelYear:          req.ModelYear,
-		Color:              req.Color,
-		VehicleType:        req.VehicleType,
-		FuelType:           req.FuelType,
-		SeatingCapacity:    req.SeatingCapacity,
-		IsActive:           true,
-	}
-
-	if err := s.vehicles.Create(ctx, vehicle); err != nil {
-		return nil, err
-	}
 
 	return &VehicleResponse{
-		ID:                 vehicle.ID,
-		CompanyID:          vehicle.CompanyID,
-		BranchID:           vehicle.BranchID,
-		FleetID:            vehicle.FleetID,
-		RegistrationNumber: vehicle.RegistrationNumber,
-		VIN:                vinValue(vehicle.VIN),
-		Make:               vehicle.Make,
-		Model:              vehicle.Model,
-		ModelYear:          vehicle.ModelYear,
-		Color:              vehicle.Color,
-		VehicleType:        vehicle.VehicleType,
-		FuelType:           vehicle.FuelType,
-		SeatingCapacity:    vehicle.SeatingCapacity,
-		IsActive:           vehicle.IsActive,
+		ID:                 created.ID,
+		CompanyID:          created.CompanyID,
+		BranchID:           created.BranchID,
+		FleetID:            created.FleetID,
+		RegistrationNumber: created.RegistrationNumber,
+		VIN:                vinValue(created.VIN),
+		Make:               created.Make,
+		Model:              created.Model,
+		ModelYear:          created.ModelYear,
+		Color:              created.Color,
+		VehicleType:        created.VehicleType,
+		FuelType:           created.FuelType,
+		SeatingCapacity:    created.SeatingCapacity,
+		IsActive:           created.IsActive,
 	}, nil
 }
 

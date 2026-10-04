@@ -454,21 +454,23 @@ func (r *FleetRepository) UpdateDetailsForCompanyMember(
 	return nil
 }
 
-func (r *FleetRepository) Delete(
+// Archive hides a non-deleted fleet from normal repository reads without
+// changing its operational activation state.
+func (r *FleetRepository) Archive(
 	ctx context.Context,
 	id string,
 ) error {
 
-	query := `
-	UPDATE fleets
-	SET
-		deleted_at=NOW(),
-		updated_at=NOW()
-	WHERE id=$1
-	AND deleted_at IS NULL;
+	const query = `
+		UPDATE fleets
+		SET
+			deleted_at=NOW(),
+			updated_at=NOW()
+		WHERE id=$1
+		  AND deleted_at IS NULL
 	`
 
-	cmd, err := r.db.Exec(
+	result, err := r.db.Exec(
 		ctx,
 		query,
 		id,
@@ -477,7 +479,47 @@ func (r *FleetRepository) Delete(
 		return err
 	}
 
-	if cmd.RowsAffected() == 0 {
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
+}
+
+// ArchiveForCompanyMember hides a non-deleted fleet only when the
+// authenticated user has explicit membership in its current company.
+func (r *FleetRepository) ArchiveForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+
+	const query = `
+		UPDATE fleets AS f
+		SET
+			deleted_at=NOW(),
+			updated_at=NOW()
+		WHERE f.id=$1
+		  AND f.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM company_memberships AS cm
+			WHERE cm.company_id=f.company_id
+			  AND cm.user_id=$2
+		  )
+	`
+
+	result, err := r.db.Exec(
+		ctx,
+		query,
+		id,
+		userID,
+	)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
 		return repository.ErrNotFound
 	}
 

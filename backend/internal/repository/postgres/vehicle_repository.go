@@ -668,6 +668,34 @@ func (r *VehicleRepository) ReactivateForCompanyMember(
 	return nil
 }
 
+// HasNonDeletedByFleet reports whether a fleet still contains any vehicle
+// that has not itself been archived.
+func (r *VehicleRepository) HasNonDeletedByFleet(
+	ctx context.Context,
+	fleetID string,
+) (bool, error) {
+
+	const query = `
+		SELECT EXISTS (
+			SELECT 1
+			FROM vehicles
+			WHERE fleet_id=$1
+			  AND deleted_at IS NULL
+		)
+	`
+
+	var exists bool
+	if err := r.db.QueryRow(
+		ctx,
+		query,
+		fleetID,
+	).Scan(&exists); err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
 // Archive hides a non-deleted vehicle from active repository reads.
 func (r *VehicleRepository) Archive(
 	ctx context.Context,

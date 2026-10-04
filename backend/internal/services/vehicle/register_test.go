@@ -144,6 +144,13 @@ func (r *vehicleRepositoryStub) ReactivateForCompanyMember(
 	return nil
 }
 
+func (r *vehicleRepositoryStub) HasNonDeletedByFleet(
+	ctx context.Context,
+	fleetID string,
+) (bool, error) {
+	return false, nil
+}
+
 func (r *vehicleRepositoryStub) Archive(
 	ctx context.Context,
 	id string,
@@ -291,9 +298,17 @@ func (r *vehicleFleetRepositoryStub) UpdateDetailsForCompanyMember(
 	return nil
 }
 
-func (r *vehicleFleetRepositoryStub) Delete(
-	ctx context.Context,
-	id string,
+func (r *vehicleFleetRepositoryStub) Archive(
+	context.Context,
+	string,
+) error {
+	return nil
+}
+
+func (r *vehicleFleetRepositoryStub) ArchiveForCompanyMember(
+	context.Context,
+	string,
+	string,
 ) error {
 	return nil
 }
