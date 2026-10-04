@@ -295,6 +295,138 @@ func (h *VehicleHandler) Delete(
 	)
 }
 
+// Deactivate removes a vehicle from operational eligibility while preserving
+// its administrative and historical record.
+func (h *VehicleHandler) Deactivate(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
+	id := c.Param("id")
+
+	err := h.service.Deactivate(
+		c.Request.Context(),
+		user.ID,
+		id,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(
+			err,
+			repository.ErrNotFound,
+		):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Vehicle not found",
+				nil,
+			)
+
+		case errors.Is(
+			err,
+			vehicle.ErrVehicleHasActiveAssignment,
+		):
+			response.Error(
+				c,
+				http.StatusConflict,
+				err.Error(),
+				nil,
+			)
+
+		case errors.Is(
+			err,
+			vehicle.ErrVehicleCreationAccessDenied,
+		):
+			response.Forbidden(
+				c,
+				err.Error(),
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
+
+		return
+	}
+
+	response.Success(
+		c,
+		http.StatusOK,
+		"Vehicle deactivated successfully",
+		nil,
+	)
+}
+
+// Reactivate restores operational eligibility for a vehicle whose owning fleet
+// is itself operationally active.
+func (h *VehicleHandler) Reactivate(
+	c *gin.Context,
+) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
+	id := c.Param("id")
+
+	err := h.service.Reactivate(
+		c.Request.Context(),
+		user.ID,
+		id,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(
+			err,
+			repository.ErrNotFound,
+		):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Vehicle not found",
+				nil,
+			)
+
+		case errors.Is(
+			err,
+			vehicle.ErrVehicleFleetInactive,
+		):
+			response.Error(
+				c,
+				http.StatusConflict,
+				err.Error(),
+				nil,
+			)
+
+		case errors.Is(
+			err,
+			vehicle.ErrVehicleCreationAccessDenied,
+		):
+			response.Forbidden(
+				c,
+				err.Error(),
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
+
+		return
+	}
+
+	response.Success(
+		c,
+		http.StatusOK,
+		"Vehicle reactivated successfully",
+		nil,
+	)
+}
+
 // RegisterForDriver registers a vehicle for the authenticated driver.
 func (h *VehicleHandler) RegisterForDriver(
 	c *gin.Context,

@@ -18,7 +18,7 @@ func NewTripRepositoryWithDB(
 // using either a normal connection pool or an active transaction.
 func NewVehicleRepositoryWithDB(
 	db DBTX,
-) repository.VehicleRepository {
+) *VehicleRepository {
 	return &VehicleRepository{
 		db: db,
 	}

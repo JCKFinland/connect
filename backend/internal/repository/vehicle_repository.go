@@ -56,6 +56,36 @@ type VehicleRepository interface {
 		vehicle *models.Vehicle,
 	) error
 
+	// Deactivate marks a non-deleted vehicle operationally inactive.
+	Deactivate(
+		ctx context.Context,
+		id string,
+	) error
+
+	// DeactivateForCompanyMember marks a vehicle inactive only when the
+	// authenticated user has explicit membership in its company.
+	DeactivateForCompanyMember(
+		ctx context.Context,
+		userID string,
+		id string,
+	) error
+
+	// Reactivate marks a non-deleted vehicle operationally active only when
+	// its current fleet is itself active and non-deleted.
+	Reactivate(
+		ctx context.Context,
+		id string,
+	) error
+
+	// ReactivateForCompanyMember marks a vehicle active only when the
+	// authenticated user has explicit membership in its company and its
+	// current fleet is active and non-deleted.
+	ReactivateForCompanyMember(
+		ctx context.Context,
+		userID string,
+		id string,
+	) error
+
 	// Archive hides a vehicle from active repository reads.
 	//
 	// This unrestricted mutation is reserved for callers that have already

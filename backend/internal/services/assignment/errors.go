@@ -13,6 +13,9 @@ var (
 	// Vehicle must belong to the authenticated driver's company and branch.
 	ErrVehicleOutsideDriverScope = errors.New("vehicle is outside driver organizational scope")
 
+	// Vehicle must be operationally active before it can be assigned.
+	ErrVehicleInactive = errors.New("vehicle is inactive")
+
 	// Driver already has an active assignment.
 	ErrDriverAlreadyAssigned = errors.New("driver already assigned")
 

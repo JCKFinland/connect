@@ -1635,7 +1635,114 @@ func TestAssignDerivesAuthenticatedDriverScopeAndRejectsForeignVehicle(
 	}
 
 	// ---------------------------------------------------------
-	// 6. The driver's own vehicle must succeed, with every
+	// 6. An inactive vehicle remains administratively visible but
+	//    cannot acquire a new active assignment.
+	// ---------------------------------------------------------
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE vehicles
+			SET is_active = FALSE,
+			    updated_at = NOW()
+			WHERE id = $1
+		`,
+		driverFixture.VehicleID,
+	); err != nil {
+		t.Fatalf(
+			"deactivate assignment vehicle for regression: %v",
+			err,
+		)
+	}
+
+	var assignmentCountBeforeInactiveAttempt int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM driver_assignments
+			WHERE driver_id = $1
+		`,
+		driverFixture.UserID,
+	).Scan(&assignmentCountBeforeInactiveAttempt); err != nil {
+		t.Fatalf(
+			"count assignments before inactive vehicle attempt: %v",
+			err,
+		)
+	}
+
+	createdAssignment, err = service.Assign(
+		ctx,
+		driverFixture.UserID,
+		AssignDriverRequest{
+			VehicleID: driverFixture.VehicleID,
+			Notes:     "must reject inactive vehicle",
+		},
+	)
+
+	if !errors.Is(
+		err,
+		ErrVehicleInactive,
+	) {
+		t.Fatalf(
+			"expected ErrVehicleInactive, got %v",
+			err,
+		)
+	}
+
+	if createdAssignment != nil {
+		t.Fatalf(
+			"expected no inactive-vehicle assignment, got %+v",
+			createdAssignment,
+		)
+	}
+
+	var assignmentCountAfterInactiveAttempt int
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM driver_assignments
+			WHERE driver_id = $1
+		`,
+		driverFixture.UserID,
+	).Scan(&assignmentCountAfterInactiveAttempt); err != nil {
+		t.Fatalf(
+			"count assignments after inactive vehicle attempt: %v",
+			err,
+		)
+	}
+
+	if assignmentCountAfterInactiveAttempt !=
+		assignmentCountBeforeInactiveAttempt {
+
+		t.Fatalf(
+			"inactive vehicle attempt changed assignment history: before=%d after=%d",
+			assignmentCountBeforeInactiveAttempt,
+			assignmentCountAfterInactiveAttempt,
+		)
+	}
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			UPDATE vehicles
+			SET is_active = TRUE,
+			    updated_at = NOW()
+			WHERE id = $1
+		`,
+		driverFixture.VehicleID,
+	); err != nil {
+		t.Fatalf(
+			"reactivate assignment vehicle after regression: %v",
+			err,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// 7. The driver's own active vehicle must succeed, with every
 	//    relationship persisted from authoritative server data.
 	// ---------------------------------------------------------
 

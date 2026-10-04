@@ -222,7 +222,7 @@ func (r *VehicleRepository) GetByIDForCompanyMember(
 	return &vehicle, nil
 }
 
-// List returns all active vehicles.
+// List returns all non-deleted vehicles.
 func (r *VehicleRepository) List(
 	ctx context.Context,
 ) ([]models.Vehicle, error) {
@@ -459,6 +459,203 @@ func (r *VehicleRepository) UpdateDetailsForCompanyMember(
 		vehicle.VehicleType,
 		vehicle.FuelType,
 		vehicle.SeatingCapacity,
+	)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
+}
+
+// Deactivate marks a non-deleted vehicle operationally inactive.
+func (r *VehicleRepository) Deactivate(
+	ctx context.Context,
+	id string,
+) error {
+
+	const query = `
+		UPDATE vehicles
+		SET
+			is_active=FALSE,
+			updated_at=NOW()
+		WHERE id=$1
+		  AND deleted_at IS NULL
+	`
+
+	result, err := r.db.Exec(
+		ctx,
+		query,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
+}
+
+// DeactivateForCompanyMember marks a vehicle operationally inactive only when
+// the authenticated user has explicit membership in the vehicle's company.
+func (r *VehicleRepository) DeactivateForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+
+	const query = `
+		UPDATE vehicles AS v
+		SET
+			is_active=FALSE,
+			updated_at=NOW()
+		WHERE v.id=$1
+		  AND v.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM company_memberships AS cm
+			WHERE cm.company_id=v.company_id
+			  AND cm.user_id=$2
+		  )
+	`
+
+	result, err := r.db.Exec(
+		ctx,
+		query,
+		id,
+		userID,
+	)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
+}
+
+// IsOwningFleetActive reports whether a non-deleted vehicle's current fleet
+// exists, is non-deleted, and is operationally active.
+func (r *VehicleRepository) IsOwningFleetActive(
+	ctx context.Context,
+	vehicleID string,
+) (bool, error) {
+	const query = `
+		SELECT
+			f.is_active
+		FROM vehicles AS v
+		JOIN fleets AS f
+		  ON f.id = v.fleet_id
+		WHERE v.id = $1
+		  AND v.deleted_at IS NULL
+		  AND f.deleted_at IS NULL
+	`
+
+	var active bool
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		vehicleID,
+	).Scan(
+		&active,
+	)
+	if errors.Is(
+		err,
+		pgx.ErrNoRows,
+	) {
+		return false, repository.ErrNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+
+	return active, nil
+}
+
+// Reactivate marks a non-deleted vehicle operationally active only when its
+// current fleet remains active and non-deleted.
+func (r *VehicleRepository) Reactivate(
+	ctx context.Context,
+	id string,
+) error {
+
+	const query = `
+		UPDATE vehicles AS v
+		SET
+			is_active=TRUE,
+			updated_at=NOW()
+		WHERE v.id=$1
+		  AND v.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM fleets AS f
+			WHERE f.id=v.fleet_id
+			  AND f.is_active=TRUE
+			  AND f.deleted_at IS NULL
+		  )
+	`
+
+	result, err := r.db.Exec(
+		ctx,
+		query,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
+}
+
+// ReactivateForCompanyMember marks a vehicle operationally active only when
+// the authenticated user has explicit membership in the vehicle's company
+// and its current fleet remains active and non-deleted.
+func (r *VehicleRepository) ReactivateForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+
+	const query = `
+		UPDATE vehicles AS v
+		SET
+			is_active=TRUE,
+			updated_at=NOW()
+		WHERE v.id=$1
+		  AND v.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM company_memberships AS cm
+			WHERE cm.company_id=v.company_id
+			  AND cm.user_id=$2
+		  )
+		  AND EXISTS (
+			SELECT 1
+			FROM fleets AS f
+			WHERE f.id=v.fleet_id
+			  AND f.is_active=TRUE
+			  AND f.deleted_at IS NULL
+		  )
+	`
+
+	result, err := r.db.Exec(
+		ctx,
+		query,
+		id,
+		userID,
 	)
 	if err != nil {
 		return err

@@ -141,6 +141,10 @@ func (s *Service) Assign(
 				return ErrVehicleOutsideDriverScope
 			}
 
+			if !vehicle.IsActive {
+				return ErrVehicleInactive
+			}
+
 			// ---------------------------------------------------------
 			// 2. Lock driver lifecycle state.
 			//

@@ -402,6 +402,18 @@ func RegisterRoutes(
 				rbacMiddleware.RequirePermission("vehicles.manage"),
 				vehicleHandler.Delete,
 			)
+
+			vehicles.PATCH(
+				"/:id/deactivate",
+				rbacMiddleware.RequirePermission("vehicles.manage"),
+				vehicleHandler.Deactivate,
+			)
+
+			vehicles.PATCH(
+				"/:id/reactivate",
+				rbacMiddleware.RequirePermission("vehicles.manage"),
+				vehicleHandler.Reactivate,
+			)
 		}
 
 		// ---------------------------------------------------

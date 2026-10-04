@@ -114,6 +114,36 @@ func (r *vehicleRepositoryStub) UpdateDetailsForCompanyMember(
 	return r.updateErr
 }
 
+func (r *vehicleRepositoryStub) Deactivate(
+	ctx context.Context,
+	id string,
+) error {
+	return nil
+}
+
+func (r *vehicleRepositoryStub) DeactivateForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+	return nil
+}
+
+func (r *vehicleRepositoryStub) Reactivate(
+	ctx context.Context,
+	id string,
+) error {
+	return nil
+}
+
+func (r *vehicleRepositoryStub) ReactivateForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+	return nil
+}
+
 func (r *vehicleRepositoryStub) Archive(
 	ctx context.Context,
 	id string,
