@@ -122,6 +122,7 @@ func main() {
 	companyRepo := postgresrepo.NewCompanyRepository(db)
 	branchRepo := postgresrepo.NewBranchRepository(db)
 	fleetRepository := postgresrepo.NewFleetRepository(db)
+	companyMembershipRepo := postgresrepo.NewCompanyMembershipRepository(db)
 	vehicleRepo := postgresrepo.NewVehicleRepository(db)
 	driverRepo := postgresrepo.NewDriverRepository(db)
 	driverDocumentRepo := postgresrepo.NewDriverDocumentRepository(db)
@@ -178,9 +179,11 @@ func main() {
 
 	vehicleService := vehicleservice.NewService(
 		vehicleservice.Dependencies{
-			Vehicles: vehicleRepo,
-			Drivers:  driverRepo,
-			Fleets:   fleetRepository,
+			Vehicles:           vehicleRepo,
+			Drivers:            driverRepo,
+			Fleets:             fleetRepository,
+			UserRoles:          userRoleRepo,
+			CompanyMemberships: companyMembershipRepo,
 		},
 	)
 

@@ -26,10 +26,6 @@ type RegisterDriverVehicleRequest struct {
 
 // CreateVehicleRequest contains the payload required to register a vehicle.
 type CreateVehicleRequest struct {
-	CompanyID string `json:"company_id" binding:"required"`
-
-	BranchID string `json:"branch_id" binding:"required"`
-
 	FleetID string `json:"fleet_id" binding:"required"`
 
 	RegistrationNumber string `json:"registration_number" binding:"required"`
@@ -49,8 +45,6 @@ type CreateVehicleRequest struct {
 	FuelType string `json:"fuel_type" binding:"required"`
 
 	SeatingCapacity int `json:"seating_capacity"`
-
-	IsActive bool `json:"is_active"`
 }
 
 // UpdateVehicleRequest contains editable vehicle fields.

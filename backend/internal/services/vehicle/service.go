@@ -5,15 +5,19 @@ import (
 )
 
 type Dependencies struct {
-	Vehicles repository.VehicleRepository
-	Drivers  repository.DriverRepository
-	Fleets   repository.FleetRepository
+	Vehicles           repository.VehicleRepository
+	Drivers            repository.DriverRepository
+	Fleets             repository.FleetRepository
+	UserRoles          repository.UserRoleRepository
+	CompanyMemberships repository.CompanyMembershipRepository
 }
 
 type Service struct {
-	vehicles repository.VehicleRepository
-	drivers  repository.DriverRepository
-	fleets   repository.FleetRepository
+	vehicles           repository.VehicleRepository
+	drivers            repository.DriverRepository
+	fleets             repository.FleetRepository
+	userRoles          repository.UserRoleRepository
+	companyMemberships repository.CompanyMembershipRepository
 }
 
 func NewService(
@@ -21,8 +25,10 @@ func NewService(
 ) *Service {
 
 	return &Service{
-		vehicles: deps.Vehicles,
-		drivers:  deps.Drivers,
-		fleets:   deps.Fleets,
+		vehicles:           deps.Vehicles,
+		drivers:            deps.Drivers,
+		fleets:             deps.Fleets,
+		userRoles:          deps.UserRoles,
+		companyMemberships: deps.CompanyMemberships,
 	}
 }

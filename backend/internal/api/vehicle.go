@@ -37,6 +37,12 @@ func (h *VehicleHandler) Create(
 	c *gin.Context,
 ) {
 
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
 	var req vehicle.CreateVehicleRequest
 
 	// Validates and maps incoming JSON fields onto the expected request structure.
@@ -55,16 +61,20 @@ func (h *VehicleHandler) Create(
 	// Forwards the data payload to the underlying business service layer.
 	createdVehicle, err := h.service.Create(
 		c.Request.Context(),
+		user.ID,
 		req,
 	)
 	if err != nil {
+		switch {
+		case errors.Is(err, vehicle.ErrVehicleCreationAccessDenied):
+			response.Forbidden(c, err.Error())
 
-		response.Error(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-			nil,
-		)
+		case errors.Is(err, vehicle.ErrInvalidFleet):
+			response.BadRequest(c, err.Error())
+
+		default:
+			response.InternalServerError(c)
+		}
 
 		return
 	}
