@@ -168,11 +168,39 @@ func (r *fleetCreateBranchRepositoryStub) List(
 	return nil, nil
 }
 
+func (r *fleetCreateBranchRepositoryStub) GetOwningCompanyID(
+	ctx context.Context,
+	branchID string,
+) (string, error) {
+	branch, err := r.GetByID(ctx, branchID)
+	if err != nil {
+		return "", err
+	}
+	if branch == nil || branch.CompanyID == "" {
+		return "", repository.ErrNotFound
+	}
+	return branch.CompanyID, nil
+}
+
 func (r *fleetCreateBranchRepositoryStub) ListActiveByCompanyID(
 	context.Context,
 	string,
 ) ([]*models.Branch, error) {
 	return nil, nil
+}
+
+func (r *fleetCreateBranchRepositoryStub) HasNonDeletedByCompany(
+	context.Context,
+	string,
+) (bool, error) {
+	return false, nil
+}
+
+func (r *fleetCreateBranchRepositoryStub) HasActiveByCompany(
+	context.Context,
+	string,
+) (bool, error) {
+	return false, nil
 }
 
 func (r *fleetCreateBranchRepositoryStub) Archive(

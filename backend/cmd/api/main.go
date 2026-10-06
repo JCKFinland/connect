@@ -165,8 +165,11 @@ func main() {
 	// Encapsulates taxi company onboarding and fleet management processes.
 	companyService := companyservice.NewService(
 		companyservice.Dependencies{
-			Config:    cfg,
-			Companies: companyRepo,
+			Config:             cfg,
+			DB:                 db,
+			Companies:          companyRepo,
+			UserRoles:          userRoleRepo,
+			CompanyMemberships: companyMembershipRepo,
 		},
 	)
 

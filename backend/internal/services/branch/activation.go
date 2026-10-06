@@ -2,7 +2,11 @@ package branch
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/repository"
 
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/jackc/pgx/v5"
@@ -103,6 +107,7 @@ func (s *Service) Reactivate(
 	if s == nil ||
 		s.db == nil ||
 		s.userRoles == nil ||
+		s.branches == nil ||
 		userID == "" ||
 		id == "" {
 		return fmt.Errorf("branch reactivation access denied")
@@ -116,10 +121,34 @@ func (s *Service) Reactivate(
 		)
 	}
 
+	// Pre-read only to establish deterministic company -> branch lock ordering.
+	// The branch is authoritatively re-read after both locks are held.
+	companyID, err := s.branches.GetOwningCompanyID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return repository.ErrNotFound
+		}
+		return fmt.Errorf("get branch owning company: %w", err)
+	}
+	if companyID == "" {
+		return repository.ErrNotFound
+	}
+
 	return postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
 		func(tx pgx.Tx) error {
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"company:"+companyID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock owning company for branch reactivation: %w",
+					err,
+				)
+			}
+
 			if err := postgresrepo.AcquireTransactionAdvisoryLock(
 				ctx,
 				tx,
@@ -131,21 +160,71 @@ func (s *Service) Reactivate(
 				)
 			}
 
+			companies := postgresrepo.NewCompanyRepositoryWithDB(tx)
 			branches := postgresrepo.NewBranchRepositoryWithDB(tx)
 
+			var branchCompanyID string
+
 			if systemAdmin {
-				if _, err := branches.GetByID(ctx, id); err != nil {
+				branchObj, err := branches.GetByID(ctx, id)
+				if err != nil {
 					return err
 				}
-				return branches.Reactivate(ctx, id)
+				branchCompanyID = branchObj.CompanyID
+			} else {
+				branchObj, err := branches.GetByIDForCompanyMember(
+					ctx,
+					userID,
+					id,
+				)
+				if err != nil {
+					return err
+				}
+				branchCompanyID = branchObj.CompanyID
 			}
 
-			if _, err := branches.GetByIDForCompanyMember(
-				ctx,
-				userID,
-				id,
-			); err != nil {
-				return err
+			// Ownership changing between the pre-read and locked authoritative
+			// read invalidates the lock target. Fail closed rather than acting
+			// while holding the wrong parent lock.
+			if branchCompanyID != companyID {
+				return fmt.Errorf(
+					"branch owning company changed during reactivation",
+				)
+			}
+
+			var company *models.Company
+
+			if systemAdmin {
+				company, err = companies.GetByID(
+					ctx,
+					companyID,
+				)
+			} else {
+				company, err = companies.GetByIDForCompanyMember(
+					ctx,
+					userID,
+					companyID,
+				)
+			}
+
+			if err != nil {
+				if errors.Is(err, repository.ErrNotFound) {
+					return ErrInvalidCompany
+				}
+				return fmt.Errorf(
+					"check branch company lifecycle: %w",
+					err,
+				)
+			}
+
+			if company == nil ||
+				company.ID == "" ||
+				!company.IsActive {
+				return ErrInvalidCompany
+			}
+
+			if systemAdmin {
+				return branches.Reactivate(ctx, id)
 			}
 
 			return branches.ReactivateForCompanyMember(

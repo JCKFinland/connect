@@ -28,8 +28,6 @@ type CreateCompanyRequest struct {
 	PostalCode string `json:"postal_code"`
 
 	LogoURL string `json:"logo_url"`
-
-	IsActive bool `json:"is_active"`
 }
 
 type UpdateCompanyRequest struct {
@@ -60,6 +58,4 @@ type UpdateCompanyRequest struct {
 	PostalCode string `json:"postal_code"`
 
 	LogoURL string `json:"logo_url"`
-
-	IsActive bool `json:"is_active"`
 }

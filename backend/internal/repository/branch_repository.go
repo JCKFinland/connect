@@ -48,6 +48,24 @@ type BranchRepository interface {
 		companyID string,
 	) ([]*models.Branch, error)
 
+	// GetOwningCompanyID returns the current company ID for a non-deleted branch.
+	// It is used to establish company -> branch lifecycle lock ordering before
+	// performing the authoritative transactional re-read.
+	GetOwningCompanyID(
+		ctx context.Context,
+		branchID string,
+	) (string, error)
+
+	HasNonDeletedByCompany(
+		ctx context.Context,
+		companyID string,
+	) (bool, error)
+
+	HasActiveByCompany(
+		ctx context.Context,
+		companyID string,
+	) (bool, error)
+
 	Archive(
 		ctx context.Context,
 		id string,

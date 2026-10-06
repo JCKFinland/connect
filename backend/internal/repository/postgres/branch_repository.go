@@ -688,3 +688,79 @@ func (r *BranchRepository) ReactivateForCompanyMember(
 	}
 	return nil
 }
+
+func (r *BranchRepository) HasNonDeletedByCompany(
+	ctx context.Context,
+	companyID string,
+) (bool, error) {
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM branches
+			WHERE company_id = $1
+			  AND deleted_at IS NULL
+		);
+	`
+
+	var exists bool
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		companyID,
+	).Scan(&exists)
+
+	return exists, err
+}
+
+func (r *BranchRepository) HasActiveByCompany(
+	ctx context.Context,
+	companyID string,
+) (bool, error) {
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM branches
+			WHERE company_id = $1
+			  AND is_active = TRUE
+			  AND deleted_at IS NULL
+		);
+	`
+
+	var exists bool
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		companyID,
+	).Scan(&exists)
+
+	return exists, err
+}
+
+// GetOwningCompanyID returns the current company ID for a non-deleted branch.
+func (r *BranchRepository) GetOwningCompanyID(
+	ctx context.Context,
+	branchID string,
+) (string, error) {
+	const query = `
+		SELECT company_id
+		FROM branches
+		WHERE id = $1
+		  AND deleted_at IS NULL
+	`
+
+	var companyID string
+	if err := r.db.QueryRow(
+		ctx,
+		query,
+		branchID,
+	).Scan(&companyID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", repository.ErrNotFound
+		}
+		return "", err
+	}
+
+	return companyID, nil
+}

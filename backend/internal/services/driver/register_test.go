@@ -143,11 +143,39 @@ func (r *branchRepositoryStub) List(
 	return nil, nil
 }
 
+func (r *branchRepositoryStub) GetOwningCompanyID(
+	ctx context.Context,
+	branchID string,
+) (string, error) {
+	branch, err := r.GetByID(ctx, branchID)
+	if err != nil {
+		return "", err
+	}
+	if branch == nil || branch.CompanyID == "" {
+		return "", repository.ErrNotFound
+	}
+	return branch.CompanyID, nil
+}
+
 func (s *branchRepositoryStub) ListActiveByCompanyID(
 	ctx context.Context,
 	companyID string,
 ) ([]*models.Branch, error) {
 	return nil, nil
+}
+
+func (r *branchRepositoryStub) HasNonDeletedByCompany(
+	context.Context,
+	string,
+) (bool, error) {
+	return false, nil
+}
+
+func (r *branchRepositoryStub) HasActiveByCompany(
+	context.Context,
+	string,
+) (bool, error) {
+	return false, nil
 }
 
 func (r *branchRepositoryStub) ListForCompanyMember(

@@ -1,72 +1,76 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
-	// Uses Gin to manage HTTP context, URL routing parameters, and JSON mapping.
 	"github.com/gin-gonic/gin"
 
-	// References the business logic package tailored explicitly to taxi fleet metadata.
-	"github.com/JCKFinland/connect/backend/internal/services/company"
-
-	// Leverages a shared response envelope utility format.
+	"github.com/JCKFinland/connect/backend/internal/middleware"
+	"github.com/JCKFinland/connect/backend/internal/repository"
+	companyservice "github.com/JCKFinland/connect/backend/internal/services/company"
 	"github.com/JCKFinland/connect/backend/pkg/response"
 )
 
-// CompanyHandler bundles all available HTTP controllers managing company/fleet schemas.
 type CompanyHandler struct {
-	// Points to the structural business engine that communicates with data repositories.
-	service *company.Service
+	service *companyservice.Service
 }
 
-// NewCompanyHandler initializes the struct dependency during application bootstrap in main.go.
 func NewCompanyHandler(
-	service *company.Service,
+	service *companyservice.Service,
 ) *CompanyHandler {
-
 	return &CompanyHandler{
 		service: service,
 	}
 }
 
-// Create handles requests to onboard a brand new taxi company into the ecosystem.
-func (h *CompanyHandler) Create(
-	c *gin.Context,
-) {
+func (h *CompanyHandler) Create(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
 
-	var req company.CreateCompanyRequest
-
-	// Validates and maps incoming JSON fields onto the expected request structure.
+	var req companyservice.CreateCompanyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-
 		response.Error(
 			c,
 			http.StatusBadRequest,
 			"Invalid request body",
 			nil,
 		)
-
 		return
 	}
 
-	// Forwards the data payload to the underlying business service layer.
 	createdCompany, err := h.service.Create(
 		c.Request.Context(),
+		user.ID,
 		req,
 	)
 	if err != nil {
+		switch {
+		case errors.Is(
+			err,
+			companyservice.ErrCompanyCreationAccessDenied,
+		):
+			response.Error(
+				c,
+				http.StatusForbidden,
+				"Company creation access denied",
+				nil,
+			)
 
-		response.Error(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-			nil,
-		)
-
+		default:
+			response.Error(
+				c,
+				http.StatusInternalServerError,
+				"Failed to create company",
+				nil,
+			)
+		}
 		return
 	}
 
-	// Sends a clear HTTP 201 Status Created back to the client along with the new payload.
 	response.Success(
 		c,
 		http.StatusCreated,
@@ -75,63 +79,59 @@ func (h *CompanyHandler) Create(
 	)
 }
 
-// GetByID looks up an individual company profile using an identification string.
-func (h *CompanyHandler) GetByID(
-	c *gin.Context,
-) {
-
-	// Extracts the unique ID variable dynamically from the request path (e.g., /companies/:id).
-	id := c.Param("id")
-
-	// Queries the service layer to locate the company record.
-	company, err := h.service.GetByID(
-		c.Request.Context(),
-		id,
-	)
-	if err != nil {
-
-		// Returns an HTTP 404 Status Not Found if the company ID doesn't match an active record.
-		response.Error(
-			c,
-			http.StatusNotFound,
-			err.Error(),
-			nil,
-		)
-
+func (h *CompanyHandler) GetByID(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
 		return
 	}
 
-	// Returns an HTTP 200 Status OK with the corresponding company metadata object.
+	companyObj, err := h.service.GetByID(
+		c.Request.Context(),
+		user.ID,
+		c.Param("id"),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound),
+			errors.Is(err, companyservice.ErrCompanyNotFound):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Company not found",
+				nil,
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
+		return
+	}
+
 	response.Success(
 		c,
 		http.StatusOK,
 		"Company retrieved successfully",
-		company,
+		companyObj,
 	)
 }
 
-// List pulls every registered company out of the database for dashboards or selectors.
-func (h *CompanyHandler) List(
-	c *gin.Context,
-) {
-
-	// Commands the service layer to fetch all available records.
-	companies, err := h.service.List(
-		c.Request.Context(),
-	)
-	if err != nil {
-
-		response.Error(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-			nil,
-		)
-
+func (h *CompanyHandler) List(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
 		return
 	}
 
-	// Returns an HTTP 200 Status OK containing the array of companies.
+	companies, err := h.service.List(
+		c.Request.Context(),
+		user.ID,
+	)
+	if err != nil {
+		response.InternalServerError(c)
+		return
+	}
+
 	response.Success(
 		c,
 		http.StatusOK,
@@ -140,48 +140,47 @@ func (h *CompanyHandler) List(
 	)
 }
 
-// Update changes attributes (e.g., name, phone, status) of an existing company.
-func (h *CompanyHandler) Update(
-	c *gin.Context,
-) {
+func (h *CompanyHandler) Update(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
 
-	// Extracts target entity key from URL route parameter.
-	id := c.Param("id")
-
-	var req company.UpdateCompanyRequest
-
-	// Extracts partial structural changes from incoming request payload body.
+	var req companyservice.UpdateCompanyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-
 		response.Error(
 			c,
 			http.StatusBadRequest,
 			"Invalid request body",
 			nil,
 		)
-
 		return
 	}
 
-	// Injects structural mutations straight to business database logic.
 	err := h.service.Update(
 		c.Request.Context(),
-		id,
+		user.ID,
+		c.Param("id"),
 		req,
 	)
 	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound),
+			errors.Is(err, companyservice.ErrCompanyNotFound):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Company not found",
+				nil,
+			)
 
-		response.Error(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-			nil,
-		)
-
+		default:
+			response.InternalServerError(c)
+		}
 		return
 	}
 
-	// Acknowledges success with HTTP 200 Status OK.
 	response.Success(
 		c,
 		http.StatusOK,
@@ -190,36 +189,133 @@ func (h *CompanyHandler) Update(
 	)
 }
 
-// Delete strips an operating taxi company or fleet permanently out of the database.
-func (h *CompanyHandler) Delete(
-	c *gin.Context,
-) {
-
-	// Isolates structural ID parameter string out of path variables.
-	id := c.Param("id")
-
-	// Dispatches the deletion intent to the service layer.
-	err := h.service.Delete(
-		c.Request.Context(),
-		id,
-	)
-	if err != nil {
-
-		response.Error(
-			c,
-			http.StatusInternalServerError,
-			err.Error(),
-			nil,
-		)
-
+// Delete archives a company. It does not cascade to branches.
+func (h *CompanyHandler) Delete(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
 		return
 	}
 
-	// Formats an HTTP 200 Status OK response confirming the company is removed.
+	err := h.service.Delete(
+		c.Request.Context(),
+		user.ID,
+		c.Param("id"),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound),
+			errors.Is(err, companyservice.ErrCompanyNotFound):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Company not found",
+				nil,
+			)
+
+		case errors.Is(err, companyservice.ErrCompanyHasBranches):
+			response.Error(
+				c,
+				http.StatusConflict,
+				"Company contains non-archived branches",
+				nil,
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
+		return
+	}
+
 	response.Success(
 		c,
 		http.StatusOK,
-		"Company deleted successfully",
+		"Company archived successfully",
+		nil,
+	)
+}
+
+func (h *CompanyHandler) Deactivate(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
+	err := h.service.Deactivate(
+		c.Request.Context(),
+		user.ID,
+		c.Param("id"),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound),
+			errors.Is(err, companyservice.ErrCompanyNotFound):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Company not found",
+				nil,
+			)
+
+		case errors.Is(
+			err,
+			companyservice.ErrCompanyHasActiveBranches,
+		):
+			response.Error(
+				c,
+				http.StatusConflict,
+				"Company cannot be deactivated while it contains active branches",
+				nil,
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
+		return
+	}
+
+	response.Success(
+		c,
+		http.StatusOK,
+		"Company deactivated successfully",
+		nil,
+	)
+}
+
+func (h *CompanyHandler) Reactivate(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
+	err := h.service.Reactivate(
+		c.Request.Context(),
+		user.ID,
+		c.Param("id"),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound),
+			errors.Is(err, companyservice.ErrCompanyNotFound):
+			response.Error(
+				c,
+				http.StatusNotFound,
+				"Company not found",
+				nil,
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
+		return
+	}
+
+	response.Success(
+		c,
+		http.StatusOK,
+		"Company reactivated successfully",
 		nil,
 	)
 }

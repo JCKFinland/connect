@@ -329,15 +329,50 @@ func RegisterRoutes(
 
 		companies := v1.Group("/companies")
 
-		// Mandates valid system login credentials to alter or view fleet corporate metadata.
 		companies.Use(authMiddleware.RequireAuth())
+
 		{
-			// Standard REST patterns mapping to Create, List, Read, Update, and Delete operations.
-			companies.POST("", companyHandler.Create)
-			companies.GET("", companyHandler.List)
-			companies.GET("/:id", companyHandler.GetByID) // Captures specific string keys dynamically.
-			companies.PUT("/:id", companyHandler.Update)
-			companies.DELETE("/:id", companyHandler.Delete)
+			companies.POST(
+				"",
+				rbacMiddleware.RequirePermission("companies.manage"),
+				companyHandler.Create,
+			)
+
+			companies.GET(
+				"",
+				rbacMiddleware.RequirePermission("companies.read"),
+				companyHandler.List,
+			)
+
+			companies.GET(
+				"/:id",
+				rbacMiddleware.RequirePermission("companies.read"),
+				companyHandler.GetByID,
+			)
+
+			companies.PUT(
+				"/:id",
+				rbacMiddleware.RequirePermission("companies.manage"),
+				companyHandler.Update,
+			)
+
+			companies.DELETE(
+				"/:id",
+				rbacMiddleware.RequirePermission("companies.manage"),
+				companyHandler.Delete,
+			)
+
+			companies.PATCH(
+				"/:id/deactivate",
+				rbacMiddleware.RequirePermission("companies.manage"),
+				companyHandler.Deactivate,
+			)
+
+			companies.PATCH(
+				"/:id/reactivate",
+				rbacMiddleware.RequirePermission("companies.manage"),
+				companyHandler.Reactivate,
+			)
 		}
 
 		branches := v1.Group("/branches")

@@ -2,18 +2,50 @@ package company
 
 import (
 	"context"
+	"errors"
+	"fmt"
+
+	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/repository"
 )
 
 func (s *Service) Update(
 	ctx context.Context,
+	userID string,
 	id string,
 	req UpdateCompanyRequest,
 ) error {
+	if s == nil ||
+		s.companies == nil ||
+		s.userRoles == nil ||
+		userID == "" ||
+		id == "" {
+		return ErrCompanyNotFound
+	}
 
-	company, err := s.companies.GetByID(
-		ctx,
-		id,
-	)
+	systemAdmin, err := s.isSystemAdmin(ctx, userID)
+	if err != nil {
+		return fmt.Errorf(
+			"resolve company update authority: %w",
+			err,
+		)
+	}
+
+	var company *models.Company
+
+	if systemAdmin {
+		company, err = s.companies.GetByID(ctx, id)
+	} else {
+		company, err = s.companies.GetByIDForCompanyMember(
+			ctx,
+			userID,
+			id,
+		)
+	}
+
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrCompanyNotFound
+	}
 	if err != nil {
 		return err
 	}
@@ -32,10 +64,20 @@ func (s *Service) Update(
 	company.State = req.State
 	company.PostalCode = req.PostalCode
 	company.LogoURL = req.LogoURL
-	company.IsActive = req.IsActive
 
-	return s.companies.Update(
-		ctx,
-		company,
-	)
+	if systemAdmin {
+		err = s.companies.UpdateDetails(ctx, company)
+	} else {
+		err = s.companies.UpdateDetailsForCompanyMember(
+			ctx,
+			userID,
+			company,
+		)
+	}
+
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrCompanyNotFound
+	}
+
+	return err
 }
