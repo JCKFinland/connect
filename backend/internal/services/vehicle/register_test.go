@@ -336,6 +336,27 @@ func (r *vehicleFleetRepositoryStub) ArchiveForCompanyMember(
 	return nil
 }
 
+func (r *vehicleFleetRepositoryStub) GetOwningBranchID(
+	context.Context,
+	string,
+) (string, error) {
+	return "", nil
+}
+
+func (r *vehicleFleetRepositoryStub) HasNonDeletedByBranch(
+	context.Context,
+	string,
+) (bool, error) {
+	return false, nil
+}
+
+func (r *vehicleFleetRepositoryStub) HasActiveByBranch(
+	context.Context,
+	string,
+) (bool, error) {
+	return false, nil
+}
+
 func TestRegisterDerivesDriverTenantAndCreatesVehicle(t *testing.T) {
 	vehicleRepo := &vehicleRepositoryStub{}
 

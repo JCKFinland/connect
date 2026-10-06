@@ -345,11 +345,47 @@ func RegisterRoutes(
 		branches.Use(authMiddleware.RequireAuth())
 
 		{
-			branches.POST("", branchHandler.Create)
-			branches.GET("", branchHandler.List)
-			branches.GET("/:id", branchHandler.GetByID)
-			branches.PUT("/:id", branchHandler.Update)
-			branches.DELETE("/:id", branchHandler.Delete)
+			branches.POST(
+				"",
+				rbacMiddleware.RequirePermission("branches.manage"),
+				branchHandler.Create,
+			)
+
+			branches.GET(
+				"",
+				rbacMiddleware.RequirePermission("branches.read"),
+				branchHandler.List,
+			)
+
+			branches.GET(
+				"/:id",
+				rbacMiddleware.RequirePermission("branches.read"),
+				branchHandler.GetByID,
+			)
+
+			branches.PUT(
+				"/:id",
+				rbacMiddleware.RequirePermission("branches.manage"),
+				branchHandler.Update,
+			)
+
+			branches.DELETE(
+				"/:id",
+				rbacMiddleware.RequirePermission("branches.manage"),
+				branchHandler.Delete,
+			)
+
+			branches.PATCH(
+				"/:id/deactivate",
+				rbacMiddleware.RequirePermission("branches.manage"),
+				branchHandler.Deactivate,
+			)
+
+			branches.PATCH(
+				"/:id/reactivate",
+				rbacMiddleware.RequirePermission("branches.manage"),
+				branchHandler.Reactivate,
+			)
 		}
 
 		fleets := v1.Group("/fleets")

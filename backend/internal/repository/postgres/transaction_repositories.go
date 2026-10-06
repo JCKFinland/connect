@@ -24,6 +24,14 @@ func NewFleetRepositoryWithDB(
 	}
 }
 
+func NewBranchRepositoryWithDB(
+	db DBTX,
+) *BranchRepository {
+	return &BranchRepository{
+		db: db,
+	}
+}
+
 // NewVehicleRepositoryWithDB creates a vehicle repository
 // using either a normal connection pool or an active transaction.
 func NewVehicleRepositoryWithDB(

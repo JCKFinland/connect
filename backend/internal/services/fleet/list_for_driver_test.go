@@ -158,6 +158,27 @@ func (s *listForDriverFleetRepoStub) ArchiveForCompanyMember(
 	return nil
 }
 
+func (r *listForDriverFleetRepoStub) GetOwningBranchID(
+	context.Context,
+	string,
+) (string, error) {
+	return "", repository.ErrNotFound
+}
+
+func (r *listForDriverFleetRepoStub) HasNonDeletedByBranch(
+	context.Context,
+	string,
+) (bool, error) {
+	return false, nil
+}
+
+func (r *listForDriverFleetRepoStub) HasActiveByBranch(
+	context.Context,
+	string,
+) (bool, error) {
+	return false, nil
+}
+
 func TestListForDriverUsesDriverTenantScope(t *testing.T) {
 	driverRepo := &listForDriverDriverRepoStub{
 		driver: &models.Driver{

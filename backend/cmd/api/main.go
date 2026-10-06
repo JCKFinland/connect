@@ -194,8 +194,11 @@ func main() {
 
 	branchService := branchservice.NewService(
 		branchservice.Dependencies{
-			Config:   cfg,
-			Branches: branchRepo,
+			Config:             cfg,
+			DB:                 db,
+			Branches:           branchRepo,
+			UserRoles:          userRoleRepo,
+			CompanyMemberships: companyMembershipRepo,
 		},
 	)
 

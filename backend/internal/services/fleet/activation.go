@@ -96,6 +96,7 @@ func (s *Service) Reactivate(
 	if s == nil ||
 		s.db == nil ||
 		s.userRoles == nil ||
+		s.fleets == nil ||
 		userID == "" ||
 		id == "" {
 		return fmt.Errorf("fleet reactivation access denied")
@@ -106,10 +107,34 @@ func (s *Service) Reactivate(
 		return fmt.Errorf("resolve fleet reactivation authority: %w", err)
 	}
 
+	// Pre-read only to establish deterministic branch -> fleet lock ordering.
+	// The fleet is authoritatively re-read after both locks are held.
+	branchID, err := s.fleets.GetOwningBranchID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return repository.ErrNotFound
+		}
+		return fmt.Errorf("get fleet owning branch: %w", err)
+	}
+	if branchID == "" {
+		return repository.ErrNotFound
+	}
+
 	return postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
 		func(tx pgx.Tx) error {
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"branch:"+branchID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock owning branch for fleet reactivation: %w",
+					err,
+				)
+			}
+
 			if err := postgresrepo.AcquireTransactionAdvisoryLock(
 				ctx,
 				tx,
@@ -123,18 +148,33 @@ func (s *Service) Reactivate(
 
 			fleets := postgresrepo.NewFleetRepositoryWithDB(tx)
 
+			var fleetBranchID string
+
 			if systemAdmin {
-				if _, err := fleets.GetByID(ctx, id); err != nil {
+				fleet, err := fleets.GetByID(ctx, id)
+				if err != nil {
 					return err
 				}
+				fleetBranchID = fleet.BranchID
 			} else {
-				if _, err := fleets.GetByIDForCompanyMember(
+				fleet, err := fleets.GetByIDForCompanyMember(
 					ctx,
 					userID,
 					id,
-				); err != nil {
+				)
+				if err != nil {
 					return err
 				}
+				fleetBranchID = fleet.BranchID
+			}
+
+			// Ownership changing between the pre-read and locked authoritative
+			// read invalidates the lock target. Fail closed rather than acting
+			// while holding the wrong parent lock.
+			if fleetBranchID != branchID {
+				return fmt.Errorf(
+					"fleet owning branch changed during reactivation",
+				)
 			}
 
 			branchActive, err := fleets.IsOwningBranchActive(ctx, id)

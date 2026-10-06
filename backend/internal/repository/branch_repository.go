@@ -12,8 +12,14 @@ type BranchRepository interface {
 		branch *models.Branch,
 	) error
 
-	Update(
+	UpdateDetails(
 		ctx context.Context,
+		branch *models.Branch,
+	) error
+
+	UpdateDetailsForCompanyMember(
+		ctx context.Context,
+		userID string,
 		branch *models.Branch,
 	) error
 
@@ -22,8 +28,19 @@ type BranchRepository interface {
 		id string,
 	) (*models.Branch, error)
 
+	GetByIDForCompanyMember(
+		ctx context.Context,
+		userID string,
+		id string,
+	) (*models.Branch, error)
+
 	List(
 		ctx context.Context,
+	) ([]*models.Branch, error)
+
+	ListForCompanyMember(
+		ctx context.Context,
+		userID string,
 	) ([]*models.Branch, error)
 
 	ListActiveByCompanyID(
@@ -31,8 +48,36 @@ type BranchRepository interface {
 		companyID string,
 	) ([]*models.Branch, error)
 
-	Delete(
+	Archive(
 		ctx context.Context,
+		id string,
+	) error
+
+	ArchiveForCompanyMember(
+		ctx context.Context,
+		userID string,
+		id string,
+	) error
+
+	Deactivate(
+		ctx context.Context,
+		id string,
+	) error
+
+	DeactivateForCompanyMember(
+		ctx context.Context,
+		userID string,
+		id string,
+	) error
+
+	Reactivate(
+		ctx context.Context,
+		id string,
+	) error
+
+	ReactivateForCompanyMember(
+		ctx context.Context,
+		userID string,
 		id string,
 	) error
 }

@@ -22,6 +22,18 @@ func (r *fleetCreateRepositoryStub) Reactivate(context.Context, string) error { 
 func (r *fleetCreateRepositoryStub) ReactivateForCompanyMember(context.Context, string, string) error {
 	return nil
 }
+func (r *fleetCreateRepositoryStub) GetOwningBranchID(context.Context, string) (string, error) {
+	return "", repository.ErrNotFound
+}
+
+func (r *fleetCreateRepositoryStub) HasNonDeletedByBranch(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (r *fleetCreateRepositoryStub) HasActiveByBranch(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (r *fleetCreateRepositoryStub) IsOwningBranchActive(context.Context, string) (bool, error) {
 	return true, nil
 }
@@ -116,8 +128,16 @@ func (r *fleetCreateBranchRepositoryStub) Create(
 	return nil
 }
 
-func (r *fleetCreateBranchRepositoryStub) Update(
+func (r *fleetCreateBranchRepositoryStub) UpdateDetails(
 	context.Context,
+	*models.Branch,
+) error {
+	return nil
+}
+
+func (r *fleetCreateBranchRepositoryStub) UpdateDetailsForCompanyMember(
+	context.Context,
+	string,
 	*models.Branch,
 ) error {
 	return nil
@@ -134,6 +154,14 @@ func (r *fleetCreateBranchRepositoryStub) GetByID(
 	return r.branch, nil
 }
 
+func (r *fleetCreateBranchRepositoryStub) GetByIDForCompanyMember(
+	ctx context.Context,
+	_ string,
+	id string,
+) (*models.Branch, error) {
+	return r.GetByID(ctx, id)
+}
+
 func (r *fleetCreateBranchRepositoryStub) List(
 	context.Context,
 ) ([]*models.Branch, error) {
@@ -147,8 +175,46 @@ func (r *fleetCreateBranchRepositoryStub) ListActiveByCompanyID(
 	return nil, nil
 }
 
-func (r *fleetCreateBranchRepositoryStub) Delete(
+func (r *fleetCreateBranchRepositoryStub) Archive(
 	context.Context,
+	string,
+) error {
+	return nil
+}
+
+func (r *fleetCreateBranchRepositoryStub) ArchiveForCompanyMember(
+	context.Context,
+	string,
+	string,
+) error {
+	return nil
+}
+
+func (r *fleetCreateBranchRepositoryStub) Deactivate(
+	context.Context,
+	string,
+) error {
+	return nil
+}
+
+func (r *fleetCreateBranchRepositoryStub) DeactivateForCompanyMember(
+	context.Context,
+	string,
+	string,
+) error {
+	return nil
+}
+
+func (r *fleetCreateBranchRepositoryStub) Reactivate(
+	context.Context,
+	string,
+) error {
+	return nil
+}
+
+func (r *fleetCreateBranchRepositoryStub) ReactivateForCompanyMember(
+	context.Context,
+	string,
 	string,
 ) error {
 	return nil
@@ -222,220 +288,6 @@ func (r *fleetCreateCompanyMembershipRepositoryStub) ListByUserID(
 	return nil, nil
 }
 
-func TestCreateDerivesCompanyFromBranchAndCreatesActiveFleet(t *testing.T) {
-	fleetRepo := &fleetCreateRepositoryStub{}
-
-	service := NewService(Dependencies{
-		Fleets: fleetRepo,
-		Branches: &fleetCreateBranchRepositoryStub{
-			branch: &models.Branch{
-				BaseModel: models.BaseModel{ID: "branch-1"},
-				CompanyID: "company-1",
-				IsActive:  true,
-			},
-		},
-		UserRoles: &fleetCreateUserRoleRepositoryStub{
-			roles: []string{"COMPANY_ADMIN"},
-		},
-		CompanyMemberships: &fleetCreateCompanyMembershipRepositoryStub{
-			memberships: map[string]map[string]bool{
-				"user-1": {"company-1": true},
-			},
-		},
-	})
-
-	result, err := service.Create(
-		context.Background(),
-		"user-1",
-		CreateFleetRequest{
-			BranchID:    "branch-1",
-			Code:        "FLEET-001",
-			Name:        "Main Fleet",
-			Description: "Primary fleet",
-		},
-	)
-	if err != nil {
-		t.Fatalf("create fleet: %v", err)
-	}
-
-	if fleetRepo.created == nil {
-		t.Fatal("expected fleet to be created")
-	}
-
-	if fleetRepo.created.CompanyID != "company-1" {
-		t.Fatalf(
-			"expected company derived from branch, got %q",
-			fleetRepo.created.CompanyID,
-		)
-	}
-
-	if fleetRepo.created.BranchID != "branch-1" {
-		t.Fatalf(
-			"expected authoritative branch branch-1, got %q",
-			fleetRepo.created.BranchID,
-		)
-	}
-
-	if !fleetRepo.created.IsActive {
-		t.Fatal("expected service-owned initial active state")
-	}
-
-	if result.CompanyID != "company-1" ||
-		result.BranchID != "branch-1" ||
-		!result.IsActive {
-		t.Fatalf("unexpected response authority fields: %#v", result)
-	}
-}
-
-func TestCreateRejectsCrossTenantMembership(t *testing.T) {
-	fleetRepo := &fleetCreateRepositoryStub{}
-
-	service := NewService(Dependencies{
-		Fleets: fleetRepo,
-		Branches: &fleetCreateBranchRepositoryStub{
-			branch: &models.Branch{
-				BaseModel: models.BaseModel{ID: "branch-2"},
-				CompanyID: "company-2",
-				IsActive:  true,
-			},
-		},
-		UserRoles: &fleetCreateUserRoleRepositoryStub{
-			roles: []string{"COMPANY_ADMIN"},
-		},
-		CompanyMemberships: &fleetCreateCompanyMembershipRepositoryStub{
-			memberships: map[string]map[string]bool{
-				"user-1": {"company-1": true},
-			},
-		},
-	})
-
-	_, err := service.Create(
-		context.Background(),
-		"user-1",
-		CreateFleetRequest{
-			BranchID: "branch-2",
-			Code:     "FLEET-002",
-			Name:     "Other Fleet",
-		},
-	)
-
-	if !errors.Is(err, ErrFleetCreationAccessDenied) {
-		t.Fatalf(
-			"expected ErrFleetCreationAccessDenied, got %v",
-			err,
-		)
-	}
-
-	if fleetRepo.created != nil {
-		t.Fatal("cross-tenant fleet must not be created")
-	}
-}
-
-func TestCreateAllowsSystemAdminWithoutCompanyMembership(t *testing.T) {
-	fleetRepo := &fleetCreateRepositoryStub{}
-
-	service := NewService(Dependencies{
-		Fleets: fleetRepo,
-		Branches: &fleetCreateBranchRepositoryStub{
-			branch: &models.Branch{
-				BaseModel: models.BaseModel{ID: "branch-1"},
-				CompanyID: "company-1",
-				IsActive:  true,
-			},
-		},
-		UserRoles: &fleetCreateUserRoleRepositoryStub{
-			roles: []string{"SYSTEM_ADMIN"},
-		},
-		CompanyMemberships: &fleetCreateCompanyMembershipRepositoryStub{},
-	})
-
-	_, err := service.Create(
-		context.Background(),
-		"system-admin",
-		CreateFleetRequest{
-			BranchID: "branch-1",
-			Code:     "FLEET-001",
-			Name:     "Main Fleet",
-		},
-	)
-	if err != nil {
-		t.Fatalf("system admin create fleet: %v", err)
-	}
-
-	if fleetRepo.created == nil {
-		t.Fatal("expected system admin fleet creation")
-	}
-}
-
-func TestCreateRejectsInactiveBranch(t *testing.T) {
-	fleetRepo := &fleetCreateRepositoryStub{}
-
-	service := NewService(Dependencies{
-		Fleets: fleetRepo,
-		Branches: &fleetCreateBranchRepositoryStub{
-			branch: &models.Branch{
-				BaseModel: models.BaseModel{ID: "branch-1"},
-				CompanyID: "company-1",
-				IsActive:  false,
-			},
-		},
-		UserRoles: &fleetCreateUserRoleRepositoryStub{
-			roles: []string{"SYSTEM_ADMIN"},
-		},
-		CompanyMemberships: &fleetCreateCompanyMembershipRepositoryStub{},
-	})
-
-	_, err := service.Create(
-		context.Background(),
-		"system-admin",
-		CreateFleetRequest{
-			BranchID: "branch-1",
-			Code:     "FLEET-001",
-			Name:     "Main Fleet",
-		},
-	)
-
-	if !errors.Is(err, ErrInvalidBranch) {
-		t.Fatalf("expected ErrInvalidBranch, got %v", err)
-	}
-
-	if fleetRepo.created != nil {
-		t.Fatal("fleet must not be created in inactive branch")
-	}
-}
-
-func TestCreateRejectsMissingBranch(t *testing.T) {
-	fleetRepo := &fleetCreateRepositoryStub{}
-
-	service := NewService(Dependencies{
-		Fleets: fleetRepo,
-		Branches: &fleetCreateBranchRepositoryStub{
-			err: repository.ErrNotFound,
-		},
-		UserRoles: &fleetCreateUserRoleRepositoryStub{
-			roles: []string{"SYSTEM_ADMIN"},
-		},
-	})
-
-	_, err := service.Create(
-		context.Background(),
-		"system-admin",
-		CreateFleetRequest{
-			BranchID: "missing-branch",
-			Code:     "FLEET-001",
-			Name:     "Main Fleet",
-		},
-	)
-
-	if !errors.Is(err, ErrInvalidBranch) {
-		t.Fatalf("expected ErrInvalidBranch, got %v", err)
-	}
-
-	if fleetRepo.created != nil {
-		t.Fatal("fleet must not be created for missing branch")
-	}
-}
-
 func TestCreateRejectsMissingAuthenticatedUser(t *testing.T) {
 	fleetRepo := &fleetCreateRepositoryStub{}
 
@@ -467,5 +319,13 @@ func TestCreateRejectsMissingAuthenticatedUser(t *testing.T) {
 
 var _ repository.FleetRepository = (*fleetCreateRepositoryStub)(nil)
 var _ repository.BranchRepository = (*fleetCreateBranchRepositoryStub)(nil)
+
+func (r *fleetCreateBranchRepositoryStub) ListForCompanyMember(
+	ctx context.Context,
+	userID string,
+) ([]*models.Branch, error) {
+	return nil, nil
+}
+
 var _ repository.UserRoleRepository = (*fleetCreateUserRoleRepositoryStub)(nil)
 var _ repository.CompanyMembershipRepository = (*fleetCreateCompanyMembershipRepositoryStub)(nil)

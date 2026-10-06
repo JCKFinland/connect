@@ -7,6 +7,8 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
 var (
@@ -14,104 +16,112 @@ var (
 	ErrInvalidBranch             = errors.New("invalid or inactive branch")
 )
 
-// Create registers a new fleet through the administrative fleet surface.
+// Create registers a new active fleet through the administrative fleet surface.
 //
-// Branch ownership is the canonical source of company authority.
-// Clients cannot choose company_id or initial activation state.
+// Branch ownership is the canonical source of company authority. Creation
+// participates in the branch lifecycle lock so an active fleet cannot race
+// branch deactivation or archival.
 func (s *Service) Create(
 	ctx context.Context,
 	userID string,
 	req CreateFleetRequest,
 ) (*FleetResponse, error) {
-	if userID == "" {
+	if s == nil ||
+		s.db == nil ||
+		s.userRoles == nil ||
+		userID == "" ||
+		req.BranchID == "" {
 		return nil, ErrFleetCreationAccessDenied
 	}
 
-	if s.branches == nil {
-		return nil, fmt.Errorf("branch repository is not configured")
-	}
-
-	branch, err := s.branches.GetByID(ctx, req.BranchID)
+	systemAdmin, err := s.isSystemAdmin(ctx, userID)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrInvalidBranch
-		}
-
-		return nil, fmt.Errorf("get branch: %w", err)
+		return nil, fmt.Errorf(
+			"resolve fleet creation authority: %w",
+			err,
+		)
 	}
 
-	if branch == nil ||
-		branch.ID == "" ||
-		branch.CompanyID == "" ||
-		!branch.IsActive {
-		return nil, ErrInvalidBranch
-	}
+	var created *models.Fleet
 
-	authorized, err := s.canCreateFleetForCompany(
+	err = postgresrepo.RunInTransaction(
 		ctx,
-		userID,
-		branch.CompanyID,
+		s.db,
+		func(tx pgx.Tx) error {
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"branch:"+req.BranchID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock branch lifecycle for fleet creation: %w",
+					err,
+				)
+			}
+
+			branches := postgresrepo.NewBranchRepositoryWithDB(tx)
+			fleets := postgresrepo.NewFleetRepositoryWithDB(tx)
+
+			var branch *models.Branch
+			var err error
+
+			if systemAdmin {
+				branch, err = branches.GetByID(
+					ctx,
+					req.BranchID,
+				)
+			} else {
+				branch, err = branches.GetByIDForCompanyMember(
+					ctx,
+					userID,
+					req.BranchID,
+				)
+			}
+
+			if err != nil {
+				if errors.Is(err, repository.ErrNotFound) {
+					return ErrInvalidBranch
+				}
+				return fmt.Errorf("get branch: %w", err)
+			}
+
+			if branch == nil ||
+				branch.ID == "" ||
+				branch.CompanyID == "" ||
+				!branch.IsActive {
+				return ErrInvalidBranch
+			}
+
+			fleet := &models.Fleet{
+				CompanyID:   branch.CompanyID,
+				BranchID:    branch.ID,
+				Code:        req.Code,
+				Name:        req.Name,
+				Description: req.Description,
+				IsActive:    true,
+			}
+
+			if err := fleets.Create(ctx, fleet); err != nil {
+				return err
+			}
+
+			created = fleet
+			return nil
+		},
 	)
 	if err != nil {
-		return nil, err
-	}
-	if !authorized {
-		return nil, ErrFleetCreationAccessDenied
-	}
-
-	fleet := &models.Fleet{
-		CompanyID:   branch.CompanyID,
-		BranchID:    branch.ID,
-		Code:        req.Code,
-		Name:        req.Name,
-		Description: req.Description,
-		IsActive:    true,
-	}
-
-	if err := s.fleets.Create(ctx, fleet); err != nil {
 		return nil, err
 	}
 
 	return &FleetResponse{
-		ID:          fleet.ID,
-		CreatedAt:   fleet.CreatedAt,
-		UpdatedAt:   fleet.UpdatedAt,
-		CompanyID:   fleet.CompanyID,
-		BranchID:    fleet.BranchID,
-		Code:        fleet.Code,
-		Name:        fleet.Name,
-		Description: fleet.Description,
-		IsActive:    fleet.IsActive,
+		ID:          created.ID,
+		CreatedAt:   created.CreatedAt,
+		UpdatedAt:   created.UpdatedAt,
+		CompanyID:   created.CompanyID,
+		BranchID:    created.BranchID,
+		Code:        created.Code,
+		Name:        created.Name,
+		Description: created.Description,
+		IsActive:    created.IsActive,
 	}, nil
-}
-
-func (s *Service) canCreateFleetForCompany(
-	ctx context.Context,
-	userID string,
-	companyID string,
-) (bool, error) {
-	systemAdmin, err := s.isSystemAdmin(ctx, userID)
-	if err != nil {
-		return false, err
-	}
-	if systemAdmin {
-		return true, nil
-	}
-
-	if s.companyMemberships == nil {
-		return false, fmt.Errorf(
-			"company membership repository is not configured",
-		)
-	}
-
-	member, err := s.companyMemberships.Exists(
-		ctx,
-		userID,
-		companyID,
-	)
-	if err != nil {
-		return false, fmt.Errorf("check company membership: %w", err)
-	}
-
-	return member, nil
 }

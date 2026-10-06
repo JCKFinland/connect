@@ -24,8 +24,6 @@ type CreateBranchRequest struct {
 	Latitude float64 `json:"latitude"`
 
 	Longitude float64 `json:"longitude"`
-
-	IsActive bool `json:"is_active"`
 }
 
 type UpdateBranchRequest struct {
@@ -50,6 +48,4 @@ type UpdateBranchRequest struct {
 	Latitude float64 `json:"latitude"`
 
 	Longitude float64 `json:"longitude"`
-
-	IsActive bool `json:"is_active"`
 }

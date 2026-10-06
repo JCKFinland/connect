@@ -578,6 +578,33 @@ func (r *FleetRepository) DeactivateForCompanyMember(
 	return nil
 }
 
+// GetOwningBranchID returns the current branch ID for a non-deleted fleet.
+func (r *FleetRepository) GetOwningBranchID(
+	ctx context.Context,
+	fleetID string,
+) (string, error) {
+	const query = `
+		SELECT branch_id
+		FROM fleets
+		WHERE id=$1
+		  AND deleted_at IS NULL
+	`
+
+	var branchID string
+	if err := r.db.QueryRow(
+		ctx,
+		query,
+		fleetID,
+	).Scan(&branchID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", repository.ErrNotFound
+		}
+		return "", err
+	}
+
+	return branchID, nil
+}
+
 // IsOwningBranchActive reports whether a non-deleted fleet's owning branch
 // exists, is non-deleted, and is operationally active.
 func (r *FleetRepository) IsOwningBranchActive(
@@ -670,4 +697,45 @@ func (r *FleetRepository) ReactivateForCompanyMember(
 		return repository.ErrNotFound
 	}
 	return nil
+}
+
+func (r *FleetRepository) HasNonDeletedByBranch(
+	ctx context.Context,
+	branchID string,
+) (bool, error) {
+	const query = `
+		SELECT EXISTS (
+			SELECT 1
+			FROM fleets
+			WHERE branch_id=$1
+			  AND deleted_at IS NULL
+		)
+	`
+
+	var exists bool
+	if err := r.db.QueryRow(ctx, query, branchID).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (r *FleetRepository) HasActiveByBranch(
+	ctx context.Context,
+	branchID string,
+) (bool, error) {
+	const query = `
+		SELECT EXISTS (
+			SELECT 1
+			FROM fleets
+			WHERE branch_id=$1
+			  AND is_active=TRUE
+			  AND deleted_at IS NULL
+		)
+	`
+
+	var exists bool
+	if err := r.db.QueryRow(ctx, query, branchID).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }

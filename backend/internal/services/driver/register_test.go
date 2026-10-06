@@ -99,6 +99,29 @@ func (r *branchRepositoryStub) Update(
 	return nil
 }
 
+func (r *branchRepositoryStub) UpdateDetails(
+	ctx context.Context,
+	branch *models.Branch,
+) error {
+	return nil
+}
+
+func (r *branchRepositoryStub) UpdateDetailsForCompanyMember(
+	ctx context.Context,
+	userID string,
+	branch *models.Branch,
+) error {
+	return nil
+}
+
+func (r *branchRepositoryStub) GetByIDForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) (*models.Branch, error) {
+	return r.GetByID(ctx, id)
+}
+
 func (r *branchRepositoryStub) GetByID(
 	ctx context.Context,
 	id string,
@@ -125,6 +148,58 @@ func (s *branchRepositoryStub) ListActiveByCompanyID(
 	companyID string,
 ) ([]*models.Branch, error) {
 	return nil, nil
+}
+
+func (r *branchRepositoryStub) ListForCompanyMember(
+	ctx context.Context,
+	userID string,
+) ([]*models.Branch, error) {
+	return r.List(ctx)
+}
+
+func (r *branchRepositoryStub) Archive(
+	ctx context.Context,
+	id string,
+) error {
+	return nil
+}
+
+func (r *branchRepositoryStub) ArchiveForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+	return nil
+}
+
+func (r *branchRepositoryStub) Deactivate(
+	ctx context.Context,
+	id string,
+) error {
+	return nil
+}
+
+func (r *branchRepositoryStub) DeactivateForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+	return nil
+}
+
+func (r *branchRepositoryStub) Reactivate(
+	ctx context.Context,
+	id string,
+) error {
+	return nil
+}
+
+func (r *branchRepositoryStub) ReactivateForCompanyMember(
+	ctx context.Context,
+	userID string,
+	id string,
+) error {
+	return nil
 }
 
 func (r *branchRepositoryStub) Delete(

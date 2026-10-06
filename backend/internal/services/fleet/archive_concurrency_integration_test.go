@@ -11,6 +11,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/models"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	fleetService "github.com/JCKFinland/connect/backend/internal/services/fleet"
 	vehicleService "github.com/JCKFinland/connect/backend/internal/services/vehicle"
 	"github.com/google/uuid"
 )
@@ -696,5 +697,253 @@ func TestVehicleReactivationRechecksFleetAfterDeactivationLock(
 
 	if vehicleActive {
 		t.Fatal("vehicle became active under an inactive fleet")
+	}
+}
+
+func TestFleetReactivationRechecksBranchAfterDeactivationLock(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	userID := uuid.NewString()
+	companyID := uuid.NewString()
+	branchID := uuid.NewString()
+	fleetID := uuid.NewString()
+
+	_, err = db.Exec(ctx, `
+		INSERT INTO users (
+			id, email, password_hash, first_name, last_name
+		)
+		VALUES ($1, $2, $3, 'Fleet', 'BranchRace')
+	`, userID, userID+"@example.test", "test-password-hash")
+	if err != nil {
+		t.Fatalf("create concurrency user: %v", err)
+	}
+
+	_, err = db.Exec(ctx, `
+		INSERT INTO companies (
+			id, name, legal_name, business_id, email,
+			country_code, timezone
+		)
+		VALUES ($1, $2, $3, $4, $5, 'FI', 'Europe/Helsinki')
+	`,
+		companyID,
+		"Branch Race "+companyID[:8],
+		"Branch Race "+companyID[:8]+" Oy",
+		"BRR-"+companyID[:8],
+		companyID+"@example.test",
+	)
+	if err != nil {
+		t.Fatalf("create concurrency company: %v", err)
+	}
+
+	_, err = db.Exec(ctx, `
+		INSERT INTO branches (
+			id,
+			company_id,
+			code,
+			name,
+			email,
+			phone,
+			address_line1,
+			address_line2,
+			city,
+			state,
+			postal_code,
+			latitude,
+			longitude,
+			is_active
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6, $7,
+			$8, $9, $10, $11, $12, $13, TRUE
+		)
+	`,
+		branchID,
+		companyID,
+		"BR-"+branchID[:8],
+		"Branch Race "+branchID[:8],
+		branchID+"@example.test",
+		"+358401234567",
+		"1 Testikatu",
+		"",
+		"Helsinki",
+		"Uusimaa",
+		"00100",
+		60.1699,
+		24.9384,
+	)
+	if err != nil {
+		t.Fatalf("create concurrency branch: %v", err)
+	}
+
+	_, err = db.Exec(ctx, `
+		INSERT INTO fleets (
+			id, company_id, branch_id, code, name,
+			description, is_active
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+	`,
+		fleetID,
+		companyID,
+		branchID,
+		"FL-"+fleetID[:8],
+		"Fleet Branch Race "+fleetID[:8],
+		"branch deactivate/fleet reactivate serialization test",
+	)
+	if err != nil {
+		t.Fatalf("create inactive concurrency fleet: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		_, _ = db.Exec(cleanupCtx, `DELETE FROM fleets WHERE id=$1`, fleetID)
+		_, _ = db.Exec(cleanupCtx, `DELETE FROM branches WHERE id=$1`, branchID)
+		_, _ = db.Exec(cleanupCtx, `DELETE FROM companies WHERE id=$1`, companyID)
+		_, _ = db.Exec(cleanupCtx, `DELETE FROM users WHERE id=$1`, userID)
+	})
+
+	blockerTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin controlling transaction: %v", err)
+	}
+
+	blockerFinished := false
+	t.Cleanup(func() {
+		if !blockerFinished {
+			_ = blockerTx.Rollback(context.Background())
+		}
+	})
+
+	if err := postgresrepo.AcquireTransactionAdvisoryLock(
+		ctx,
+		blockerTx,
+		"branch:"+branchID,
+	); err != nil {
+		t.Fatalf("acquire controlling branch lock: %v", err)
+	}
+
+	service := fleetService.NewService(fleetService.Dependencies{
+		DB:     db,
+		Fleets: postgresrepo.NewFleetRepository(db),
+		UserRoles: &concurrencyUserRoleRepositoryStub{
+			roles: []string{"SYSTEM_ADMIN"},
+		},
+	})
+
+	reactivateCtx, cancelReactivate := context.WithTimeout(
+		ctx,
+		5*time.Second,
+	)
+	defer cancelReactivate()
+
+	reactivateResult := make(chan error, 1)
+	go func() {
+		reactivateResult <- service.Reactivate(
+			reactivateCtx,
+			userID,
+			fleetID,
+		)
+	}()
+
+	var waiting bool
+	for attempt := 0; attempt < 100; attempt++ {
+		err := db.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_locks
+				WHERE locktype='advisory'
+				  AND NOT granted
+			)
+		`).Scan(&waiting)
+		if err != nil {
+			t.Fatalf("inspect advisory lock waiters: %v", err)
+		}
+
+		if waiting {
+			break
+		}
+
+		select {
+		case reactivateErr := <-reactivateResult:
+			t.Fatalf(
+				"fleet reactivation returned before controlling branch lock released: %v",
+				reactivateErr,
+			)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	if !waiting {
+		t.Fatal("fleet reactivation did not wait on branch advisory lock")
+	}
+
+	branches := postgresrepo.NewBranchRepositoryWithDB(blockerTx)
+	if err := branches.Deactivate(ctx, branchID); err != nil {
+		t.Fatalf("deactivate branch in controlling transaction: %v", err)
+	}
+
+	if err := blockerTx.Commit(ctx); err != nil {
+		t.Fatalf("commit controlling branch deactivation: %v", err)
+	}
+	blockerFinished = true
+
+	select {
+	case reactivateErr := <-reactivateResult:
+		if !errors.Is(reactivateErr, fleetService.ErrFleetBranchInactive) {
+			t.Fatalf(
+				"expected ErrFleetBranchInactive after serialized branch deactivation, got %v",
+				reactivateErr,
+			)
+		}
+	case <-reactivateCtx.Done():
+		t.Fatalf(
+			"fleet reactivation did not finish after branch lock release: %v",
+			reactivateCtx.Err(),
+		)
+	}
+
+	var branchActive bool
+	if err := db.QueryRow(
+		ctx,
+		`SELECT is_active FROM branches WHERE id=$1`,
+		branchID,
+	).Scan(&branchActive); err != nil {
+		t.Fatalf("inspect branch activation state: %v", err)
+	}
+	if branchActive {
+		t.Fatal("controlling branch deactivation was not preserved")
+	}
+
+	var fleetActive bool
+	if err := db.QueryRow(
+		ctx,
+		`SELECT is_active FROM fleets WHERE id=$1`,
+		fleetID,
+	).Scan(&fleetActive); err != nil {
+		t.Fatalf("inspect fleet activation state: %v", err)
+	}
+	if fleetActive {
+		t.Fatal("fleet became active under an inactive branch")
 	}
 }

@@ -105,10 +105,28 @@ type FleetRepository interface {
 		id string,
 	) error
 
+	// GetOwningBranchID returns the current branch ID for a non-deleted fleet.
+	// It is used to establish branch -> fleet lifecycle lock ordering before
+	// performing the authoritative transactional re-read.
+	GetOwningBranchID(
+		ctx context.Context,
+		fleetID string,
+	) (string, error)
+
 	// IsOwningBranchActive reports whether the fleet's current branch exists,
 	// is non-deleted, and is operationally active.
 	IsOwningBranchActive(
 		ctx context.Context,
 		fleetID string,
+	) (bool, error)
+
+	HasNonDeletedByBranch(
+		ctx context.Context,
+		branchID string,
+	) (bool, error)
+
+	HasActiveByBranch(
+		ctx context.Context,
+		branchID string,
 	) (bool, error)
 }

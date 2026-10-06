@@ -34,6 +34,18 @@ func (r *fleetReadRepositoryStub) Reactivate(context.Context, string) error { re
 func (r *fleetReadRepositoryStub) ReactivateForCompanyMember(context.Context, string, string) error {
 	return nil
 }
+func (r *fleetReadRepositoryStub) GetOwningBranchID(context.Context, string) (string, error) {
+	return "", repository.ErrNotFound
+}
+
+func (r *fleetReadRepositoryStub) HasNonDeletedByBranch(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (r *fleetReadRepositoryStub) HasActiveByBranch(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (r *fleetReadRepositoryStub) IsOwningBranchActive(context.Context, string) (bool, error) {
 	return true, nil
 }
