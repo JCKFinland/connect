@@ -314,18 +314,28 @@ func (h *DriverHandler) Delete(c *gin.Context) {
 		c.Param("id"),
 	)
 	if err != nil {
-		if errors.Is(err, driverservice.ErrDriverNotFound) {
+		switch {
+		case errors.Is(err, driverservice.ErrDriverNotFound):
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
 				"message": "driver not found",
 			})
-			return
+
+		case errors.Is(err, driverservice.ErrDriverOperationallyActive),
+			errors.Is(err, driverservice.ErrDriverHasActiveAssignment),
+			errors.Is(err, driverservice.ErrDriverHasActiveTrip):
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
 		}
 
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
 		return
 	}
 

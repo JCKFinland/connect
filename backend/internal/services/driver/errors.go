@@ -24,4 +24,22 @@ var (
 	ErrDriverNotPendingVerification = errors.New(
 		"driver is not pending verification",
 	)
+
+	// ErrDriverOperationallyActive indicates that the driver still has an
+	// online operational presence and cannot be archived.
+	ErrDriverOperationallyActive = errors.New(
+		"driver is operationally active",
+	)
+
+	// ErrDriverHasActiveAssignment indicates that the driver still has an
+	// active vehicle assignment and cannot be archived.
+	ErrDriverHasActiveAssignment = errors.New(
+		"driver has active assignment",
+	)
+
+	// ErrDriverHasActiveTrip indicates that the driver still has a
+	// non-terminal trip and cannot be archived.
+	ErrDriverHasActiveTrip = errors.New(
+		"driver has active trip",
+	)
 )

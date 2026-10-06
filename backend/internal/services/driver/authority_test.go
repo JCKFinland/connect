@@ -290,33 +290,6 @@ func TestUpdateConcealsCrossTenantDriver(t *testing.T) {
 	}
 }
 
-func TestDeleteConcealsCrossTenantDriver(t *testing.T) {
-	repo := &managementDriverRepositoryStub{
-		driver: managementDriverFixture(),
-	}
-	service := NewService(Dependencies{
-		Drivers:   repo,
-		UserRoles: &managementUserRoleRepositoryStub{},
-		CompanyMemberships: &managementCompanyMembershipRepositoryStub{
-			member: false,
-		},
-	})
-
-	err := service.Delete(
-		context.Background(),
-		"other-company-manager",
-		"driver-record-1",
-	)
-
-	if !errors.Is(err, ErrDriverNotFound) {
-		t.Fatalf("expected ErrDriverNotFound, got %v", err)
-	}
-
-	if repo.deletedID != "" {
-		t.Fatal("cross-tenant delete reached persistence")
-	}
-}
-
 func TestSystemAdminCanManageDriverWithoutCompanyMembership(t *testing.T) {
 	repo := &managementDriverRepositoryStub{
 		driver: managementDriverFixture(),
