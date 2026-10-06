@@ -66,6 +66,13 @@ func (r *driverRepositoryStub) List(
 	return nil, nil
 }
 
+func (r *driverRepositoryStub) UpdateDetails(
+	ctx context.Context,
+	driver *models.Driver,
+) error {
+	return nil
+}
+
 func (r *driverRepositoryStub) Update(
 	ctx context.Context,
 	driver *models.Driver,

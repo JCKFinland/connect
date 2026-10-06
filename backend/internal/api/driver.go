@@ -250,6 +250,14 @@ func (h *DriverHandler) List(c *gin.Context) {
 
 // Update modifies an existing driver.
 func (h *DriverHandler) Update(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authentication required",
+		})
+		return
+	}
 
 	var req driverservice.UpdateDriverRequest
 
@@ -263,10 +271,19 @@ func (h *DriverHandler) Update(c *gin.Context) {
 
 	err := h.service.Update(
 		c.Request.Context(),
+		user.ID,
 		c.Param("id"),
 		req,
 	)
 	if err != nil {
+		if errors.Is(err, driverservice.ErrDriverNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "driver not found",
+			})
+			return
+		}
+
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -282,12 +299,29 @@ func (h *DriverHandler) Update(c *gin.Context) {
 
 // Delete performs a soft delete.
 func (h *DriverHandler) Delete(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authentication required",
+		})
+		return
+	}
 
 	err := h.service.Delete(
 		c.Request.Context(),
+		user.ID,
 		c.Param("id"),
 	)
 	if err != nil {
+		if errors.Is(err, driverservice.ErrDriverNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "driver not found",
+			})
+			return
+		}
+
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": err.Error(),

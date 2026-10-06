@@ -80,7 +80,7 @@ func (s *Service) Assign(
 			// are accepted from the client request.
 			// ---------------------------------------------------------
 
-			driver, err := drivers.GetByUserID(
+			driver, err := drivers.GetByUserIDForUpdate(
 				ctx,
 				userID,
 			)

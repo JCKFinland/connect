@@ -194,6 +194,13 @@ type vehicleDriverRepositoryStub struct {
 	err    error
 }
 
+func (r *vehicleDriverRepositoryStub) UpdateDetails(
+	ctx context.Context,
+	driver *models.Driver,
+) error {
+	return nil
+}
+
 func (r *vehicleDriverRepositoryStub) Create(
 	ctx context.Context,
 	driver *models.Driver,

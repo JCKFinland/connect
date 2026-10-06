@@ -58,6 +58,13 @@ func (r *selfServiceDriverRepository) List(
 	return []models.Driver{}, nil
 }
 
+func (r *selfServiceDriverRepository) UpdateDetails(
+	ctx context.Context,
+	driver *models.Driver,
+) error {
+	return nil
+}
+
 func (r *selfServiceDriverRepository) Update(
 	context.Context,
 	*models.Driver,

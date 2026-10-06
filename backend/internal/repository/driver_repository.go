@@ -39,7 +39,17 @@ type DriverRepository interface {
 		ctx context.Context,
 	) ([]models.Driver, error)
 
-	// Update persists changes to an existing driver.
+	// UpdateDetails persists only mutable profile and employment details.
+	// It must not modify account identity, tenant/branch authority, regulatory
+	// credentials, verification metadata, or lifecycle state.
+	UpdateDetails(
+		ctx context.Context,
+		driver *models.Driver,
+	) error
+
+	// Update persists the complete driver record for dedicated lifecycle
+	// workflows such as atomic verification. Generic management updates must
+	// use UpdateDetails instead.
 	Update(
 		ctx context.Context,
 		driver *models.Driver,

@@ -52,33 +52,17 @@ type RegisterDriverRequest struct {
 	DrivingLicenseExpiry *time.Time `json:"driving_license_expiry" binding:"required"`
 }
 
-// UpdateDriverRequest contains mutable driver fields.
+// UpdateDriverRequest contains profile and employment details that may be
+// changed without mutating account identity, tenant/branch authority,
+// regulatory credentials, verification state, or operational lifecycle state.
 type UpdateDriverRequest struct {
-	CompanyID string `json:"company_id"`
-
-	BranchID string `json:"branch_id"`
-
 	DriverNumber string `json:"driver_number"`
 
 	FirstName string `json:"first_name"`
-
-	LastName string `json:"last_name"`
+	LastName  string `json:"last_name"`
 
 	Phone string `json:"phone"`
-
 	Email string `json:"email"`
 
-	TaxiDriverLicenseNumber string `json:"taxi_driver_license_number"`
-
-	DrivingLicenseNumber string `json:"driving_license_number"`
-
-	DrivingLicenseExpiry *time.Time `json:"driving_license_expiry,omitempty"`
-
 	HireDate *time.Time `json:"hire_date,omitempty"`
-
-	Status string `json:"status"`
-
-	IsVerified bool `json:"is_verified"`
-
-	IsActive bool `json:"is_active"`
 }

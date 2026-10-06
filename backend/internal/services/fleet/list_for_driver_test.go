@@ -14,6 +14,13 @@ type listForDriverDriverRepoStub struct {
 	err    error
 }
 
+func (r *listForDriverDriverRepoStub) UpdateDetails(
+	ctx context.Context,
+	driver *models.Driver,
+) error {
+	return nil
+}
+
 func (r *listForDriverFleetRepoStub) Deactivate(context.Context, string) error { return nil }
 func (r *listForDriverFleetRepoStub) DeactivateForCompanyMember(context.Context, string, string) error {
 	return nil

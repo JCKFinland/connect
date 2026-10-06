@@ -53,6 +53,13 @@ func (r *complianceDriverRepository) List(
 	return []models.Driver{}, nil
 }
 
+func (r *complianceDriverRepository) UpdateDetails(
+	ctx context.Context,
+	driver *models.Driver,
+) error {
+	return nil
+}
+
 func (r *complianceDriverRepository) Update(
 	context.Context,
 	*models.Driver,

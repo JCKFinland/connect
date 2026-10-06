@@ -2,49 +2,50 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/JCKFinland/connect/backend/internal/repository"
 )
 
 // Update modifies an existing driver.
 func (s *Service) Update(
 	ctx context.Context,
+	userID string,
 	id string,
 	req UpdateDriverRequest,
 ) error {
 
-	driver, err := s.repo.GetByID(
+	driver, err := s.resolveManagementTarget(
 		ctx,
+		userID,
 		id,
 	)
 	if err != nil {
 		return err
 	}
 
-	// Update mutable fields.
-	driver.CompanyID = req.CompanyID
-	driver.BranchID = req.BranchID
+	// Generic management update is intentionally profile-only. Tenant and
+	// branch authority, regulatory credentials, verification metadata, and
+	// lifecycle state are owned by their dedicated workflows.
 	driver.DriverNumber = req.DriverNumber
-
 	driver.FirstName = req.FirstName
 	driver.LastName = req.LastName
-
 	driver.Phone = req.Phone
 	driver.Email = req.Email
-
-	driver.TaxiDriverLicenseNumber = req.TaxiDriverLicenseNumber
-	driver.DrivingLicenseNumber = req.DrivingLicenseNumber
-	driver.DrivingLicenseExpiry = req.DrivingLicenseExpiry
-
 	driver.HireDate = req.HireDate
-
-	driver.Status = req.Status
-	driver.IsVerified = req.IsVerified
-	driver.IsActive = req.IsActive
-
 	driver.UpdatedAt = time.Now().UTC()
 
-	return s.repo.Update(
+	if err := s.repo.UpdateDetails(
 		ctx,
 		driver,
-	)
+	); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrDriverNotFound
+		}
+
+		return err
+	}
+
+	return nil
 }
