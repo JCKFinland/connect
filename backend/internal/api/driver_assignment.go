@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	// Imports Gin to extract incoming JSON payloads and handle request contexts.
@@ -25,6 +26,35 @@ func NewDriverAssignmentHandler(
 
 	return &DriverAssignmentHandler{
 		service: service,
+	}
+}
+
+func handleAssignmentError(
+	c *gin.Context,
+	err error,
+) {
+	switch {
+	case errors.Is(err, assignment.ErrDriverNotFound),
+		errors.Is(err, assignment.ErrVehicleNotFound),
+		errors.Is(err, assignment.ErrAssignmentNotFound):
+
+		response.NotFound(c, err.Error())
+
+	case errors.Is(err, assignment.ErrDriverInactive),
+		errors.Is(err, assignment.ErrCompanyInactive),
+		errors.Is(err, assignment.ErrBranchInactive),
+		errors.Is(err, assignment.ErrFleetInactive),
+		errors.Is(err, assignment.ErrVehicleOutsideDriverScope),
+		errors.Is(err, assignment.ErrVehicleInactive),
+		errors.Is(err, assignment.ErrDriverAlreadyAssigned),
+		errors.Is(err, assignment.ErrVehicleAlreadyAssigned),
+		errors.Is(err, assignment.ErrDriverOffline),
+		errors.Is(err, assignment.ErrDriverUnavailable):
+
+		response.Conflict(c, err.Error())
+
+	default:
+		response.InternalServerError(c)
 	}
 }
 
@@ -61,11 +91,9 @@ func (h *DriverAssignmentHandler) Assign(
 	)
 
 	if err != nil {
-		response.Error(
+		handleAssignmentError(
 			c,
-			http.StatusBadRequest,
-			err.Error(),
-			nil,
+			err,
 		)
 		return
 	}
@@ -98,11 +126,9 @@ func (h *DriverAssignmentHandler) Unassign(
 		c.Request.Context(),
 		user.ID,
 	); err != nil {
-		response.Error(
+		handleAssignmentError(
 			c,
-			http.StatusBadRequest,
-			err.Error(),
-			nil,
+			err,
 		)
 		return
 	}
