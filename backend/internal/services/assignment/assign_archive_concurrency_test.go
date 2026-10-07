@@ -572,3 +572,431 @@ func TestAssignWaitsForDriverArchiveAndThenRejectsArchivedDriver(
 		)
 	}
 }
+
+func TestAssignWaitsForFleetLifecycleAndThenRejectsInactiveFleet(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Close()
+	})
+
+	fixture, cleanup, err := testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create driver fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cleanup(context.Background()); err != nil {
+			t.Errorf("cleanup driver fixture: %v", err)
+		}
+	})
+
+	_, err = db.Exec(
+		ctx,
+		`
+			UPDATE driver_assignments
+			SET unassigned_at = NOW(), updated_at = NOW()
+			WHERE id = $1
+			  AND unassigned_at IS NULL
+		`,
+		fixture.AssignmentID,
+	)
+	if err != nil {
+		t.Fatalf("close fixture assignment: %v", err)
+	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO driver_presence (
+				driver_id,
+				company_id,
+				branch_id,
+				is_online,
+				availability_status
+			)
+			VALUES ($1, $2, $3, FALSE, 'OFFLINE')
+		`,
+		fixture.UserID,
+		fixture.CompanyID,
+		fixture.BranchID,
+	)
+	if err != nil {
+		t.Fatalf("create fixture driver presence: %v", err)
+	}
+
+	var fleetID string
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT fleet_id
+			FROM vehicles
+			WHERE id = $1
+		`,
+		fixture.VehicleID,
+	).Scan(&fleetID)
+	if err != nil {
+		t.Fatalf("resolve fixture fleet: %v", err)
+	}
+
+	lifecycleTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin fleet lifecycle transaction: %v", err)
+	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			_ = lifecycleTx.Rollback(context.Background())
+		}
+	}()
+
+	if err := postgresrepo.AcquireTransactionAdvisoryLock(
+		ctx,
+		lifecycleTx,
+		"fleet:"+fleetID,
+	); err != nil {
+		t.Fatalf("acquire fleet lifecycle lock: %v", err)
+	}
+
+	assignService := NewService(Dependencies{DB: db})
+	assignResult := make(chan error, 1)
+
+	go func() {
+		_, err := assignService.Assign(
+			context.Background(),
+			fixture.UserID,
+			AssignDriverRequest{
+				VehicleID: fixture.VehicleID,
+				Notes:     "fleet lifecycle concurrency integration test",
+			},
+		)
+		assignResult <- err
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+
+	for {
+		var waiting int
+
+		err := db.QueryRow(
+			ctx,
+			`
+				SELECT COUNT(*)
+				FROM pg_locks
+				WHERE locktype = 'advisory'
+				  AND granted = FALSE
+			`,
+		).Scan(&waiting)
+		if err != nil {
+			t.Fatalf("inspect advisory lock waiters: %v", err)
+		}
+
+		if waiting > 0 {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatal("assignment never waited on fleet advisory lock")
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	_, err = lifecycleTx.Exec(
+		ctx,
+		`
+			UPDATE fleets
+			SET is_active = FALSE, updated_at = NOW()
+			WHERE id = $1
+			  AND deleted_at IS NULL
+		`,
+		fleetID,
+	)
+	if err != nil {
+		t.Fatalf("deactivate fleet while holding lifecycle lock: %v", err)
+	}
+
+	if err := lifecycleTx.Commit(ctx); err != nil {
+		t.Fatalf("commit fleet deactivation: %v", err)
+	}
+	committed = true
+
+	select {
+	case err := <-assignResult:
+		if !errors.Is(err, ErrFleetInactive) {
+			t.Fatalf(
+				"expected ErrFleetInactive after fleet lifecycle won serialization, got %v",
+				err,
+			)
+		}
+
+	case <-time.After(5 * time.Second):
+		t.Fatal("assignment did not finish after fleet lifecycle lock released")
+	}
+
+	var activeAssignments int
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT COUNT(*)
+			FROM driver_assignments
+			WHERE vehicle_id = $1
+			  AND unassigned_at IS NULL
+		`,
+		fixture.VehicleID,
+	).Scan(&activeAssignments)
+	if err != nil {
+		t.Fatalf("count active assignments after fleet race: %v", err)
+	}
+
+	if activeAssignments != 0 {
+		t.Fatalf(
+			"inactive fleet vehicle has %d active assignments; expected 0",
+			activeAssignments,
+		)
+	}
+}
+
+func TestAssignRechecksParentLifecycleAfterLock(
+	t *testing.T,
+) {
+	tests := []struct {
+		name          string
+		lockKey       func(*testutil.DriverFixture) string
+		deactivateSQL string
+		deactivateID  func(*testutil.DriverFixture) string
+		wantErr       error
+	}{
+		{
+			name: "company",
+			lockKey: func(f *testutil.DriverFixture) string {
+				return "company:" + f.CompanyID
+			},
+			deactivateSQL: `
+				UPDATE companies
+				SET is_active = FALSE, updated_at = NOW()
+				WHERE id = $1
+				  AND deleted_at IS NULL
+			`,
+			deactivateID: func(f *testutil.DriverFixture) string {
+				return f.CompanyID
+			},
+			wantErr: ErrCompanyInactive,
+		},
+		{
+			name: "branch",
+			lockKey: func(f *testutil.DriverFixture) string {
+				return "branch:" + f.BranchID
+			},
+			deactivateSQL: `
+				UPDATE branches
+				SET is_active = FALSE, updated_at = NOW()
+				WHERE id = $1
+				  AND deleted_at IS NULL
+			`,
+			deactivateID: func(f *testutil.DriverFixture) string {
+				return f.BranchID
+			},
+			wantErr: ErrBranchInactive,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			originalDir, err := os.Getwd()
+			if err != nil {
+				t.Fatalf("get working directory: %v", err)
+			}
+
+			if err := os.Chdir("../../.."); err != nil {
+				t.Fatalf("change to backend root: %v", err)
+			}
+			defer func() {
+				_ = os.Chdir(originalDir)
+			}()
+
+			cfg, err := config.Load()
+			if err != nil {
+				t.Fatalf("load CONNECT configuration: %v", err)
+			}
+
+			db, err := database.Connect(cfg)
+			if err != nil {
+				t.Fatalf("connect database: %v", err)
+			}
+			t.Cleanup(db.Close)
+
+			fixture, cleanup, err := testutil.CreateDriverFixture(ctx, db)
+			if err != nil {
+				t.Fatalf("create driver fixture: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := cleanup(context.Background()); err != nil {
+					t.Errorf("cleanup driver fixture: %v", err)
+				}
+			})
+
+			_, err = db.Exec(
+				ctx,
+				`
+					UPDATE driver_assignments
+					SET unassigned_at = NOW(), updated_at = NOW()
+					WHERE id = $1
+					  AND unassigned_at IS NULL
+				`,
+				fixture.AssignmentID,
+			)
+			if err != nil {
+				t.Fatalf("close fixture assignment: %v", err)
+			}
+
+			_, err = db.Exec(
+				ctx,
+				`
+					INSERT INTO driver_presence (
+						driver_id,
+						company_id,
+						branch_id,
+						is_online,
+						availability_status
+					)
+					VALUES ($1, $2, $3, FALSE, 'OFFLINE')
+				`,
+				fixture.UserID,
+				fixture.CompanyID,
+				fixture.BranchID,
+			)
+			if err != nil {
+				t.Fatalf("create fixture driver presence: %v", err)
+			}
+
+			lifecycleTx, err := db.Begin(ctx)
+			if err != nil {
+				t.Fatalf("begin %s lifecycle transaction: %v", tc.name, err)
+			}
+
+			committed := false
+			defer func() {
+				if !committed {
+					_ = lifecycleTx.Rollback(context.Background())
+				}
+			}()
+
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				lifecycleTx,
+				tc.lockKey(fixture),
+			); err != nil {
+				t.Fatalf("acquire %s lifecycle lock: %v", tc.name, err)
+			}
+
+			assignService := NewService(Dependencies{DB: db})
+			assignResult := make(chan error, 1)
+
+			go func() {
+				_, err := assignService.Assign(
+					context.Background(),
+					fixture.UserID,
+					AssignDriverRequest{
+						VehicleID: fixture.VehicleID,
+						Notes:     tc.name + " lifecycle concurrency integration test",
+					},
+				)
+				assignResult <- err
+			}()
+
+			deadline := time.Now().Add(5 * time.Second)
+
+			for {
+				var waiting int
+
+				err := db.QueryRow(
+					ctx,
+					`
+						SELECT COUNT(*)
+						FROM pg_locks
+						WHERE locktype = 'advisory'
+						  AND granted = FALSE
+					`,
+				).Scan(&waiting)
+				if err != nil {
+					t.Fatalf("inspect advisory lock waiters: %v", err)
+				}
+
+				if waiting > 0 {
+					break
+				}
+
+				if time.Now().After(deadline) {
+					t.Fatalf(
+						"assignment never waited on %s advisory lock",
+						tc.name,
+					)
+				}
+
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			_, err = lifecycleTx.Exec(
+				ctx,
+				tc.deactivateSQL,
+				tc.deactivateID(fixture),
+			)
+			if err != nil {
+				t.Fatalf(
+					"deactivate %s while holding lifecycle lock: %v",
+					tc.name,
+					err,
+				)
+			}
+
+			if err := lifecycleTx.Commit(ctx); err != nil {
+				t.Fatalf("commit %s deactivation: %v", tc.name, err)
+			}
+			committed = true
+
+			select {
+			case err := <-assignResult:
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf(
+						"expected %v after %s lifecycle won serialization, got %v",
+						tc.wantErr,
+						tc.name,
+						err,
+					)
+				}
+
+			case <-time.After(5 * time.Second):
+				t.Fatalf(
+					"assignment did not finish after %s lifecycle lock released",
+					tc.name,
+				)
+			}
+		})
+	}
+}

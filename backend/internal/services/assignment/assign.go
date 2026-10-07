@@ -70,79 +70,149 @@ func (s *Service) Assign(
 					tx,
 				)
 
+			companies :=
+				postgresrepo.NewCompanyRepositoryWithDB(tx)
+
+			branches :=
+				postgresrepo.NewBranchRepositoryWithDB(tx)
+
+			fleets :=
+				postgresrepo.NewFleetRepositoryWithDB(tx)
+
 			// ---------------------------------------------------------
-			// 1. Resolve authoritative organizational relationships.
+			// 1. Establish deterministic lifecycle lock targets.
 			//
-			// The authenticated users.id is the operational driver
-			// identity used by assignment and presence. Company and
-			// branch come from the driver's registration. Fleet comes
-			// from the selected vehicle. None of these relationships
-			// are accepted from the client request.
+			// These reads establish lock targets only. Driver and vehicle
+			// state are authoritatively re-read after all lifecycle locks
+			// are held.
 			// ---------------------------------------------------------
 
-			driver, err := drivers.GetByUserIDForUpdate(
-				ctx,
-				userID,
-			)
-
-			if errors.Is(
-				err,
-				repository.ErrNotFound,
-			) {
+			preDriver, err := drivers.GetByUserID(ctx, userID)
+			if errors.Is(err, repository.ErrNotFound) {
 				return ErrDriverNotFound
 			}
-
 			if err != nil {
-				return fmt.Errorf(
-					"get authenticated driver: %w",
-					err,
-				)
+				return fmt.Errorf("pre-read authenticated driver: %w", err)
 			}
 
-			// Serialize assignment and archival decisions for this vehicle.
-			//
-			// Vehicle archival acquires the same transaction-scoped advisory
-			// lock before checking assignment state. Acquiring it before the
-			// vehicle read prevents assignment from proceeding with vehicle
-			// state made stale by a concurrent archive.
-			if err := postgresrepo.AcquireTransactionAdvisoryLock(
-				ctx,
-				tx,
-				"vehicle:"+req.VehicleID,
-			); err != nil {
-				return fmt.Errorf(
-					"lock vehicle lifecycle for assignment: %w",
-					err,
-				)
-			}
-
-			vehicle, err := vehicles.GetByID(
-				ctx,
-				req.VehicleID,
-			)
-
-			if errors.Is(
-				err,
-				repository.ErrNotFound,
-			) {
+			fleetID, err := vehicles.GetOwningFleetID(ctx, req.VehicleID)
+			if errors.Is(err, repository.ErrNotFound) {
 				return ErrVehicleNotFound
 			}
-
 			if err != nil {
+				return fmt.Errorf("pre-read vehicle owning fleet: %w", err)
+			}
+
+			lockTargets := []struct {
+				key  string
+				name string
+			}{
+				{"company:" + preDriver.CompanyID, "company"},
+				{"branch:" + preDriver.BranchID, "branch"},
+				{"fleet:" + fleetID, "fleet"},
+				{"vehicle:" + req.VehicleID, "vehicle"},
+			}
+
+			for _, target := range lockTargets {
+				if err := postgresrepo.AcquireTransactionAdvisoryLock(
+					ctx,
+					tx,
+					target.key,
+				); err != nil {
+					return fmt.Errorf(
+						"lock %s lifecycle for assignment: %w",
+						target.name,
+						err,
+					)
+				}
+			}
+
+			// ---------------------------------------------------------
+			// 2. Re-read authoritative driver and vehicle state.
+			// ---------------------------------------------------------
+
+			driver, err := drivers.GetByUserIDForUpdate(ctx, userID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrDriverNotFound
+			}
+			if err != nil {
+				return fmt.Errorf("get authenticated driver: %w", err)
+			}
+
+			if driver.CompanyID != preDriver.CompanyID ||
+				driver.BranchID != preDriver.BranchID {
 				return fmt.Errorf(
-					"get assignment vehicle: %w",
-					err,
+					"driver organizational scope changed during assignment",
+				)
+			}
+
+			if !driver.IsActive ||
+				!driver.IsVerified ||
+				driver.Status != "ACTIVE" {
+				return ErrDriverInactive
+			}
+
+			vehicle, err := vehicles.GetByID(ctx, req.VehicleID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrVehicleNotFound
+			}
+			if err != nil {
+				return fmt.Errorf("get assignment vehicle: %w", err)
+			}
+
+			if vehicle.FleetID != fleetID {
+				return fmt.Errorf(
+					"vehicle owning fleet changed during assignment",
 				)
 			}
 
 			if vehicle.CompanyID != driver.CompanyID ||
 				vehicle.BranchID != driver.BranchID {
-
 				return ErrVehicleOutsideDriverScope
 			}
 
 			if !vehicle.IsActive {
 				return ErrVehicleInactive
+			}
+
+			company, err := companies.GetByID(ctx, driver.CompanyID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrCompanyInactive
+			}
+			if err != nil {
+				return fmt.Errorf("get driver company: %w", err)
+			}
+			if !company.IsActive {
+				return ErrCompanyInactive
+			}
+
+			branch, err := branches.GetByID(ctx, driver.BranchID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrBranchInactive
+			}
+			if err != nil {
+				return fmt.Errorf("get driver branch: %w", err)
+			}
+			if branch.CompanyID != driver.CompanyID {
+				return ErrVehicleOutsideDriverScope
+			}
+			if !branch.IsActive {
+				return ErrBranchInactive
+			}
+
+			fleet, err := fleets.GetByID(ctx, fleetID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrFleetInactive
+			}
+			if err != nil {
+				return fmt.Errorf("get vehicle fleet: %w", err)
+			}
+			if fleet.CompanyID != driver.CompanyID ||
+				fleet.BranchID != driver.BranchID {
+				return ErrVehicleOutsideDriverScope
+			}
+			if !fleet.IsActive {
+				return ErrFleetInactive
 			}
 
 			// ---------------------------------------------------------
