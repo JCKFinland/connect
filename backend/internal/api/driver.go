@@ -209,13 +209,30 @@ func (h *DriverHandler) Create(c *gin.Context) {
 
 // GetByID returns a driver by ID.
 func (h *DriverHandler) GetByID(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authentication required",
+		})
+		return
+	}
 
 	driver, err := h.service.GetByID(
 		c.Request.Context(),
+		user.ID,
 		c.Param("id"),
 	)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
+		if errors.Is(err, driverservice.ErrDriverNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "driver not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": err.Error(),
 		})
@@ -230,9 +247,18 @@ func (h *DriverHandler) GetByID(c *gin.Context) {
 
 // List returns all drivers.
 func (h *DriverHandler) List(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authentication required",
+		})
+		return
+	}
 
 	drivers, err := h.service.List(
 		c.Request.Context(),
+		user.ID,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

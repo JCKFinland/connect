@@ -41,6 +41,14 @@ func (r *managementDriverRepositoryStub) GetByID(
 	return &copy, nil
 }
 
+func (r *managementDriverRepositoryStub) GetByIDForCompanyMember(
+	ctx context.Context,
+	_ string,
+	id string,
+) (*models.Driver, error) {
+	return r.GetByID(ctx, id)
+}
+
 func (r *managementDriverRepositoryStub) GetByIDForUpdate(
 	ctx context.Context,
 	id string,
@@ -59,6 +67,13 @@ func (r *managementDriverRepositoryStub) List(
 	context.Context,
 ) ([]models.Driver, error) {
 	return nil, nil
+}
+
+func (r *managementDriverRepositoryStub) ListForCompanyMember(
+	ctx context.Context,
+	_ string,
+) ([]models.Driver, error) {
+	return r.List(ctx)
 }
 
 func (r *managementDriverRepositoryStub) UpdateDetails(

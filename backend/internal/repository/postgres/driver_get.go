@@ -2,8 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/repository"
+	"github.com/jackc/pgx/v5"
 )
 
 // GetByID returns a single driver by its ID.
@@ -71,6 +74,9 @@ func (r *DriverRepository) GetByID(
 	)
 
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, repository.ErrNotFound
+		}
 		return nil, err
 	}
 

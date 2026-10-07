@@ -21,6 +21,14 @@ type DriverRepository interface {
 		id string,
 	) (*models.Driver, error)
 
+	// GetByIDForCompanyMember returns a driver only when the caller is an
+	// explicit member of the driver's company.
+	GetByIDForCompanyMember(
+		ctx context.Context,
+		userID string,
+		id string,
+	) (*models.Driver, error)
+
 	// GetByIDForUpdate returns a driver and locks the row for the
 	// duration of the current database transaction.
 	GetByIDForUpdate(
@@ -37,6 +45,13 @@ type DriverRepository interface {
 	// List returns all non-deleted drivers.
 	List(
 		ctx context.Context,
+	) ([]models.Driver, error)
+
+	// ListForCompanyMember returns non-deleted drivers belonging only to
+	// companies where the caller has explicit membership.
+	ListForCompanyMember(
+		ctx context.Context,
+		userID string,
 	) ([]models.Driver, error)
 
 	// UpdateDetails persists only mutable profile and employment details.

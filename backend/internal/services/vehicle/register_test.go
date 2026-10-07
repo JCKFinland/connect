@@ -194,6 +194,13 @@ type vehicleDriverRepositoryStub struct {
 	err    error
 }
 
+func (r *vehicleDriverRepositoryStub) ListForCompanyMember(
+	ctx context.Context,
+	_ string,
+) ([]models.Driver, error) {
+	return r.List(ctx)
+}
+
 func (r *vehicleDriverRepositoryStub) UpdateDetails(
 	ctx context.Context,
 	driver *models.Driver,
@@ -213,6 +220,14 @@ func (r *vehicleDriverRepositoryStub) GetByID(
 	id string,
 ) (*models.Driver, error) {
 	return nil, repository.ErrNotFound
+}
+
+func (r *vehicleDriverRepositoryStub) GetByIDForCompanyMember(
+	ctx context.Context,
+	_ string,
+	id string,
+) (*models.Driver, error) {
+	return r.GetByID(ctx, id)
 }
 
 func (r *vehicleDriverRepositoryStub) GetByIDForUpdate(

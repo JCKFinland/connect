@@ -33,6 +33,14 @@ func (r *complianceDriverRepository) GetByID(
 	return r.driver, nil
 }
 
+func (r *complianceDriverRepository) GetByIDForCompanyMember(
+	ctx context.Context,
+	_ string,
+	id string,
+) (*models.Driver, error) {
+	return r.GetByID(ctx, id)
+}
+
 func (r *complianceDriverRepository) GetByIDForUpdate(
 	context.Context,
 	string,
@@ -51,6 +59,13 @@ func (r *complianceDriverRepository) List(
 	context.Context,
 ) ([]models.Driver, error) {
 	return []models.Driver{}, nil
+}
+
+func (r *complianceDriverRepository) ListForCompanyMember(
+	ctx context.Context,
+	_ string,
+) ([]models.Driver, error) {
+	return r.List(ctx)
 }
 
 func (r *complianceDriverRepository) UpdateDetails(

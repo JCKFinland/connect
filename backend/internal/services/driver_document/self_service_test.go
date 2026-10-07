@@ -31,6 +31,14 @@ func (r *selfServiceDriverRepository) GetByID(
 	return nil, repository.ErrNotFound
 }
 
+func (r *selfServiceDriverRepository) GetByIDForCompanyMember(
+	ctx context.Context,
+	_ string,
+	id string,
+) (*models.Driver, error) {
+	return r.GetByID(ctx, id)
+}
+
 func (r *selfServiceDriverRepository) GetByIDForUpdate(
 	context.Context,
 	string,
@@ -56,6 +64,13 @@ func (r *selfServiceDriverRepository) List(
 	context.Context,
 ) ([]models.Driver, error) {
 	return []models.Driver{}, nil
+}
+
+func (r *selfServiceDriverRepository) ListForCompanyMember(
+	ctx context.Context,
+	_ string,
+) ([]models.Driver, error) {
+	return r.List(ctx)
 }
 
 func (r *selfServiceDriverRepository) UpdateDetails(
