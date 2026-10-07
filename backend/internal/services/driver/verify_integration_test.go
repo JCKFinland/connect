@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
@@ -456,5 +457,311 @@ func TestVerifySerializesConcurrentAttempts(t *testing.T) {
 			"expected exactly one DRIVER role assignment, got %d",
 			roleCount,
 		)
+	}
+}
+
+func TestVerifyRechecksCompanyAfterLifecycleLock(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	fixture, cleanup, err := createVerificationFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create verification fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanup(context.Background()); err != nil {
+			t.Logf("cleanup verification fixture: %v", err)
+		}
+	}()
+
+	lockTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lifecycle lock transaction: %v", err)
+	}
+	defer func() {
+		_ = lockTx.Rollback(context.Background())
+	}()
+
+	if err := postgresrepo.AcquireTransactionAdvisoryLock(
+		ctx,
+		lockTx,
+		"company:"+fixture.CompanyID,
+	); err != nil {
+		t.Fatalf("lock company lifecycle: %v", err)
+	}
+
+	service := NewService(Dependencies{
+		DB:      db,
+		Drivers: postgresrepo.NewDriverRepository(db),
+	})
+
+	verifyDone := make(chan error, 1)
+
+	go func() {
+		_, err := service.Verify(
+			context.Background(),
+			fixture.DriverID,
+			fixture.VerifierID,
+		)
+		verifyDone <- err
+	}()
+
+	select {
+	case err := <-verifyDone:
+		t.Fatalf(
+			"verification returned before company lifecycle lock was released: %v",
+			err,
+		)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if _, err := lockTx.Exec(
+		ctx,
+		`
+			UPDATE companies
+			SET is_active = FALSE,
+			    updated_at = NOW()
+			WHERE id = $1
+		`,
+		fixture.CompanyID,
+	); err != nil {
+		t.Fatalf("deactivate company while holding lifecycle lock: %v", err)
+	}
+
+	if err := lockTx.Commit(ctx); err != nil {
+		t.Fatalf("commit company deactivation: %v", err)
+	}
+
+	select {
+	case err := <-verifyDone:
+		if !errors.Is(err, ErrInvalidDriver) {
+			t.Fatalf(
+				"expected ErrInvalidDriver after company deactivation, got %v",
+				err,
+			)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("verification did not finish after lifecycle lock release")
+	}
+
+	driverRepo := postgresrepo.NewDriverRepository(db)
+
+	persisted, err := driverRepo.GetByID(ctx, fixture.DriverID)
+	if err != nil {
+		t.Fatalf("reload driver: %v", err)
+	}
+
+	if persisted.Status != "PENDING_VERIFICATION" {
+		t.Fatalf(
+			"expected PENDING_VERIFICATION, got %s",
+			persisted.Status,
+		)
+	}
+
+	if persisted.IsVerified {
+		t.Fatal("expected driver to remain unverified")
+	}
+
+	if persisted.VerifiedAt != nil {
+		t.Fatal("expected verified_at to remain nil")
+	}
+
+	if persisted.VerifiedByUserID != nil {
+		t.Fatal("expected verified_by_user_id to remain nil")
+	}
+
+	roleRepo := repository.NewRoleRepository(db)
+
+	driverRole, err := roleRepo.GetByName(ctx, "DRIVER")
+	if err != nil {
+		t.Fatalf("get DRIVER role: %v", err)
+	}
+
+	userRoleRepo := repository.NewUserRoleRepository(db)
+
+	hasDriverRole, err := userRoleRepo.UserHasRole(
+		ctx,
+		fixture.UserID,
+		driverRole.ID,
+	)
+	if err != nil {
+		t.Fatalf("check DRIVER role assignment: %v", err)
+	}
+
+	if hasDriverRole {
+		t.Fatal("driver must not receive DRIVER role after company deactivation")
+	}
+}
+
+func TestVerifyRechecksBranchAfterLifecycleLock(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	fixture, cleanup, err := createVerificationFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create verification fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanup(context.Background()); err != nil {
+			t.Logf("cleanup verification fixture: %v", err)
+		}
+	}()
+
+	lockTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lifecycle lock transaction: %v", err)
+	}
+	defer func() {
+		_ = lockTx.Rollback(context.Background())
+	}()
+
+	if err := postgresrepo.AcquireTransactionAdvisoryLock(
+		ctx,
+		lockTx,
+		"branch:"+fixture.BranchID,
+	); err != nil {
+		t.Fatalf("lock branch lifecycle: %v", err)
+	}
+
+	service := NewService(Dependencies{
+		DB:      db,
+		Drivers: postgresrepo.NewDriverRepository(db),
+	})
+
+	verifyDone := make(chan error, 1)
+
+	go func() {
+		_, err := service.Verify(
+			context.Background(),
+			fixture.DriverID,
+			fixture.VerifierID,
+		)
+		verifyDone <- err
+	}()
+
+	select {
+	case err := <-verifyDone:
+		t.Fatalf(
+			"verification returned before branch lifecycle lock was released: %v",
+			err,
+		)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if _, err := lockTx.Exec(
+		ctx,
+		`
+			UPDATE branches
+			SET is_active = FALSE,
+			    updated_at = NOW()
+			WHERE id = $1
+		`,
+		fixture.BranchID,
+	); err != nil {
+		t.Fatalf("deactivate branch while holding lifecycle lock: %v", err)
+	}
+
+	if err := lockTx.Commit(ctx); err != nil {
+		t.Fatalf("commit branch deactivation: %v", err)
+	}
+
+	select {
+	case err := <-verifyDone:
+		if !errors.Is(err, ErrInvalidDriver) {
+			t.Fatalf(
+				"expected ErrInvalidDriver after branch deactivation, got %v",
+				err,
+			)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("verification did not finish after branch lifecycle lock release")
+	}
+
+	driverRepo := postgresrepo.NewDriverRepository(db)
+
+	persisted, err := driverRepo.GetByID(ctx, fixture.DriverID)
+	if err != nil {
+		t.Fatalf("reload driver: %v", err)
+	}
+
+	if persisted.Status != "PENDING_VERIFICATION" {
+		t.Fatalf(
+			"expected PENDING_VERIFICATION, got %s",
+			persisted.Status,
+		)
+	}
+
+	if persisted.IsVerified {
+		t.Fatal("expected driver to remain unverified")
+	}
+
+	if persisted.VerifiedAt != nil {
+		t.Fatal("expected verified_at to remain nil")
+	}
+
+	if persisted.VerifiedByUserID != nil {
+		t.Fatal("expected verified_by_user_id to remain nil")
+	}
+
+	roleRepo := repository.NewRoleRepository(db)
+
+	driverRole, err := roleRepo.GetByName(ctx, "DRIVER")
+	if err != nil {
+		t.Fatalf("get DRIVER role: %v", err)
+	}
+
+	userRoleRepo := repository.NewUserRoleRepository(db)
+
+	hasDriverRole, err := userRoleRepo.UserHasRole(
+		ctx,
+		fixture.UserID,
+		driverRole.ID,
+	)
+	if err != nil {
+		t.Fatalf("check DRIVER role assignment: %v", err)
+	}
+
+	if hasDriverRole {
+		t.Fatal("driver must not receive DRIVER role after branch deactivation")
 	}
 }

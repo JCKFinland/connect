@@ -29,12 +29,58 @@ func (s *Service) Verify(
 		return nil, ErrInvalidDriver
 	}
 
+	// Pre-read only to establish deterministic company -> branch -> driver
+	// lifecycle lock ordering. The driver is authoritatively re-read with
+	// FOR UPDATE after the parent lifecycle locks are held.
+	lockTargetRepo := postgresrepo.NewDriverRepository(s.db)
+
+	lockTarget, err := lockTargetRepo.GetByID(ctx, driverID)
+	if errors.Is(err, pgx.ErrNoRows) ||
+		errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrDriverNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get driver verification lock target: %w", err)
+	}
+	if lockTarget == nil ||
+		lockTarget.CompanyID == "" ||
+		lockTarget.BranchID == "" {
+		return nil, ErrInvalidDriver
+	}
+
+	companyID := lockTarget.CompanyID
+	branchID := lockTarget.BranchID
+
 	var verifiedDriver *models.Driver
 
-	err := postgresrepo.RunInTransaction(
+	err = postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
 		func(tx pgx.Tx) error {
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"company:"+companyID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock company lifecycle for driver verification: %w",
+					err,
+				)
+			}
+
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"branch:"+branchID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock branch lifecycle for driver verification: %w",
+					err,
+				)
+			}
+
+			companies := postgresrepo.NewCompanyRepositoryWithDB(tx)
+			branches := postgresrepo.NewBranchRepositoryWithDB(tx)
 			drivers := postgresrepo.NewDriverRepositoryWithDB(tx)
 			roles := repository.NewRoleRepository(tx)
 			userRoles := repository.NewUserRoleRepository(tx)
@@ -46,6 +92,44 @@ func (s *Service) Verify(
 			}
 			if err != nil {
 				return fmt.Errorf("get driver for verification: %w", err)
+			}
+
+			// If ownership changed after the pre-read, the lifecycle locks above
+			// protect the wrong parents. Fail closed rather than activating the
+			// driver under stale lock targets.
+			if driver.CompanyID != companyID ||
+				driver.BranchID != branchID {
+				return ErrInvalidDriver
+			}
+
+			company, err := companies.GetByID(ctx, companyID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrInvalidDriver
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"get company for driver verification: %w",
+					err,
+				)
+			}
+			if company == nil || !company.IsActive {
+				return ErrInvalidDriver
+			}
+
+			branch, err := branches.GetByID(ctx, branchID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrInvalidDriver
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"get branch for driver verification: %w",
+					err,
+				)
+			}
+			if branch == nil ||
+				!branch.IsActive ||
+				branch.CompanyID != companyID {
+				return ErrInvalidDriver
 			}
 
 			if driver.Status != "PENDING_VERIFICATION" ||
