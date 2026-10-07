@@ -37,10 +37,34 @@ func (s *Service) Deactivate(
 		)
 	}
 
+	// Pre-read only to establish deterministic company -> branch lock ordering.
+	// The branch is authoritatively re-read after both locks are held.
+	companyID, err := s.branches.GetOwningCompanyID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return repository.ErrNotFound
+		}
+		return fmt.Errorf("get branch owning company: %w", err)
+	}
+	if companyID == "" {
+		return repository.ErrNotFound
+	}
+
 	return postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
 		func(tx pgx.Tx) error {
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"company:"+companyID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock owning company for branch deactivation: %w",
+					err,
+				)
+			}
+
 			if err := postgresrepo.AcquireTransactionAdvisoryLock(
 				ctx,
 				tx,
@@ -55,18 +79,33 @@ func (s *Service) Deactivate(
 			branches := postgresrepo.NewBranchRepositoryWithDB(tx)
 			fleets := postgresrepo.NewFleetRepositoryWithDB(tx)
 
+			var branchCompanyID string
+
 			if systemAdmin {
-				if _, err := branches.GetByID(ctx, id); err != nil {
+				branchObj, err := branches.GetByID(ctx, id)
+				if err != nil {
 					return err
 				}
+				branchCompanyID = branchObj.CompanyID
 			} else {
-				if _, err := branches.GetByIDForCompanyMember(
+				branchObj, err := branches.GetByIDForCompanyMember(
 					ctx,
 					userID,
 					id,
-				); err != nil {
+				)
+				if err != nil {
 					return err
 				}
+				branchCompanyID = branchObj.CompanyID
+			}
+
+			// Ownership changing between the pre-read and locked authoritative
+			// read invalidates the lock target. Fail closed rather than acting
+			// while holding the wrong parent lock.
+			if branchCompanyID != companyID {
+				return fmt.Errorf(
+					"branch owning company changed during deactivation",
+				)
 			}
 
 			hasActiveFleets, err := fleets.HasActiveByBranch(

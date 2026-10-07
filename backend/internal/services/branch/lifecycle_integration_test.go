@@ -978,3 +978,205 @@ func TestBranchReactivationRechecksCompanyAfterDeactivationLock(t *testing.T) {
 		t.Fatal("company remained active after controlling deactivation")
 	}
 }
+
+func TestBranchDeactivationWaitsForCompanyLifecycleLock(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	userID := uuid.NewString()
+	companyID := uuid.NewString()
+	branchID := uuid.NewString()
+
+	if _, err := db.Exec(ctx, `
+		INSERT INTO users (
+			id, email, password_hash, first_name, last_name
+		)
+		VALUES ($1, $2, 'test-password-hash', 'Branch', 'DeactivateRace')
+	`, userID, userID+"@example.test"); err != nil {
+		t.Fatalf("create concurrency user: %v", err)
+	}
+
+	if _, err := db.Exec(ctx, `
+		INSERT INTO companies (
+			id, name, legal_name, business_id, email,
+			country_code, timezone
+		)
+		VALUES ($1, $2, $3, $4, $5, 'FI', 'Europe/Helsinki')
+	`,
+		companyID,
+		"Branch Deactivate Race "+companyID[:8],
+		"Branch Deactivate Race "+companyID[:8]+" Oy",
+		"BDR-"+companyID[:8],
+		companyID+"@example.test",
+	); err != nil {
+		t.Fatalf("create concurrency company: %v", err)
+	}
+
+	if _, err := db.Exec(ctx, `
+		INSERT INTO branches (
+			id, company_id, code, name, is_active
+		)
+		VALUES ($1, $2, $3, $4, TRUE)
+	`,
+		branchID,
+		companyID,
+		"BR-"+branchID[:8],
+		"Branch Deactivate Race "+branchID[:8],
+	); err != nil {
+		t.Fatalf("create active concurrency branch: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		_, _ = db.Exec(
+			cleanupCtx,
+			`DELETE FROM branches WHERE id=$1`,
+			branchID,
+		)
+		_, _ = db.Exec(
+			cleanupCtx,
+			`DELETE FROM companies WHERE id=$1`,
+			companyID,
+		)
+		_, _ = db.Exec(
+			cleanupCtx,
+			`DELETE FROM users WHERE id=$1`,
+			userID,
+		)
+	})
+
+	blockerTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin controlling transaction: %v", err)
+	}
+
+	blockerFinished := false
+	t.Cleanup(func() {
+		if !blockerFinished {
+			_ = blockerTx.Rollback(context.Background())
+		}
+	})
+
+	if err := postgresrepo.AcquireTransactionAdvisoryLock(
+		ctx,
+		blockerTx,
+		"company:"+companyID,
+	); err != nil {
+		t.Fatalf("acquire controlling company lock: %v", err)
+	}
+
+	service := NewService(Dependencies{
+		DB:       db,
+		Branches: postgresrepo.NewBranchRepository(db),
+		UserRoles: &branchAuthorityUserRoleRepositoryStub{
+			roles: []string{"SYSTEM_ADMIN"},
+		},
+		CompanyMemberships: postgresrepo.NewCompanyMembershipRepository(db),
+	})
+
+	deactivateCtx, cancelDeactivate := context.WithTimeout(
+		ctx,
+		5*time.Second,
+	)
+	defer cancelDeactivate()
+
+	deactivateResult := make(chan error, 1)
+	go func() {
+		deactivateResult <- service.Deactivate(
+			deactivateCtx,
+			userID,
+			branchID,
+		)
+	}()
+
+	var waiting bool
+	for attempt := 0; attempt < 100; attempt++ {
+		if err := db.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_locks
+				WHERE locktype='advisory'
+				  AND NOT granted
+			)
+		`).Scan(&waiting); err != nil {
+			t.Fatalf("inspect advisory lock waiters: %v", err)
+		}
+
+		if waiting {
+			break
+		}
+
+		select {
+		case deactivateErr := <-deactivateResult:
+			t.Fatalf(
+				"branch deactivation returned before controlling company lock released: %v",
+				deactivateErr,
+			)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	if !waiting {
+		t.Fatal("branch deactivation did not wait on company advisory lock")
+	}
+
+	var activeWhileBlocked bool
+	if err := blockerTx.QueryRow(
+		ctx,
+		`SELECT is_active FROM branches WHERE id=$1`,
+		branchID,
+	).Scan(&activeWhileBlocked); err != nil {
+		t.Fatalf("inspect branch while deactivation blocked: %v", err)
+	}
+	if !activeWhileBlocked {
+		t.Fatal("branch deactivated before company lifecycle lock released")
+	}
+
+	if err := blockerTx.Commit(ctx); err != nil {
+		t.Fatalf("release controlling company lock: %v", err)
+	}
+	blockerFinished = true
+
+	select {
+	case deactivateErr := <-deactivateResult:
+		if deactivateErr != nil {
+			t.Fatalf(
+				"deactivate branch after company lock release: %v",
+				deactivateErr,
+			)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("branch deactivation did not finish after company lock released")
+	}
+
+	var activeAfter bool
+	if err := db.QueryRow(
+		ctx,
+		`SELECT is_active FROM branches WHERE id=$1`,
+		branchID,
+	).Scan(&activeAfter); err != nil {
+		t.Fatalf("inspect branch after deactivation: %v", err)
+	}
+	if activeAfter {
+		t.Fatal("branch remained active after serialized deactivation")
+	}
+}
