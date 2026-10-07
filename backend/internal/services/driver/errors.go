@@ -14,6 +14,12 @@ var (
 		"driver already exists",
 	)
 
+	// ErrDriverCreationAccessDenied indicates that the authenticated caller may
+	// not create a driver in the requested company tenant.
+	ErrDriverCreationAccessDenied = errors.New(
+		"driver creation access denied",
+	)
+
 	// ErrInvalidDriver indicates that the supplied driver information is invalid.
 	ErrInvalidDriver = errors.New(
 		"invalid driver",

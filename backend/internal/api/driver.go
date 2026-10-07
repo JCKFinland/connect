@@ -178,6 +178,14 @@ func (h *DriverHandler) ListRegistrationBranches(c *gin.Context) {
 
 // Create registers a new driver.
 func (h *DriverHandler) Create(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "authentication required",
+		})
+		return
+	}
 
 	var req driverservice.CreateDriverRequest
 
@@ -191,13 +199,35 @@ func (h *DriverHandler) Create(c *gin.Context) {
 
 	driver, err := h.service.Create(
 		c.Request.Context(),
+		user.ID,
 		req,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
+		switch {
+		case errors.Is(err, driverservice.ErrDriverCreationAccessDenied):
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "driver creation access denied",
+			})
+
+		case errors.Is(err, driverservice.ErrInvalidDriver):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "invalid driver",
+			})
+
+		case errors.Is(err, driverservice.ErrDriverAlreadyExists):
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"message": "driver already exists",
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "failed to create driver",
+			})
+		}
 		return
 	}
 

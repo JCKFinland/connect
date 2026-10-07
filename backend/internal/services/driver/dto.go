@@ -27,12 +27,6 @@ type CreateDriverRequest struct {
 	DrivingLicenseExpiry *time.Time `json:"driving_license_expiry,omitempty"`
 
 	HireDate *time.Time `json:"hire_date,omitempty"`
-
-	Status string `json:"status"`
-
-	IsVerified bool `json:"is_verified"`
-
-	IsActive bool `json:"is_active"`
 }
 
 // RegisterDriverRequest contains the driver-supplied fields for
