@@ -1000,3 +1000,160 @@ func TestAssignRechecksParentLifecycleAfterLock(
 		})
 	}
 }
+
+func TestAssignAllowsConcurrentSharedParentLifecycleLocks(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	t.Cleanup(db.Close)
+
+	fixture, cleanup, err := testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create driver fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cleanup(context.Background()); err != nil {
+			t.Errorf("cleanup driver fixture: %v", err)
+		}
+	})
+
+	_, err = db.Exec(
+		ctx,
+		`
+			UPDATE driver_assignments
+			SET unassigned_at = NOW(), updated_at = NOW()
+			WHERE id = $1
+			  AND unassigned_at IS NULL
+		`,
+		fixture.AssignmentID,
+	)
+	if err != nil {
+		t.Fatalf("close fixture assignment: %v", err)
+	}
+
+	_, err = db.Exec(
+		ctx,
+		`
+			INSERT INTO driver_presence (
+				driver_id,
+				company_id,
+				branch_id,
+				is_online,
+				availability_status
+			)
+			VALUES ($1, $2, $3, FALSE, 'OFFLINE')
+		`,
+		fixture.UserID,
+		fixture.CompanyID,
+		fixture.BranchID,
+	)
+	if err != nil {
+		t.Fatalf("create fixture driver presence: %v", err)
+	}
+
+	var fleetID string
+	err = db.QueryRow(
+		ctx,
+		`
+			SELECT fleet_id
+			FROM vehicles
+			WHERE id = $1
+		`,
+		fixture.VehicleID,
+	).Scan(&fleetID)
+	if err != nil {
+		t.Fatalf("resolve fixture fleet: %v", err)
+	}
+
+	readerTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin parent lifecycle reader transaction: %v", err)
+	}
+
+	readerFinished := false
+	defer func() {
+		if !readerFinished {
+			_ = readerTx.Rollback(context.Background())
+		}
+	}()
+
+	for _, key := range []string{
+		"company:" + fixture.CompanyID,
+		"branch:" + fixture.BranchID,
+		"fleet:" + fleetID,
+	} {
+		if err := postgresrepo.AcquireTransactionAdvisorySharedLock(
+			ctx,
+			readerTx,
+			key,
+		); err != nil {
+			t.Fatalf("acquire shared parent lifecycle lock %q: %v", key, err)
+		}
+	}
+
+	assignCtx, cancelAssign := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelAssign()
+
+	assignService := NewService(Dependencies{DB: db})
+
+	assignment, err := assignService.Assign(
+		assignCtx,
+		fixture.UserID,
+		AssignDriverRequest{
+			VehicleID: fixture.VehicleID,
+			Notes:     "shared parent lifecycle lock compatibility test",
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"assignment should proceed while compatible shared parent locks are held: %v",
+			err,
+		)
+	}
+	if assignment == nil {
+		t.Fatal("expected created assignment")
+	}
+
+	if err := readerTx.Rollback(ctx); err != nil {
+		t.Fatalf("release shared parent lifecycle locks: %v", err)
+	}
+	readerFinished = true
+
+	if _, err := db.Exec(
+		ctx,
+		`DELETE FROM driver_presence WHERE driver_id = $1`,
+		fixture.UserID,
+	); err != nil {
+		t.Fatalf("delete fixture driver presence: %v", err)
+	}
+
+	if _, err := db.Exec(
+		ctx,
+		`DELETE FROM driver_assignments WHERE id = $1`,
+		assignment.ID,
+	); err != nil {
+		t.Fatalf("delete created assignment: %v", err)
+	}
+}

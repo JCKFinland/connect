@@ -34,8 +34,47 @@ func RunInTransaction(
 	return tx.Commit(ctx)
 }
 
+// AcquireTransactionAdvisorySharedLock acquires a PostgreSQL
+// transaction-scoped shared advisory lock for the supplied logical key.
+//
+// Shared locks allow concurrent lifecycle readers while still conflicting
+// with lifecycle writers that acquire the corresponding exclusive lock.
+//
+// hashtextextended converts the logical string key into a stable BIGINT
+// advisory-lock key.
+func AcquireTransactionAdvisorySharedLock(
+	ctx context.Context,
+	tx pgx.Tx,
+	key string,
+) error {
+	if key == "" {
+		return fmt.Errorf(
+			"advisory lock key is required",
+		)
+	}
+
+	const query = `
+		SELECT pg_advisory_xact_lock_shared(
+			hashtextextended($1, 0)
+		)
+	`
+
+	if _, err := tx.Exec(
+		ctx,
+		query,
+		key,
+	); err != nil {
+		return fmt.Errorf(
+			"acquire transaction shared advisory lock: %w",
+			err,
+		)
+	}
+
+	return nil
+}
+
 // AcquireTransactionAdvisoryLock acquires a PostgreSQL transaction-scoped
-// advisory lock for the supplied logical key.
+// exclusive advisory lock for the supplied logical key.
 //
 // The lock:
 //

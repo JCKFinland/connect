@@ -103,18 +103,17 @@ func (s *Service) Assign(
 				return fmt.Errorf("pre-read vehicle owning fleet: %w", err)
 			}
 
-			lockTargets := []struct {
+			parentLockTargets := []struct {
 				key  string
 				name string
 			}{
 				{"company:" + preDriver.CompanyID, "company"},
 				{"branch:" + preDriver.BranchID, "branch"},
 				{"fleet:" + fleetID, "fleet"},
-				{"vehicle:" + req.VehicleID, "vehicle"},
 			}
 
-			for _, target := range lockTargets {
-				if err := postgresrepo.AcquireTransactionAdvisoryLock(
+			for _, target := range parentLockTargets {
+				if err := postgresrepo.AcquireTransactionAdvisorySharedLock(
 					ctx,
 					tx,
 					target.key,
@@ -125,6 +124,17 @@ func (s *Service) Assign(
 						err,
 					)
 				}
+			}
+
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"vehicle:"+req.VehicleID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock vehicle lifecycle for assignment: %w",
+					err,
+				)
 			}
 
 			// ---------------------------------------------------------
