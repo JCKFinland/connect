@@ -88,6 +88,34 @@ func handlePresenceError(
 		errors.Is(
 			err,
 			presence.ErrDriverComplianceRequired,
+		),
+		errors.Is(
+			err,
+			presence.ErrDriverOffline,
+		),
+		errors.Is(
+			err,
+			presence.ErrDriverInactive,
+		),
+		errors.Is(
+			err,
+			presence.ErrCompanyInactive,
+		),
+		errors.Is(
+			err,
+			presence.ErrBranchInactive,
+		),
+		errors.Is(
+			err,
+			presence.ErrFleetInactive,
+		),
+		errors.Is(
+			err,
+			presence.ErrVehicleInactive,
+		),
+		errors.Is(
+			err,
+			presence.ErrAssignmentScopeInvalid,
 		):
 
 		response.Conflict(

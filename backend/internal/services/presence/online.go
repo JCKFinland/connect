@@ -14,8 +14,18 @@ import (
 var ErrDriverAssignmentRequired = errors.New(
 	"driver assignment required before going online",
 )
+
 var ErrDriverComplianceRequired = errors.New(
-	"driver regulatory compliance required before going online",
+	"driver regulatory compliance required",
+)
+
+var (
+	ErrDriverInactive         = errors.New("driver inactive")
+	ErrCompanyInactive        = errors.New("company inactive")
+	ErrBranchInactive         = errors.New("branch inactive")
+	ErrFleetInactive          = errors.New("fleet inactive")
+	ErrVehicleInactive        = errors.New("vehicle inactive")
+	ErrAssignmentScopeInvalid = errors.New("driver assignment scope invalid")
 )
 
 func (s *Service) GoOnline(
@@ -53,12 +63,12 @@ func (s *Service) GoOnline(
 		)
 	}
 
-	driver, err := s.getDriverByUserID(
-		ctx,
-		req.UserID,
-	)
+	driver, err := s.drivers.GetByUserID(ctx, req.UserID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrDriverNotFound
+	}
 	if err != nil {
-		return err
+		return fmt.Errorf("get driver before compliance validation: %w", err)
 	}
 
 	eligible, err := s.compliance.IsEligible(
@@ -92,39 +102,35 @@ func (s *Service) GoOnline(
 					tx,
 				)
 
-			// ---------------------------------------------------------
-			// 1. Lock the driver's lifecycle state.
-			//
-			// AcceptOffer(), Assign(), and Unassign() use this same
-			// presence row as their serialization point.
-			// ---------------------------------------------------------
-
-			_, err :=
-				presenceRepo.GetByDriverIDForUpdate(
-					ctx,
-					req.UserID,
+			driverRepo :=
+				postgresrepo.NewDriverRepositoryWithDB(
+					tx,
 				)
 
-			if errors.Is(
-				err,
-				repository.ErrNotFound,
-			) {
-				return ErrDriverNotFound
-			}
-
-			if err != nil {
-				return fmt.Errorf(
-					"lock driver presence before going online: %w",
-					err,
+			companyRepo :=
+				postgresrepo.NewCompanyRepositoryWithDB(
+					tx,
 				)
-			}
 
-			// ---------------------------------------------------------
-			// 2. Load the authoritative active vehicle assignment
-			//    while the driver lifecycle row remains locked.
-			// ---------------------------------------------------------
+			branchRepo :=
+				postgresrepo.NewBranchRepositoryWithDB(
+					tx,
+				)
 
-			assignment, err :=
+			fleetRepo :=
+				postgresrepo.NewFleetRepositoryWithDB(
+					tx,
+				)
+
+			vehicleRepo :=
+				postgresrepo.NewVehicleRepositoryWithDB(
+					tx,
+				)
+
+			// Establish the complete lifecycle target before taking row locks.
+			// The assignment is re-read after presence serialization before
+			// publishing the online state.
+			preAssignment, err :=
 				assignmentRepo.GetActiveByDriver(
 					ctx,
 					req.UserID,
@@ -139,6 +145,207 @@ func (s *Service) GoOnline(
 
 			if err != nil {
 				return fmt.Errorf(
+					"get active driver assignment before lifecycle validation: %w",
+					err,
+				)
+			}
+
+			if preAssignment == nil ||
+				preAssignment.ID == "" ||
+				preAssignment.CompanyID == "" ||
+				preAssignment.BranchID == "" ||
+				preAssignment.FleetID == "" ||
+				preAssignment.VehicleID == "" {
+
+				return ErrDriverAssignmentRequired
+			}
+
+			// Lifecycle-enabling reads serialize with parent deactivation and
+			// archive operations in deterministic parent-to-child order.
+			lifecycleTargets := []struct {
+				key  string
+				name string
+			}{
+				{"company:" + preAssignment.CompanyID, "company"},
+				{"branch:" + preAssignment.BranchID, "branch"},
+				{"fleet:" + preAssignment.FleetID, "fleet"},
+				{"vehicle:" + preAssignment.VehicleID, "vehicle"},
+			}
+
+			for _, target := range lifecycleTargets {
+				if err := postgresrepo.AcquireTransactionAdvisorySharedLock(
+					ctx,
+					tx,
+					target.key,
+				); err != nil {
+					return fmt.Errorf(
+						"acquire %s lifecycle lock before going online: %w",
+						target.name,
+						err,
+					)
+				}
+			}
+
+			// Lock and re-read the authoritative driver before operational
+			// presence. Driver lifecycle operations use this same ordering.
+			authoritativeDriver, err :=
+				driverRepo.GetByUserIDForUpdate(
+					ctx,
+					req.UserID,
+				)
+
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrDriverNotFound
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"get authoritative driver before going online: %w",
+					err,
+				)
+			}
+
+			if authoritativeDriver.CompanyID != preAssignment.CompanyID ||
+				authoritativeDriver.BranchID != preAssignment.BranchID {
+				return ErrAssignmentScopeInvalid
+			}
+
+			if !authoritativeDriver.IsActive ||
+				!authoritativeDriver.IsVerified ||
+				authoritativeDriver.Status != "ACTIVE" {
+				return ErrDriverInactive
+			}
+
+			company, err :=
+				companyRepo.GetByID(
+					ctx,
+					preAssignment.CompanyID,
+				)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrCompanyInactive
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"get company before going online: %w",
+					err,
+				)
+			}
+			if company == nil || !company.IsActive {
+				return ErrCompanyInactive
+			}
+
+			branch, err :=
+				branchRepo.GetByID(
+					ctx,
+					preAssignment.BranchID,
+				)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrBranchInactive
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"get branch before going online: %w",
+					err,
+				)
+			}
+			if branch == nil {
+				return ErrBranchInactive
+			}
+			if branch.CompanyID != preAssignment.CompanyID {
+				return ErrAssignmentScopeInvalid
+			}
+			if !branch.IsActive {
+				return ErrBranchInactive
+			}
+
+			fleet, err :=
+				fleetRepo.GetByID(
+					ctx,
+					preAssignment.FleetID,
+				)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrFleetInactive
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"get fleet before going online: %w",
+					err,
+				)
+			}
+			if fleet == nil {
+				return ErrFleetInactive
+			}
+			if fleet.CompanyID != preAssignment.CompanyID ||
+				fleet.BranchID != preAssignment.BranchID {
+				return ErrAssignmentScopeInvalid
+			}
+			if !fleet.IsActive {
+				return ErrFleetInactive
+			}
+
+			vehicle, err :=
+				vehicleRepo.GetByID(
+					ctx,
+					preAssignment.VehicleID,
+				)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrVehicleInactive
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"get vehicle before going online: %w",
+					err,
+				)
+			}
+			if vehicle == nil {
+				return ErrVehicleInactive
+			}
+			if vehicle.CompanyID != preAssignment.CompanyID ||
+				vehicle.BranchID != preAssignment.BranchID ||
+				vehicle.FleetID != preAssignment.FleetID {
+				return ErrAssignmentScopeInvalid
+			}
+			if !vehicle.IsActive {
+				return ErrVehicleInactive
+			}
+
+			// Serialize operational state only after lifecycle eligibility has
+			// been established under the parent/vehicle barriers.
+			_, err =
+				presenceRepo.GetByDriverIDForUpdate(
+					ctx,
+					req.UserID,
+				)
+
+			if errors.Is(
+				err,
+				repository.ErrNotFound,
+			) {
+				return ErrDriverNotFound
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"lock driver presence before going online: %w",
+					err,
+				)
+			}
+
+			// Unassignment can proceed without parent lifecycle locks. Re-read
+			// after taking the presence lock so a stale assignment snapshot can
+			// never be published into driver_presence.
+			assignment, err :=
+				assignmentRepo.GetActiveByDriver(
+					ctx,
+					req.UserID,
+				)
+
+			if errors.Is(
+				err,
+				repository.ErrNotFound,
+			) {
+				return ErrDriverAssignmentRequired
+			}
+			if err != nil {
+				return fmt.Errorf(
 					"get active driver assignment before going online: %w",
 					err,
 				)
@@ -146,19 +353,17 @@ func (s *Service) GoOnline(
 
 			if assignment == nil ||
 				assignment.ID == "" ||
-				assignment.VehicleID == "" {
+				assignment.ID != preAssignment.ID ||
+				assignment.CompanyID != preAssignment.CompanyID ||
+				assignment.BranchID != preAssignment.BranchID ||
+				assignment.FleetID != preAssignment.FleetID ||
+				assignment.VehicleID != preAssignment.VehicleID {
 
 				return ErrDriverAssignmentRequired
 			}
 
-			// ---------------------------------------------------------
-			// 3. Reconcile assignment data into driver_presence.
-			//
-			// This is guarded against BUSY/active-trip state.
-			// The driver's existing online/offline availability is
-			// deliberately preserved by this operation.
-			// ---------------------------------------------------------
-
+			// Reconcile the validated assignment into driver_presence. This is
+			// guarded against BUSY/active-trip state.
 			attached, err :=
 				presenceRepo.AttachAssignmentIfIdle(
 					ctx,

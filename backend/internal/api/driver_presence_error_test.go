@@ -87,6 +87,48 @@ func TestHandlePresenceError(t *testing.T) {
 			expectedStatus:  http.StatusConflict,
 			expectedMessage: presence.ErrDriverComplianceRequired.Error(),
 		},
+		{
+			name:            "offline driver returns conflict",
+			err:             presence.ErrDriverOffline,
+			expectedStatus:  http.StatusConflict,
+			expectedMessage: presence.ErrDriverOffline.Error(),
+		},
+		{
+			name:            "inactive driver returns conflict",
+			err:             presence.ErrDriverInactive,
+			expectedStatus:  http.StatusConflict,
+			expectedMessage: presence.ErrDriverInactive.Error(),
+		},
+		{
+			name:            "inactive company returns conflict",
+			err:             presence.ErrCompanyInactive,
+			expectedStatus:  http.StatusConflict,
+			expectedMessage: presence.ErrCompanyInactive.Error(),
+		},
+		{
+			name:            "inactive branch returns conflict",
+			err:             presence.ErrBranchInactive,
+			expectedStatus:  http.StatusConflict,
+			expectedMessage: presence.ErrBranchInactive.Error(),
+		},
+		{
+			name:            "inactive fleet returns conflict",
+			err:             presence.ErrFleetInactive,
+			expectedStatus:  http.StatusConflict,
+			expectedMessage: presence.ErrFleetInactive.Error(),
+		},
+		{
+			name:            "inactive vehicle returns conflict",
+			err:             presence.ErrVehicleInactive,
+			expectedStatus:  http.StatusConflict,
+			expectedMessage: presence.ErrVehicleInactive.Error(),
+		},
+		{
+			name:            "invalid assignment scope returns conflict",
+			err:             presence.ErrAssignmentScopeInvalid,
+			expectedStatus:  http.StatusConflict,
+			expectedMessage: presence.ErrAssignmentScopeInvalid.Error(),
+		},
 	}
 
 	for _, testCase := range tests {
