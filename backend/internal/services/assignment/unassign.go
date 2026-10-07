@@ -110,9 +110,10 @@ func (s *Service) Unassign(
 			// ---------------------------------------------------------
 
 			detached, err :=
-				presenceRepo.DetachAssignmentIfIdle(
+				presenceRepo.DetachSpecificAssignmentIfIdle(
 					ctx,
 					userID,
+					activeAssignment.ID,
 				)
 
 			if err != nil {

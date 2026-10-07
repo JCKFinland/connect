@@ -119,6 +119,14 @@ type DriverPresenceRepository interface {
 		driverID string,
 	) (bool, error)
 
+	// DetachSpecificAssignmentIfIdle removes presence state only when the
+	// currently attached assignment matches assignmentID and detachment is safe.
+	DetachSpecificAssignmentIfIdle(
+		ctx context.Context,
+		driverID string,
+		assignmentID string,
+	) (bool, error)
+
 	AttachAssignmentIfIdle(
 		ctx context.Context,
 		driverID string,
