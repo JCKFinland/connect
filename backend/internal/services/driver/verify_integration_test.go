@@ -613,6 +613,196 @@ func TestVerifyRechecksCompanyAfterLifecycleLock(t *testing.T) {
 	}
 }
 
+func TestVerifyDoesNotResurrectConcurrentlyArchivedDriver(t *testing.T) {
+	ctx := context.Background()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	fixture, cleanup, err := createVerificationFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create verification fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanup(context.Background()); err != nil {
+			t.Logf("cleanup verification fixture: %v", err)
+		}
+	}()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO company_memberships (
+				user_id,
+				company_id
+			)
+			VALUES ($1, $2)
+			ON CONFLICT (user_id, company_id) DO NOTHING
+		`,
+		fixture.UserID,
+		fixture.CompanyID,
+	); err != nil {
+		t.Fatalf("create company membership: %v", err)
+	}
+
+	defer func() {
+		_, _ = db.Exec(
+			context.Background(),
+			`
+				DELETE FROM company_memberships
+				WHERE user_id = $1
+				  AND company_id = $2
+			`,
+			fixture.UserID,
+			fixture.CompanyID,
+		)
+	}()
+
+	lockTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lifecycle lock transaction: %v", err)
+	}
+	defer func() {
+		_ = lockTx.Rollback(context.Background())
+	}()
+
+	if err := postgresrepo.AcquireTransactionAdvisoryLock(
+		ctx,
+		lockTx,
+		"company:"+fixture.CompanyID,
+	); err != nil {
+		t.Fatalf("lock company lifecycle: %v", err)
+	}
+
+	verifyService := NewService(Dependencies{
+		DB:      db,
+		Drivers: postgresrepo.NewDriverRepository(db),
+	})
+
+	verifyDone := make(chan error, 1)
+
+	go func() {
+		_, err := verifyService.Verify(
+			context.Background(),
+			fixture.DriverID,
+			fixture.VerifierID,
+		)
+		verifyDone <- err
+	}()
+
+	select {
+	case err := <-verifyDone:
+		t.Fatalf(
+			"verification returned before company lifecycle lock was released: %v",
+			err,
+		)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	deleteService := NewService(Dependencies{
+		DB:                 db,
+		Drivers:            postgresrepo.NewDriverRepository(db),
+		UserRoles:          repository.NewUserRoleRepository(db),
+		CompanyMemberships: postgresrepo.NewCompanyMembershipRepository(db),
+	})
+
+	if err := deleteService.Delete(
+		ctx,
+		fixture.UserID,
+		fixture.DriverID,
+	); err != nil {
+		t.Fatalf("archive driver while verification is blocked: %v", err)
+	}
+
+	if err := lockTx.Commit(ctx); err != nil {
+		t.Fatalf("release company lifecycle lock: %v", err)
+	}
+
+	select {
+	case err := <-verifyDone:
+		if !errors.Is(err, ErrDriverNotFound) {
+			t.Fatalf(
+				"expected ErrDriverNotFound after concurrent archive, got %v",
+				err,
+			)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("verification did not finish after lifecycle lock release")
+	}
+
+	var (
+		deletedAt        *time.Time
+		status           string
+		isVerified       bool
+		verifiedAt       *time.Time
+		verifiedByUserID *string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				deleted_at,
+				status,
+				is_verified,
+				verified_at,
+				verified_by_user_id
+			FROM drivers
+			WHERE id = $1
+		`,
+		fixture.DriverID,
+	).Scan(
+		&deletedAt,
+		&status,
+		&isVerified,
+		&verifiedAt,
+		&verifiedByUserID,
+	); err != nil {
+		t.Fatalf("reload archived driver: %v", err)
+	}
+
+	if deletedAt == nil {
+		t.Fatal("expected driver to remain archived")
+	}
+
+	if status != "PENDING_VERIFICATION" {
+		t.Fatalf(
+			"expected PENDING_VERIFICATION after archive, got %s",
+			status,
+		)
+	}
+
+	if isVerified {
+		t.Fatal("archived driver must remain unverified")
+	}
+
+	if verifiedAt != nil {
+		t.Fatal("archived driver must not receive verified_at")
+	}
+
+	if verifiedByUserID != nil {
+		t.Fatal("archived driver must not receive verified_by_user_id")
+	}
+}
+
 func TestVerifyRechecksBranchAfterLifecycleLock(t *testing.T) {
 	ctx := context.Background()
 
