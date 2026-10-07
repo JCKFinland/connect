@@ -216,10 +216,10 @@ func (s *Service) Assign(
 			}
 
 			// ---------------------------------------------------------
-			// 2. Lock driver lifecycle state.
+			// 3. Lock driver presence state.
 			//
 			// AcceptOffer() and Unassign() use the same presence row
-			// as their driver-level serialization point.
+			// as their operational serialization point.
 			// ---------------------------------------------------------
 
 			_, err =
@@ -245,7 +245,7 @@ func (s *Service) Assign(
 			}
 
 			// ---------------------------------------------------------
-			// 3. Driver must not already have an active assignment.
+			// 4. Driver must not already have an active assignment.
 			// ---------------------------------------------------------
 
 			_, err =
@@ -269,7 +269,7 @@ func (s *Service) Assign(
 			}
 
 			// ---------------------------------------------------------
-			// 4. Vehicle must not already have an active assignment.
+			// 5. Vehicle must not already have an active assignment.
 			// ---------------------------------------------------------
 
 			_, err =
@@ -293,7 +293,7 @@ func (s *Service) Assign(
 			}
 
 			// ---------------------------------------------------------
-			// 5. Create assignment from authoritative relationships.
+			// 6. Create assignment from authoritative relationships.
 			//
 			// PostgreSQL partial unique indexes remain the final
 			// concurrency backstop for driver and vehicle uniqueness.
@@ -322,7 +322,7 @@ func (s *Service) Assign(
 			}
 
 			// ---------------------------------------------------------
-			// 6. Attach assignment to presence only if the driver is
+			// 7. Attach assignment to presence only if the driver is
 			//    still operationally idle.
 			//
 			// Failure here rolls back assignment creation as well.
