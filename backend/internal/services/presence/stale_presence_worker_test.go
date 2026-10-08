@@ -23,9 +23,10 @@ func TestStartStalePresenceWorkerRunsImmediately(t *testing.T) {
 				HeartbeatTimeout: 2 * time.Minute,
 			},
 		},
-		expireAllStaleIdle: func(
+		reconcileStaleIdleBounded: func(
 			ctx context.Context,
-			staleBefore time.Time,
+			now time.Time,
+			batchSize int,
 		) (int64, error) {
 			select {
 			case called <- struct{}{}:
@@ -83,9 +84,10 @@ func TestStartStalePresenceWorkerContinuesAfterCycleError(
 				HeartbeatTimeout: 2 * time.Minute,
 			},
 		},
-		expireAllStaleIdle: func(
+		reconcileStaleIdleBounded: func(
 			ctx context.Context,
-			staleBefore time.Time,
+			now time.Time,
+			batchSize int,
 		) (int64, error) {
 			current := cycleCount.Add(1)
 
@@ -169,9 +171,10 @@ func TestStartStalePresenceWorkerStopsOnCancelledCycle(
 				HeartbeatTimeout: 2 * time.Minute,
 			},
 		},
-		expireAllStaleIdle: func(
+		reconcileStaleIdleBounded: func(
 			ctx context.Context,
-			staleBefore time.Time,
+			now time.Time,
+			batchSize int,
 		) (int64, error) {
 			select {
 			case started <- struct{}{}:
@@ -257,5 +260,101 @@ func TestStartStalePresenceWorkerRejectsInvalidDerivedInterval(
 
 	default:
 		t.Fatal("expected invalid interval to be reported")
+	}
+}
+
+// TestStartStalePresenceWorkerBatchSize verifies that the worker passes
+// the configured candidate limit to bounded reconciliation.
+func TestStartStalePresenceWorkerBatchSize(t *testing.T) {
+	tests := []struct {
+		name      string
+		batchSize int
+		want      int
+	}{
+		{
+			name:      "default batch size",
+			batchSize: 0,
+			want:      defaultStaleIdleBatchSize,
+		},
+		{
+			name:      "negative batch size uses default",
+			batchSize: -1,
+			want:      defaultStaleIdleBatchSize,
+		},
+		{
+			name:      "configured batch size",
+			batchSize: 25,
+			want:      25,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(
+				context.Background(),
+			)
+			defer cancel()
+
+			received := make(chan int, 1)
+			done := make(chan struct{})
+
+			service := &Service{
+				cfg: &config.Config{
+					Presence: config.PresenceConfig{
+						HeartbeatTimeout: 2 * time.Minute,
+					},
+				},
+				reconcileStaleIdleBounded: func(
+					ctx context.Context,
+					now time.Time,
+					batchSize int,
+				) (int64, error) {
+					select {
+					case received <- batchSize:
+					default:
+					}
+
+					return 0, nil
+				},
+			}
+
+			go func() {
+				defer close(done)
+
+				service.StartStalePresenceWorker(
+					ctx,
+					StalePresenceWorkerOptions{
+						Interval:  time.Hour,
+						BatchSize: tc.batchSize,
+					},
+				)
+			}()
+
+			select {
+			case got := <-received:
+				if got != tc.want {
+					t.Errorf(
+						"batch size: got %d, want %d",
+						got,
+						tc.want,
+					)
+				}
+
+			case <-time.After(3 * time.Second):
+				t.Error(
+					"worker did not invoke bounded reconciliation",
+				)
+			}
+
+			cancel()
+
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal(
+					"worker did not stop after cancellation",
+				)
+			}
+		})
 	}
 }

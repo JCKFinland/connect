@@ -10,8 +10,12 @@ import (
 type StalePresenceWorkerOptions struct {
 	Interval time.Duration
 
+	// BatchSize is the maximum number of stale driver candidates
+	// inspected during each reconciliation cycle.
+	// A non-positive value uses the default batch size.
+	BatchSize int
+
 	// OnError receives non-fatal reconciliation errors.
-	//
 	// The worker continues operating after these errors.
 	OnError func(error)
 }
@@ -21,6 +25,9 @@ type StalePresenceWorkerOptions struct {
 //
 // One reconciliation runs immediately at startup. Subsequent reconciliation
 // runs at the configured interval.
+//
+// Every reconciliation cycle is bounded. Each candidate is processed
+// transactionally after acquiring its permanent driver aggregate lock.
 func (s *Service) StartStalePresenceWorker(
 	ctx context.Context,
 	options StalePresenceWorkerOptions,
@@ -45,10 +52,16 @@ func (s *Service) StartStalePresenceWorker(
 		return
 	}
 
+	batchSize := options.BatchSize
+	if batchSize <= 0 {
+		batchSize = defaultStaleIdleBatchSize
+	}
+
 	runCycle := func() bool {
-		_, err := s.ReconcileAllStaleIdle(
+		_, err := s.reconcileStaleIdleBounded(
 			ctx,
 			time.Now().UTC(),
+			batchSize,
 		)
 		if err == nil {
 			return true
@@ -65,8 +78,8 @@ func (s *Service) StartStalePresenceWorker(
 		return true
 	}
 
-	// Reconcile immediately so stale persisted state does not have to wait for
-	// the first ticker interval after process startup.
+	// Reconcile immediately so stale persisted state does not have to wait
+	// for the first ticker interval after process startup.
 	if !runCycle() {
 		return
 	}

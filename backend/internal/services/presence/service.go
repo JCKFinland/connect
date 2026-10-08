@@ -2,6 +2,7 @@ package presence
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/config"
@@ -38,6 +39,10 @@ type Service struct {
 	db  *pgxpool.Pool
 	cfg *config.Config
 
+	// Serializes reconciliation cycles and protects the keyset cursor.
+	staleIdleCursorMu sync.Mutex
+	staleIdleCursor   string
+
 	users           repository.UserRepository
 	drivers         repository.DriverRepository
 	presence        repository.DriverPresenceRepository
@@ -54,6 +59,14 @@ type Service struct {
 	expireAllStaleIdle func(
 		ctx context.Context,
 		staleBefore time.Time,
+	) (int64, error)
+
+	// Production worker uses transactional bounded reconciliation.
+	// Tests may inject a deterministic callback.
+	reconcileStaleIdleBounded func(
+		ctx context.Context,
+		now time.Time,
+		batchSize int,
 	) (int64, error)
 }
 
@@ -77,5 +90,6 @@ func NewService(
 		service.expireAllStaleIdle = deps.Presence.ExpireAllStaleIdle
 	}
 
+	service.reconcileStaleIdleBounded = service.ReconcileStaleIdleBounded
 	return service
 }
