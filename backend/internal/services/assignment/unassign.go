@@ -49,7 +49,21 @@ func (s *Service) Unassign(
 					tx,
 				)
 
-			// ---------------------------------------------------------
+				// ---------------------------------------------------------
+				// Lock the permanent driver before operational presence.
+			// Maintain driver-first ordering across assignment,
+			// dispatch, and regulatory lifecycle transactions.
+			drivers := postgresrepo.NewDriverRepositoryWithDB(tx)
+			if _, err := drivers.GetByUserIDForUpdate(ctx, userID); err != nil {
+				if errors.Is(err, repository.ErrNotFound) {
+					return ErrAssignmentNotFound
+				}
+				return fmt.Errorf(
+					"lock permanent driver before unassignment: %w",
+					err,
+				)
+			}
+
 			// 1. Lock the authenticated driver's presence row.
 			//
 			// AcceptOffer() also locks this row before committing a
