@@ -318,6 +318,29 @@ func (s *Service) DispatchRide(
 					)
 				}
 
+				// Acquire the permanent driver aggregate before presence.
+				// Regulatory document mutations use this same serialization lock.
+				operationalDriver, err := drivers.GetByUserID(
+					ctx,
+					candidate.presence.DriverID,
+				)
+				if errors.Is(err, repository.ErrNotFound) {
+					continue
+				}
+				if err != nil {
+					return fmt.Errorf("resolve candidate driver for locking: %w", err)
+				}
+				if operationalDriver == nil || operationalDriver.ID == "" {
+					continue
+				}
+
+				driverLocked, err := drivers.TryLockByID(ctx, operationalDriver.ID)
+				if err != nil {
+					return fmt.Errorf("try lock candidate driver aggregate: %w", err)
+				}
+				if !driverLocked {
+					continue
+				}
 				lockedDriver, err := presence.GetAvailableByDriverIDForUpdate(
 					ctx,
 					candidate.presence.DriverID,
@@ -432,6 +455,10 @@ func (s *Service) DispatchRide(
 
 				selected = lockedDriver
 				selectedAssignment = lockedAssignment
+
+				if s.afterSelectCandidate != nil {
+					s.afterSelectCandidate(lockedDriver.DriverID)
+				}
 
 				break
 			}

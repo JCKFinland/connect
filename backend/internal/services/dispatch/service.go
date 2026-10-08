@@ -41,6 +41,12 @@ type Service struct {
 	//
 	// It is nil in normal production operation.
 	beforeClaimCandidate func(driverID string)
+
+	// afterSelectCandidate coordinates regulatory-revocation concurrency
+	// tests after final compliance validation while the driver aggregate
+	// lock remains held by the dispatch transaction.
+	// Nil in production.
+	afterSelectCandidate func(driverID string)
 }
 
 func NewService(

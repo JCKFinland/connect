@@ -145,7 +145,7 @@ func (s *Service) AcceptOffer(
 			// 3. Resolve operational drivers.id -> users.id.
 			// ---------------------------------------------------------
 
-			driver, err := drivers.GetByID(
+			driver, err := drivers.GetByIDForUpdate(
 				ctx,
 				offer.DriverID,
 			)
