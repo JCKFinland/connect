@@ -109,13 +109,33 @@ func (s *Service) Heartbeat(
 		s.db,
 		func(tx pgx.Tx) error {
 
+			driverRepo :=
+				postgresrepo.NewDriverRepositoryWithDB(tx)
+
 			presenceRepo :=
 				postgresrepo.NewDriverPresenceRepositoryWithDB(
 					tx,
 				)
 
+			// Regulatory document mutations lock the permanent driver
+			// aggregate. Acquire that lock before presence to serialize
+			// compliance evaluation with concurrent revocation.
+			driver, err := driverRepo.GetByUserIDForUpdate(
+				ctx,
+				req.UserID,
+			)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrDriverNotFound
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"lock driver before heartbeat: %w",
+					err,
+				)
+			}
+
 			// ---------------------------------------------------------
-			// Lock presence first.
+			// Lock presence after the permanent driver aggregate.
 			//
 			// This distinguishes:
 			//
@@ -165,27 +185,21 @@ func (s *Service) Heartbeat(
 				(current.AvailabilityStatus == StatusAvailable ||
 					current.AvailabilityStatus == StatusBreak) {
 
-				if s.drivers == nil {
-					return errors.New(
-						"driver repository is not configured",
-					)
+				if !driver.IsActive {
+					return errors.New("driver account is inactive")
 				}
 
-				if s.compliance == nil {
+				compliance := s.compliance
+				if s.complianceForDB != nil {
+					compliance = s.complianceForDB(tx)
+				}
+				if compliance == nil {
 					return errors.New(
 						"driver compliance service is not configured",
 					)
 				}
 
-				driver, err := s.getDriverByUserID(
-					ctx,
-					req.UserID,
-				)
-				if err != nil {
-					return err
-				}
-
-				eligible, err := s.compliance.IsEligible(
+				eligible, err := compliance.IsEligible(
 					ctx,
 					driver.ID,
 					time.Now().UTC(),
