@@ -9,7 +9,9 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
+	"github.com/JCKFinland/connect/backend/internal/models"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	drivercomplianceservice "github.com/JCKFinland/connect/backend/internal/services/driver_compliance"
 	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
@@ -140,6 +142,237 @@ func TestGoOnlineRejectsInactiveCompany(t *testing.T) {
 
 	if isOnline {
 		t.Fatal("expected driver to remain offline")
+	}
+	if availabilityStatus != StatusOffline {
+		t.Fatalf(
+			"expected availability %s, got %s",
+			StatusOffline,
+			availabilityStatus,
+		)
+	}
+	if assignmentID != nil {
+		t.Fatalf("expected assignment to remain detached, got %s", *assignmentID)
+	}
+	if vehicleID != nil {
+		t.Fatalf("expected vehicle to remain detached, got %s", *vehicleID)
+	}
+}
+
+func TestGoOnlineRejectsComplianceRevokedWhileWaitingForDriverAggregateLock(
+	t *testing.T,
+) {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+
+	fixture, cleanupFixture, err := testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create driver fixture: %v", err)
+	}
+	defer func() {
+		if cleanupErr := cleanupFixture(context.Background()); cleanupErr != nil {
+			t.Logf("cleanup driver fixture: %v", cleanupErr)
+		}
+	}()
+
+	cleanupCompliance, err :=
+		testutil.MakeDriverRegulatorilyCompliant(ctx, db, fixture)
+	if err != nil {
+		t.Fatalf("make driver regulatorily compliant: %v", err)
+	}
+	defer func() {
+		if cleanupErr := cleanupCompliance(context.Background()); cleanupErr != nil {
+			t.Logf("cleanup driver compliance fixture: %v", cleanupErr)
+		}
+	}()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO driver_presence (
+				driver_id,
+				company_id,
+				branch_id,
+				availability_status,
+				is_online
+			)
+			VALUES ($1, $2, $3, $4, FALSE)
+		`,
+		fixture.UserID,
+		fixture.CompanyID,
+		fixture.BranchID,
+		StatusOffline,
+	); err != nil {
+		t.Fatalf("insert driver presence: %v", err)
+	}
+
+	documentRepo := postgresrepo.NewDriverDocumentRepository(db)
+
+	drivingLicense, err := documentRepo.GetByDriverAndType(
+		ctx,
+		fixture.DriverID,
+		models.DriverDocumentTypeDrivingLicense,
+	)
+	if err != nil {
+		t.Fatalf("get verified driving-license document: %v", err)
+	}
+
+	revokeTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin revocation transaction: %v", err)
+	}
+
+	revokeTxFinished := false
+	defer func() {
+		if !revokeTxFinished {
+			_ = revokeTx.Rollback(context.Background())
+		}
+	}()
+
+	if _, err := revokeTx.Exec(
+		ctx,
+		`
+			SELECT id
+			FROM drivers
+			WHERE id = $1
+			FOR UPDATE
+		`,
+		fixture.DriverID,
+	); err != nil {
+		t.Fatalf("lock driver aggregate for revocation: %v", err)
+	}
+
+	if _, err := revokeTx.Exec(
+		ctx,
+		`
+			UPDATE driver_documents
+			SET
+				status = $2,
+				revoked_at = NOW(),
+				revoked_by_user_id = $3,
+				revocation_reason = $4,
+				updated_at = NOW()
+			WHERE id = $1
+			  AND deleted_at IS NULL
+		`,
+		drivingLicense.ID,
+		models.DriverDocumentStatusRevoked,
+		fixture.UserID,
+		"concurrent regulatory revocation",
+	); err != nil {
+		t.Fatalf("stage driving-license revocation: %v", err)
+	}
+
+	service := NewService(
+		Dependencies{
+			DB:          db,
+			Config:      cfg,
+			Drivers:     postgresrepo.NewDriverRepository(db),
+			Presence:    postgresrepo.NewDriverPresenceRepository(db),
+			Assignments: postgresrepo.NewDriverAssignmentRepository(db),
+			Compliance:  &complianceEvaluatorStub{eligible: true},
+			ComplianceForDB: func(dbtx postgresrepo.DBTX) ComplianceEvaluator {
+				return drivercomplianceservice.NewService(
+					drivercomplianceservice.Dependencies{
+						Drivers:   postgresrepo.NewDriverRepositoryWithDB(dbtx),
+						Documents: postgresrepo.NewDriverDocumentRepositoryWithDB(dbtx),
+					},
+				)
+			},
+		},
+	)
+
+	started := make(chan struct{})
+	result := make(chan error, 1)
+
+	go func() {
+		close(started)
+		result <- service.GoOnline(
+			context.Background(),
+			GoOnlineRequest{
+				UserID: fixture.UserID,
+			},
+		)
+	}()
+
+	<-started
+
+	select {
+	case early := <-result:
+		t.Fatalf(
+			"GoOnline completed while regulatory mutation held driver aggregate lock: %v",
+			early,
+		)
+	case <-time.After(150 * time.Millisecond):
+		// Expected: GoOnline is blocked acquiring the authoritative driver row.
+	}
+
+	if err := revokeTx.Commit(ctx); err != nil {
+		t.Fatalf("commit regulatory revocation: %v", err)
+	}
+	revokeTxFinished = true
+
+	select {
+	case goOnlineErr := <-result:
+		if !errors.Is(goOnlineErr, ErrDriverComplianceRequired) {
+			t.Fatalf(
+				"expected ErrDriverComplianceRequired after committed revocation, got %v",
+				goOnlineErr,
+			)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GoOnline did not complete after regulatory revocation committed")
+	}
+
+	var (
+		isOnline           bool
+		availabilityStatus string
+		assignmentID       *string
+		vehicleID          *string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT
+				is_online,
+				availability_status,
+				assignment_id,
+				vehicle_id
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		fixture.UserID,
+	).Scan(
+		&isOnline,
+		&availabilityStatus,
+		&assignmentID,
+		&vehicleID,
+	); err != nil {
+		t.Fatalf("load presence after rejected GoOnline: %v", err)
+	}
+
+	if isOnline {
+		t.Fatal("expected driver to remain offline after regulatory revocation")
 	}
 	if availabilityStatus != StatusOffline {
 		t.Fatalf(
@@ -1535,6 +1768,226 @@ func TestUpdateAvailabilityDoesNotBringOfflineDriverOnline(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestUpdateAvailabilityRejectsComplianceRevokedWhileWaitingForDriverAggregateLock(
+	t *testing.T,
+) {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir("../../.."); err != nil {
+		t.Fatalf("change to backend root: %v", err)
+	}
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load CONNECT configuration: %v", err)
+	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+
+	fixture, cleanupFixture, err := testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create driver fixture: %v", err)
+	}
+	defer func() {
+		if cleanupErr := cleanupFixture(context.Background()); cleanupErr != nil {
+			t.Logf("cleanup driver fixture: %v", cleanupErr)
+		}
+	}()
+
+	cleanupCompliance, err :=
+		testutil.MakeDriverRegulatorilyCompliant(ctx, db, fixture)
+	if err != nil {
+		t.Fatalf("make driver regulatorily compliant: %v", err)
+	}
+	defer func() {
+		if cleanupErr := cleanupCompliance(context.Background()); cleanupErr != nil {
+			t.Logf("cleanup driver compliance fixture: %v", cleanupErr)
+		}
+	}()
+
+	if _, err := db.Exec(
+		ctx,
+		`
+			INSERT INTO driver_presence (
+				driver_id,
+				company_id,
+				branch_id,
+				assignment_id,
+				vehicle_id,
+				is_online,
+				availability_status,
+				updated_at
+			)
+			VALUES ($1, $2, $3, $4, $5, TRUE, $6, NOW())
+		`,
+		fixture.UserID,
+		fixture.CompanyID,
+		fixture.BranchID,
+		fixture.AssignmentID,
+		fixture.VehicleID,
+		StatusBreak,
+	); err != nil {
+		t.Fatalf("create online break presence: %v", err)
+	}
+
+	documentRepo := postgresrepo.NewDriverDocumentRepository(db)
+
+	drivingLicense, err := documentRepo.GetByDriverAndType(
+		ctx,
+		fixture.DriverID,
+		models.DriverDocumentTypeDrivingLicense,
+	)
+	if err != nil {
+		t.Fatalf("get verified driving-license document: %v", err)
+	}
+
+	revokeTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin revocation transaction: %v", err)
+	}
+
+	revokeTxFinished := false
+	defer func() {
+		if !revokeTxFinished {
+			_ = revokeTx.Rollback(context.Background())
+		}
+	}()
+
+	if _, err := revokeTx.Exec(
+		ctx,
+		`
+			SELECT id
+			FROM drivers
+			WHERE id = $1
+			FOR UPDATE
+		`,
+		fixture.DriverID,
+	); err != nil {
+		t.Fatalf("lock driver aggregate for revocation: %v", err)
+	}
+
+	if _, err := revokeTx.Exec(
+		ctx,
+		`
+			UPDATE driver_documents
+			SET
+				status = $2,
+				revoked_at = NOW(),
+				revoked_by_user_id = $3,
+				revocation_reason = $4,
+				updated_at = NOW()
+			WHERE id = $1
+			  AND deleted_at IS NULL
+		`,
+		drivingLicense.ID,
+		models.DriverDocumentStatusRevoked,
+		fixture.UserID,
+		"concurrent regulatory revocation",
+	); err != nil {
+		t.Fatalf("stage driving-license revocation: %v", err)
+	}
+
+	service := NewService(
+		Dependencies{
+			DB:          db,
+			Config:      cfg,
+			Drivers:     postgresrepo.NewDriverRepository(db),
+			Presence:    postgresrepo.NewDriverPresenceRepository(db),
+			Assignments: postgresrepo.NewDriverAssignmentRepository(db),
+			Compliance:  &complianceEvaluatorStub{eligible: true},
+			ComplianceForDB: func(dbtx postgresrepo.DBTX) ComplianceEvaluator {
+				return drivercomplianceservice.NewService(
+					drivercomplianceservice.Dependencies{
+						Drivers:   postgresrepo.NewDriverRepositoryWithDB(dbtx),
+						Documents: postgresrepo.NewDriverDocumentRepositoryWithDB(dbtx),
+					},
+				)
+			},
+		},
+	)
+
+	started := make(chan struct{})
+	result := make(chan error, 1)
+
+	go func() {
+		close(started)
+		result <- service.UpdateAvailability(
+			context.Background(),
+			UpdateAvailabilityRequest{
+				UserID: fixture.UserID,
+				Status: StatusAvailable,
+			},
+		)
+	}()
+
+	<-started
+
+	select {
+	case early := <-result:
+		t.Fatalf(
+			"UpdateAvailability completed while regulatory mutation held driver aggregate lock: %v",
+			early,
+		)
+	case <-time.After(150 * time.Millisecond):
+		// Expected: AVAILABLE is blocked acquiring the authoritative driver row.
+	}
+
+	if err := revokeTx.Commit(ctx); err != nil {
+		t.Fatalf("commit regulatory revocation: %v", err)
+	}
+	revokeTxFinished = true
+
+	select {
+	case availabilityErr := <-result:
+		if !errors.Is(availabilityErr, ErrDriverComplianceRequired) {
+			t.Fatalf(
+				"expected ErrDriverComplianceRequired after committed revocation, got %v",
+				availabilityErr,
+			)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("UpdateAvailability did not complete after regulatory revocation committed")
+	}
+
+	var (
+		isOnline           bool
+		availabilityStatus string
+	)
+
+	if err := db.QueryRow(
+		ctx,
+		`
+			SELECT is_online, availability_status
+			FROM driver_presence
+			WHERE driver_id = $1
+		`,
+		fixture.UserID,
+	).Scan(&isOnline, &availabilityStatus); err != nil {
+		t.Fatalf("load presence after rejected AVAILABLE transition: %v", err)
+	}
+
+	if !isOnline {
+		t.Fatal("expected rejected AVAILABLE transition to preserve online state")
+	}
+	if availabilityStatus != StatusBreak {
+		t.Fatalf(
+			"expected rejected AVAILABLE transition to preserve %s, got %s",
+			StatusBreak,
+			availabilityStatus,
+		)
 	}
 }
 

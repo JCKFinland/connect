@@ -479,6 +479,14 @@ func main() {
 			Presence:    driverPresenceRepo,
 			Assignments: driverAssignmentRepo,
 			Compliance:  driverComplianceService,
+			ComplianceForDB: func(db postgresrepo.DBTX) presence.ComplianceEvaluator {
+				return drivercomplianceservice.NewService(
+					drivercomplianceservice.Dependencies{
+						Drivers:   postgresrepo.NewDriverRepositoryWithDB(db),
+						Documents: postgresrepo.NewDriverDocumentRepositoryWithDB(db),
+					},
+				)
+			},
 		},
 	)
 

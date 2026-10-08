@@ -63,30 +63,6 @@ func (s *Service) GoOnline(
 		)
 	}
 
-	driver, err := s.drivers.GetByUserID(ctx, req.UserID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return ErrDriverNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("get driver before compliance validation: %w", err)
-	}
-
-	eligible, err := s.compliance.IsEligible(
-		ctx,
-		driver.ID,
-		time.Now().UTC(),
-	)
-	if err != nil {
-		return fmt.Errorf(
-			"evaluate driver compliance before going online: %w",
-			err,
-		)
-	}
-
-	if !eligible {
-		return ErrDriverComplianceRequired
-	}
-
 	return postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
@@ -383,6 +359,34 @@ func (s *Service) GoOnline(
 
 			if !attached {
 				return ErrDriverAvailabilityLocked
+			}
+
+			// Compliance is the final dispatchability gate after assignment
+			// reconciliation. Production evaluates through transaction-bound
+			// repositories while the authoritative driver row remains locked.
+			compliance := s.compliance
+			if s.complianceForDB != nil {
+				compliance = s.complianceForDB(tx)
+			}
+			if compliance == nil {
+				return errors.New(
+					"driver compliance service is not configured",
+				)
+			}
+
+			eligible, err := compliance.IsEligible(
+				ctx,
+				authoritativeDriver.ID,
+				time.Now().UTC(),
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"evaluate driver compliance before going online: %w",
+					err,
+				)
+			}
+			if !eligible {
+				return ErrDriverComplianceRequired
 			}
 
 			// ---------------------------------------------------------

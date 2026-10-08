@@ -372,7 +372,17 @@ func (s *Service) UpdateAvailability(
 					)
 				}
 
-				eligible, err := s.compliance.IsEligible(
+				compliance := s.compliance
+				if s.complianceForDB != nil {
+					compliance = s.complianceForDB(tx)
+				}
+				if compliance == nil {
+					return errors.New(
+						"driver compliance service is not configured",
+					)
+				}
+
+				eligible, err := compliance.IsEligible(
 					ctx,
 					authoritativeDriverID,
 					time.Now().UTC(),
