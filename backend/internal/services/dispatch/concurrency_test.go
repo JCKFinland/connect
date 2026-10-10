@@ -582,212 +582,56 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 
+	// A disposable hierarchy prevents existing active trips from silently
+	// skipping the acceptance regression. Never mutate John's shared fixture.
+	driverFixture, cleanupDriverFixture, err := testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated acceptance driver: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated acceptance driver: %v", err)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// 3. Existing controlled test fixture.
-	//
-	// dispatch_offers.driver_id uses drivers.id.
-	// driver_presence/trips.driver_id use users.id.
-	// ---------------------------------------------------------
-
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
-
-		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
-
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
-
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
-	)
-
-	// ---------------------------------------------------------
-	// 4. Clear only stale PENDING offers.
-	// ---------------------------------------------------------
-
-	offerRepo :=
-		postgresrepo.NewDispatchOfferRepository(db)
-
-	if _, err := offerRepo.ExpireStalePending(
-		ctx,
-		time.Now().UTC(),
-	); err != nil {
-		t.Fatalf(
-			"expire stale dispatch offers: %v",
-			err,
-		)
+	cleanupCompliance, err := testutil.MakeDriverRegulatorilyCompliant(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("prepare isolated acceptance compliance: %v", err)
 	}
-
-	// ---------------------------------------------------------
-	// 5. Avoid interfering with legitimate active state.
-	// ---------------------------------------------------------
-
-	var activePendingOfferCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM dispatch_offers
-			WHERE driver_id = $1
-			  AND status = 'PENDING'
-		`,
-		johnDriverID,
-	).Scan(&activePendingOfferCount); err != nil {
-		t.Fatalf(
-			"check active pending offer: %v",
-			err,
-		)
-	}
-
-	if activePendingOfferCount != 0 {
-		t.Skip(
-			"John already has an active PENDING dispatch offer",
-		)
-	}
-
-	var activeTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(&activeTripCount); err != nil {
-		t.Fatalf(
-			"check existing active trip: %v",
-			err,
-		)
-	}
-
-	if activeTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
-		)
-	}
-
-	// ---------------------------------------------------------
-	// 6. Preserve John's presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		_, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					last_heartbeat_at = $4,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		)
-
-		if restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
+		if err := cleanupCompliance(context.Background()); err != nil {
+			t.Errorf("cleanup isolated acceptance compliance: %v", err)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// 7. Make John AVAILABLE for controlled acceptance.
-	// ---------------------------------------------------------
+	johnUserID := driverFixture.UserID
+	johnDriverID := driverFixture.DriverID
+	johnVehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
 
-	if _, err := db.Exec(
-		ctx,
-		`
-			UPDATE driver_presence
-			SET
-				is_online = TRUE,
-				availability_status = 'AVAILABLE',
-				last_heartbeat_at = NOW(),
-				updated_at = NOW()
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	); err != nil {
-		t.Fatalf(
-			"prepare driver presence: %v",
-			err,
-		)
+	_, err = db.Exec(ctx, `
+		INSERT INTO driver_presence (
+			driver_id, company_id, branch_id, vehicle_id,
+			assignment_id, is_online, availability_status,
+			latitude, longitude, last_heartbeat_at
+		) VALUES ($1, $2, $3, $4, $5, TRUE, 'AVAILABLE',
+			60.2055, 24.6559, NOW())
+	`, johnUserID, companyID, branchID, johnVehicleID, driverFixture.AssignmentID)
+	if err != nil {
+		t.Fatalf("create isolated acceptance presence: %v", err)
 	}
+	defer func() {
+		if _, err := db.Exec(context.Background(),
+			`DELETE FROM driver_presence WHERE driver_id = $1`, johnUserID); err != nil {
+			t.Errorf("cleanup isolated acceptance presence: %v", err)
+		}
+	}()
 
-	// ---------------------------------------------------------
-	// 8. Create disposable service category.
-	// ---------------------------------------------------------
+	offerRepo := postgresrepo.NewDispatchOfferRepository(db)
 
 	serviceCategoryID := uuid.NewString()
 
@@ -5139,206 +4983,56 @@ func TestAcceptOfferExpiredRidePersistsTerminalState(t *testing.T) {
 	// Serialize access to John's shared integration fixture.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
+	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 
+	// A disposable hierarchy prevents existing active trips from silently
+	// skipping the acceptance regression. Never mutate John's shared fixture.
+	driverFixture, cleanupDriverFixture, err := testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated acceptance driver: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated acceptance driver: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
-
-		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
-
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
-
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
-	)
-
-	offerRepo :=
-		postgresrepo.NewDispatchOfferRepository(db)
-
-	// ---------------------------------------------------------
-	// Remove only genuinely stale offers before checking whether
-	// the fixture is free.
-	// ---------------------------------------------------------
-
-	if _, err := offerRepo.ExpireStalePending(
-		ctx,
-		time.Now().UTC(),
-	); err != nil {
-		t.Fatalf(
-			"expire stale offers before expired-acceptance test: %v",
-			err,
-		)
+	cleanupCompliance, err := testutil.MakeDriverRegulatorilyCompliant(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("prepare isolated acceptance compliance: %v", err)
 	}
-
-	var existingPendingOfferCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM dispatch_offers
-			WHERE driver_id = $1
-			  AND status = 'PENDING'
-		`,
-		johnDriverID,
-	).Scan(
-		&existingPendingOfferCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing pending driver offer: %v",
-			err,
-		)
-	}
-
-	if existingPendingOfferCount != 0 {
-		t.Skip(
-			"John already has an active PENDING dispatch offer",
-		)
-	}
-
-	// ---------------------------------------------------------
-	// Ensure the fixture is not already involved in an active trip.
-	// ---------------------------------------------------------
-
-	var activeTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&activeTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active trip: %v",
-			err,
-		)
-	}
-
-	if activeTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
-		)
-	}
-
-	// ---------------------------------------------------------
-	// Preserve John's presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		_, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					last_heartbeat_at = $4,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		)
-
-		if restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
+		if err := cleanupCompliance(context.Background()); err != nil {
+			t.Errorf("cleanup isolated acceptance compliance: %v", err)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// Make John AVAILABLE before the acceptance attempt.
-	// ---------------------------------------------------------
+	johnUserID := driverFixture.UserID
+	johnDriverID := driverFixture.DriverID
+	johnVehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
 
-	if _, err := db.Exec(
-		ctx,
-		`
-			UPDATE driver_presence
-			SET
-				is_online = TRUE,
-				availability_status = 'AVAILABLE',
-				last_heartbeat_at = NOW(),
-				updated_at = NOW()
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	); err != nil {
-		t.Fatalf(
-			"prepare driver presence: %v",
-			err,
-		)
+	_, err = db.Exec(ctx, `
+		INSERT INTO driver_presence (
+			driver_id, company_id, branch_id, vehicle_id,
+			assignment_id, is_online, availability_status,
+			latitude, longitude, last_heartbeat_at
+		) VALUES ($1, $2, $3, $4, $5, TRUE, 'AVAILABLE',
+			60.2055, 24.6559, NOW())
+	`, johnUserID, companyID, branchID, johnVehicleID, driverFixture.AssignmentID)
+	if err != nil {
+		t.Fatalf("create isolated acceptance presence: %v", err)
 	}
+	defer func() {
+		if _, err := db.Exec(context.Background(),
+			`DELETE FROM driver_presence WHERE driver_id = $1`, johnUserID); err != nil {
+			t.Errorf("cleanup isolated acceptance presence: %v", err)
+		}
+	}()
+
+	offerRepo := postgresrepo.NewDispatchOfferRepository(db)
 
 	rideRequestID := uuid.NewString()
 	offerID := uuid.NewString()
