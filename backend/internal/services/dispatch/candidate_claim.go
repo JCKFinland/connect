@@ -74,6 +74,14 @@ func claimDispatchCandidate(ctx context.Context, tx pgx.Tx, driverUserID string,
 	if !validDispatchAssignment(assignment, driverUserID, nil) {
 		return nil, nil, nil
 	}
+	// The live presence must refer to this exact active assignment and scope.
+	// A valid assignment alone cannot authorize a stale or detached presence row.
+	if lockedPresence.AssignmentID == nil || *lockedPresence.AssignmentID != assignment.ID ||
+		lockedPresence.VehicleID == nil || *lockedPresence.VehicleID != assignment.VehicleID ||
+		lockedPresence.CompanyID != assignment.CompanyID ||
+		lockedPresence.BranchID == nil || *lockedPresence.BranchID != assignment.BranchID {
+		return nil, nil, nil
+	}
 	vehicles := postgresrepo.NewVehicleRepositoryWithDB(candidateTx)
 	vehicle, err := vehicles.GetByID(ctx, assignment.VehicleID)
 	if errors.Is(err, repository.ErrNotFound) {
