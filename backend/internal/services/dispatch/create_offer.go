@@ -568,6 +568,12 @@ func (s *Service) CreateOffer(
 				return ErrNoAvailableDrivers
 			}
 
+			// Synchronization hook used by deterministic lifecycle race tests.
+			// Candidate locks remain held until this transaction completes.
+			if s.afterSelectCandidate != nil {
+				s.afterSelectCandidate(selected.DriverID)
+			}
+
 			// ---------------------------------------------------------
 			// 9. Resolve final users.id -> drivers.id.
 			// ---------------------------------------------------------
