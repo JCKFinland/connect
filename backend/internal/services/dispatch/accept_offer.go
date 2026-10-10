@@ -12,7 +12,6 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
-	drivercomplianceservice "github.com/JCKFinland/connect/backend/internal/services/driver_compliance"
 	"github.com/JCKFinland/connect/backend/internal/services/pricing"
 )
 
@@ -88,7 +87,6 @@ func (s *Service) AcceptOffer(
 
 			offers := postgresrepo.NewDispatchOfferRepositoryWithDB(tx)
 			drivers := postgresrepo.NewDriverRepositoryWithDB(tx)
-			documents := postgresrepo.NewDriverDocumentRepositoryWithDB(tx)
 			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
 			rideRequests := postgresrepo.NewRideRequestRepositoryWithDB(tx)
 			trips := postgresrepo.NewTripRepositoryWithDB(tx)
@@ -98,13 +96,6 @@ func (s *Service) AcceptOffer(
 			pricingService := pricing.NewService(
 				pricing.Dependencies{
 					FarePricingProfiles: farePricingProfiles,
-				},
-			)
-
-			compliance := drivercomplianceservice.NewService(
-				drivercomplianceservice.Dependencies{
-					Drivers:   drivers,
-					Documents: documents,
 				},
 			)
 
@@ -139,57 +130,6 @@ func (s *Service) AcceptOffer(
 
 			if !now.Before(offer.ExpiresAt) {
 				return ErrDispatchOfferExpired
-			}
-
-			// ---------------------------------------------------------
-			// 3. Resolve operational drivers.id -> users.id.
-			// ---------------------------------------------------------
-
-			driver, err := drivers.GetByIDForUpdate(
-				ctx,
-				offer.DriverID,
-			)
-			if err != nil {
-				return fmt.Errorf(
-					"resolve dispatch offer driver: %w",
-					err,
-				)
-			}
-
-			if driver == nil ||
-				driver.UserID == "" ||
-				!driver.IsActive {
-				return fmt.Errorf(
-					"dispatch offer driver is not active",
-				)
-			}
-
-			// ---------------------------------------------------------
-			// 4. Lock driver presence.
-			//
-			// Presence still uses users.id.
-			// ---------------------------------------------------------
-
-			lockedPresence, err :=
-				presence.GetAvailableByDriverIDForUpdate(
-					ctx,
-					driver.UserID,
-				)
-
-			if errors.Is(err, repository.ErrNotFound) {
-				return ErrDispatchOfferDriverUnavailable
-			}
-
-			if err != nil {
-				return fmt.Errorf(
-					"lock dispatch offer driver: %w",
-					err,
-				)
-			}
-
-			if lockedPresence == nil ||
-				lockedPresence.AvailabilityStatus != "AVAILABLE" {
-				return ErrDispatchOfferDriverUnavailable
 			}
 
 			// ---------------------------------------------------------
@@ -284,23 +224,51 @@ func (s *Service) AcceptOffer(
 				)
 			}
 
-			// Regulatory eligibility can change after an offer is created.
-			// Revalidate it inside the acceptance transaction after the
-			// offer, presence, and ride request have been locked, but before
-			// any successful-acceptance state mutation occurs.
-			eligible, err := compliance.IsEligible(
-				ctx,
-				driver.ID,
-				now,
-			)
+			// Resolve identity without a row lock. The lifecycle helper
+			// acquires hierarchy locks before locking the driver profile.
+			driver, err := drivers.GetByID(ctx, offer.DriverID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrDispatchOfferDriverUnavailable
+			}
 			if err != nil {
-				return fmt.Errorf(
-					"recheck dispatch offer driver compliance: %w",
-					err,
-				)
+				return fmt.Errorf("resolve offer driver identity: %w", err)
+			}
+			if driver == nil || driver.UserID == "" || driver.ID != offer.DriverID {
+				return ErrDispatchOfferDriverUnavailable
+			}
+
+			eligible, err := lockAndValidateDispatchLifecycle(ctx, tx, driver.UserID,
+				&dispatchLifecycleExpectation{
+					CompanyID: offer.CompanyID, BranchID: offer.BranchID,
+					FleetID: offer.FleetID, VehicleID: offer.VehicleID,
+				}, now)
+			if err != nil {
+				return fmt.Errorf("validate offer lifecycle: %w", err)
 			}
 			if !eligible {
 				return ErrDispatchOfferDriverNonCompliant
+			}
+
+			lockedDriver, err := drivers.GetByUserID(ctx, driver.UserID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrDispatchOfferDriverUnavailable
+			}
+			if err != nil {
+				return fmt.Errorf("recheck offer driver identity: %w", err)
+			}
+			if lockedDriver == nil || lockedDriver.ID != offer.DriverID {
+				return ErrDispatchOfferDriverUnavailable
+			}
+
+			lockedPresence, err := presence.GetAvailableByDriverIDForUpdate(ctx, driver.UserID)
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrDispatchOfferDriverUnavailable
+			}
+			if err != nil {
+				return fmt.Errorf("lock offer driver presence: %w", err)
+			}
+			if lockedPresence == nil || lockedPresence.AvailabilityStatus != "AVAILABLE" {
+				return ErrDispatchOfferDriverUnavailable
 			}
 
 			branchID := offer.BranchID

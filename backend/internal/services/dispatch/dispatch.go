@@ -313,146 +313,22 @@ func (s *Service) DispatchRide(
 			for _, candidate := range candidates {
 
 				if s.beforeClaimCandidate != nil {
-					s.beforeClaimCandidate(
-						candidate.presence.DriverID,
-					)
+					s.beforeClaimCandidate(candidate.presence.DriverID)
 				}
 
-				// Acquire the permanent driver aggregate before presence.
-				// Regulatory document mutations use this same serialization lock.
-				operationalDriver, err := drivers.GetByUserID(
-					ctx,
-					candidate.presence.DriverID,
-				)
-				if errors.Is(err, repository.ErrNotFound) {
-					continue
-				}
-				if err != nil {
-					return fmt.Errorf("resolve candidate driver for locking: %w", err)
-				}
-				if operationalDriver == nil || operationalDriver.ID == "" {
-					continue
-				}
-
-				driverLocked, err := drivers.TryLockByID(ctx, operationalDriver.ID)
-				if err != nil {
-					return fmt.Errorf("try lock candidate driver aggregate: %w", err)
-				}
-				if !driverLocked {
-					continue
-				}
-				lockedDriver, err := presence.GetAvailableByDriverIDForUpdate(
-					ctx,
-					candidate.presence.DriverID,
-				)
-
-				if errors.Is(err, repository.ErrNotFound) {
-					// Another dispatch may have claimed or locked this driver.
-					// Try the next-nearest eligible candidate.
-					continue
-				}
-
-				if err != nil {
-					return fmt.Errorf(
-						"lock candidate driver: %w",
-						err,
-					)
-				}
-
-				// Re-check heartbeat freshness after acquiring the lock.
-				if lockedDriver.LastHeartbeatAt == nil {
-					continue
-				}
-
-				lockedHeartbeatAge := now.Sub(
-					lockedDriver.LastHeartbeatAt.UTC(),
-				)
-
-				if lockedHeartbeatAge < 0 ||
-					lockedHeartbeatAge > s.cfg.Presence.HeartbeatTimeout {
-					continue
-				}
-
-				lockedOperationalDriver, err := drivers.GetByUserID(
-					ctx,
-					lockedDriver.DriverID,
-				)
-				if errors.Is(err, repository.ErrNotFound) {
-					continue
-				}
-				if err != nil {
-					return fmt.Errorf(
-						"recheck operational driver: %w",
-						err,
-					)
-				}
-				if lockedOperationalDriver == nil ||
-					lockedOperationalDriver.ID == "" {
-					continue
-				}
-
-				eligible, err := compliance.IsEligible(
-					ctx,
-					lockedOperationalDriver.ID,
-					now,
+				lockedDriver, lockedAssignment, err := claimDispatchCandidate(
+					ctx, tx, candidate.presence.DriverID,
+					func(vehicle *models.Vehicle) bool {
+						return isVehicleEligible(request.RequestedVehicleType, vehicle.VehicleType)
+					},
+					now, s.cfg.Presence.HeartbeatTimeout, nil,
 				)
 				if err != nil {
-					return fmt.Errorf(
-						"recheck locked driver compliance: %w",
-						err,
-					)
+					return fmt.Errorf("claim dispatch candidate: %w", err)
 				}
-				if !eligible {
+				if lockedDriver == nil || lockedAssignment == nil {
 					continue
 				}
-
-				lockedAssignment, err := assignments.GetActiveByDriver(
-					ctx,
-					lockedDriver.DriverID,
-				)
-				if errors.Is(err, repository.ErrNotFound) {
-					continue
-				}
-
-				if err != nil {
-					return fmt.Errorf(
-						"recheck locked driver assignment: %w",
-						err,
-					)
-				}
-
-				if lockedAssignment == nil ||
-					lockedAssignment.VehicleID == "" {
-					continue
-				}
-
-				lockedVehicle, err := vehicles.GetByID(
-					ctx,
-					lockedAssignment.VehicleID,
-				)
-				if errors.Is(err, repository.ErrNotFound) {
-					continue
-				}
-
-				if err != nil {
-					return fmt.Errorf(
-						"recheck locked driver vehicle: %w",
-						err,
-					)
-				}
-
-				if lockedVehicle == nil ||
-					!lockedVehicle.IsActive {
-					continue
-				}
-
-				if !isVehicleEligible(
-					request.RequestedVehicleType,
-					lockedVehicle.VehicleType,
-				) {
-					continue
-				}
-
 				selected = lockedDriver
 				selectedAssignment = lockedAssignment
 
