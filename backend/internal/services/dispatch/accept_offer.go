@@ -260,6 +260,11 @@ func (s *Service) AcceptOffer(
 				return ErrDispatchOfferDriverUnavailable
 			}
 
+			// Test synchronization point: lifecycle locks remain held through commit.
+			if s.afterSelectCandidate != nil {
+				s.afterSelectCandidate(driver.UserID)
+			}
+
 			lockedPresence, err := presence.GetAvailableByDriverIDForUpdate(ctx, driver.UserID)
 			if errors.Is(err, repository.ErrNotFound) {
 				return ErrDispatchOfferDriverUnavailable
