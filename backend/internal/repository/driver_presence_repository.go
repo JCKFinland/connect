@@ -54,6 +54,19 @@ type DriverPresenceRepository interface {
 	// trip still commits that driver.
 	//
 	// It returns false without modifying presence when release is unsafe.
+	// ReleaseFromTripWithTarget releases a terminal trip's driver
+	// to AVAILABLE or OFFLINE according to a caller-authorized
+	// eligibility decision.
+	//
+	// The repository enforces terminal-trip ownership and rejects
+	// release while another active trip exists.
+	ReleaseFromTripWithTarget(
+		ctx context.Context,
+		driverUserID string,
+		tripID string,
+		targetStatus string,
+	) (bool, error)
+
 	ReleaseFromTrip(
 		ctx context.Context,
 		driverID string,

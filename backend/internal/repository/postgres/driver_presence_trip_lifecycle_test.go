@@ -404,4 +404,95 @@ func TestDriverPresenceRepositoryTripLifecycleAuthority(t *testing.T) {
 	if claimed {
 		t.Fatal("expected terminal trip not to authorize BUSY claim")
 	}
+
+	// ---------------------------------------------------------
+	// Regulatory-aware terminal release targets.
+	// ---------------------------------------------------------
+
+	// Restore BUSY presence to simulate a new terminal-release decision.
+	_, err = db.Exec(
+		ctx,
+		`
+		UPDATE driver_presence
+		SET
+			is_online = TRUE,
+			availability_status = 'BUSY',
+			updated_at = NOW()
+		WHERE driver_id = $1
+	`,
+		fixture.UserID,
+	)
+	if err != nil {
+		t.Fatalf("restore BUSY presence: %v", err)
+	}
+
+	// Invalid release targets must never mutate presence.
+	released, err = repo.ReleaseFromTripWithTarget(
+		ctx,
+		fixture.UserID,
+		firstTripID,
+		"BUSY",
+	)
+	if err == nil {
+		t.Fatal("expected invalid release target to fail")
+	}
+	if released {
+		t.Fatal("invalid release target must not release driver")
+	}
+
+	isOnline, status = readPresence()
+	if !isOnline || status != "BUSY" {
+		t.Fatalf(
+			"invalid target changed presence: status=%q online=%v",
+			status,
+			isOnline,
+		)
+	}
+
+	// An ineligible driver must be released OFFLINE.
+	released, err = repo.ReleaseFromTripWithTarget(
+		ctx,
+		fixture.UserID,
+		firstTripID,
+		"OFFLINE",
+	)
+	if err != nil {
+		t.Fatalf("release terminal trip offline: %v", err)
+	}
+	if !released {
+		t.Fatal("expected terminal trip to authorize OFFLINE release")
+	}
+
+	isOnline, status = readPresence()
+	if isOnline || status != "OFFLINE" {
+		t.Fatalf(
+			"expected OFFLINE presence, got status=%q online=%v",
+			status,
+			isOnline,
+		)
+	}
+
+	// Releasing again must not succeed once the driver is no longer BUSY.
+	released, err = repo.ReleaseFromTripWithTarget(
+		ctx,
+		fixture.UserID,
+		firstTripID,
+		"AVAILABLE",
+	)
+	if err != nil {
+		t.Fatalf("repeat terminal release: %v", err)
+	}
+	if released {
+		t.Fatal("expected repeat release to be rejected")
+	}
+
+	isOnline, status = readPresence()
+	if isOnline || status != "OFFLINE" {
+		t.Fatalf(
+			"repeat release changed OFFLINE presence: status=%q online=%v",
+			status,
+			isOnline,
+		)
+	}
+
 }

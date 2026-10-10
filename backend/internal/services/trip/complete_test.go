@@ -12,6 +12,7 @@ import (
 
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
+	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/services/fare"
@@ -599,66 +600,6 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	// Deleting the trip cascades trip_fares and trip_events.
 	// ---------------------------------------------------------
 
-	defer func() {
-		cleanupCtx := context.Background()
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM trips
-				WHERE id = $1
-			`,
-			tripID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup rollback trip: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM ride_requests
-				WHERE id = $1
-			`,
-			rideRequestID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup rollback ride request: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM fare_pricing_profiles
-				WHERE id = $1
-			`,
-			pricingProfileID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup rollback pricing profile: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM service_categories
-				WHERE id = $1
-			`,
-			serviceCategoryID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup rollback service category: %v",
-				cleanupErr,
-			)
-		}
-	}()
-
 	// ---------------------------------------------------------
 	// 14. Construct real production service dependencies.
 	// ---------------------------------------------------------
@@ -935,6 +876,63 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 func TestCompleteTripFinalizesFareAndReleasesDriver(
 	t *testing.T,
 ) {
+	runTerminalCompletionScenario(
+		t,
+		false,
+		driverAvailabilityAvailable,
+		true,
+	)
+}
+
+func TestCompleteTripReleasesRevokedDriverOffline(
+	t *testing.T,
+) {
+	runTerminalCompletionScenario(
+		t,
+		true,
+		driverAvailabilityOffline,
+		false,
+	)
+}
+
+func TestCompleteTripRollsBackWhenAnotherActiveTripExists(
+	t *testing.T,
+) {
+	runTerminalCompletionScenario(
+		t,
+		false,
+		driverAvailabilityAvailable,
+		true,
+		true,
+	)
+}
+
+func TestCancelTripReleasesCompliantDriverAvailable(t *testing.T) {
+	runTerminalCompletionScenario(
+		t, false, driverAvailabilityAvailable, true, false, true,
+	)
+}
+
+func TestCancelTripReleasesRevokedDriverOffline(t *testing.T) {
+	runTerminalCompletionScenario(
+		t, true, driverAvailabilityOffline, false, false, true,
+	)
+}
+
+func runTerminalCompletionScenario(
+	t *testing.T,
+	revokeCompliance bool,
+	expectedAvailability string,
+	expectedOnline bool,
+	options ...bool,
+) {
+	if len(options) > 2 {
+		t.Fatal("unexpected terminal scenario options")
+	}
+
+	otherActiveTrip := len(options) > 0 && options[0]
+	cancelTrip := len(options) > 1 && options[1]
+
 	ctx := context.Background()
 
 	// ---------------------------------------------------------
@@ -1008,6 +1006,48 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 			)
 		}
 	}()
+
+	// The AVAILABLE outcome requires verified regulatory documents.
+	cleanupCompliance, err := testutil.MakeDriverRegulatorilyCompliant(
+		ctx,
+		db,
+		driverFixture,
+	)
+	if err != nil {
+		t.Fatalf("make completion driver regulatorily compliant: %v", err)
+	}
+	defer func() {
+		if err := cleanupCompliance(context.Background()); err != nil {
+			t.Logf("cleanup completion driver compliance: %v", err)
+		}
+	}()
+
+	if revokeCompliance {
+		result, err := db.Exec(
+			ctx,
+			`UPDATE driver_documents
+         SET
+             status = 'REVOKED',
+             revoked_at = NOW(),
+             revoked_by_user_id = verified_by_user_id,
+             revocation_reason = 'terminal release integration test',
+             updated_at = NOW()
+         WHERE driver_id = $1
+           AND document_type = 'TAXI_DRIVER_LICENSE'
+           AND status = 'VERIFIED'
+           AND deleted_at IS NULL`,
+			driverFixture.DriverID,
+		)
+		if err != nil {
+			t.Fatalf("revoke completion driver document: %v", err)
+		}
+		if result.RowsAffected() != 1 {
+			t.Fatalf(
+				"expected one revoked taxi licence, got %d",
+				result.RowsAffected(),
+			)
+		}
+	}
 
 	driverUserID := driverFixture.UserID
 
@@ -1415,6 +1455,151 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM trips
+				WHERE id = $1
+			`,
+			tripID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback trip: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback ride request: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM fare_pricing_profiles
+				WHERE id = $1
+			`,
+			pricingProfileID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback pricing profile: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM service_categories
+				WHERE id = $1
+			`,
+			serviceCategoryID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback service category: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
+	// The rollback scenario deliberately creates a second active trip.
+	// This represents conflicting operational state that must prevent release.
+	var conflictingTripID string
+	if otherActiveTrip {
+		conflictingTripID = uuid.NewString()
+		conflictingRideRequestID := uuid.NewString()
+
+		_, err = db.Exec(
+			ctx,
+			`INSERT INTO ride_requests (
+				id, customer_id,
+				pickup_address, pickup_latitude, pickup_longitude,
+				destination_address, destination_latitude, destination_longitude,
+				requested_vehicle_type, service_category_id,
+				passenger_count, status, notes,
+				requested_at, expires_at, created_at, updated_at
+			)
+			VALUES (
+				$1, $2,
+				'Conflicting Trip Test', 60.2055, 24.6559,
+				'Helsinki Central Station', 60.1719, 24.9414,
+				'STANDARD', $3,
+				1, 'ACCEPTED', 'Terminal rollback integration test',
+				$4, $5, $4, $4
+			)`,
+			conflictingRideRequestID,
+			customerID,
+			serviceCategoryID,
+			now,
+			now.Add(10*time.Minute),
+		)
+		if err != nil {
+			t.Fatalf("create conflicting ride request: %v", err)
+		}
+
+		defer func() {
+			if _, cleanupErr := db.Exec(
+				context.Background(),
+				`DELETE FROM ride_requests WHERE id = $1`,
+				conflictingRideRequestID,
+			); cleanupErr != nil {
+				t.Logf("cleanup conflicting ride request: %v", cleanupErr)
+			}
+		}()
+
+		defer func() {
+			if _, cleanupErr := db.Exec(
+				context.Background(),
+				`DELETE FROM trips WHERE id = $1`,
+				conflictingTripID,
+			); cleanupErr != nil {
+				t.Logf("cleanup conflicting trip: %v", cleanupErr)
+			}
+		}()
+
+		_, err = db.Exec(
+			ctx,
+			`INSERT INTO trips (
+				id, ride_request_id, customer_id, driver_id,
+				vehicle_id, company_id, branch_id, fleet_id,
+				service_category_id, pricing_profile_id,
+				status, assigned_at, is_active, created_at, updated_at
+			)
+			VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8,
+				$9, $10, 'ASSIGNED', $11, TRUE, $11, $11
+			)`,
+			conflictingTripID,
+			conflictingRideRequestID,
+			customerID,
+			driverUserID,
+			vehicleID,
+			companyID,
+			branchID,
+			fleetID,
+			serviceCategoryID,
+			pricingProfileID,
+			now,
+		)
+		if err != nil {
+			t.Fatalf("create conflicting active trip: %v", err)
+		}
+
+	}
+
 	// ---------------------------------------------------------
 	// 10. Create authoritative trip location evidence.
 	//
@@ -1470,66 +1655,6 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
-	defer func() {
-		cleanupCtx := context.Background()
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM trips
-				WHERE id = $1
-			`,
-			tripID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup completion trip: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM ride_requests
-				WHERE id = $1
-			`,
-			rideRequestID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup completion ride request: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM fare_pricing_profiles
-				WHERE id = $1
-			`,
-			pricingProfileID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup completion pricing profile: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM service_categories
-				WHERE id = $1
-			`,
-			serviceCategoryID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup completion service category: %v",
-				cleanupErr,
-			)
-		}
-	}()
-
 	// ---------------------------------------------------------
 	// 10. Construct real service.
 	// ---------------------------------------------------------
@@ -1555,16 +1680,195 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 	// 11. Complete through the production transaction.
 	// ---------------------------------------------------------
 
-	completedFare, err := service.CompleteTrip(
-		ctx,
-		tripID,
-		driverUserID,
-	)
+	var completedFare *models.TripFare
+
+	if cancelTrip {
+		err = service.UpdateStatus(
+			ctx,
+			tripID,
+			StatusCancelled,
+			driverUserID,
+		)
+	} else {
+		completedFare, err = service.CompleteTrip(
+			ctx,
+			tripID,
+			driverUserID,
+		)
+	}
+
+	if conflictingTripID != "" {
+		if err == nil {
+			t.Fatal("expected completion to fail with another active trip")
+		}
+		if completedFare != nil {
+			t.Fatal("expected no completed fare on rollback")
+		}
+
+		var status string
+		var active bool
+		err = db.QueryRow(
+			ctx,
+			`SELECT status, is_active FROM trips WHERE id = $1`,
+			tripID,
+		).Scan(&status, &active)
+		if err != nil {
+			t.Fatalf("read trip after rollback: %v", err)
+		}
+		if status != StatusInProgress || !active {
+			t.Fatalf(
+				"expected active IN_PROGRESS trip after rollback, got %s active=%t",
+				status, active,
+			)
+		}
+
+		var online bool
+		var availability string
+		err = db.QueryRow(
+			ctx,
+			`SELECT is_online, availability_status
+			 FROM driver_presence WHERE driver_id = $1`,
+			driverUserID,
+		).Scan(&online, &availability)
+		if err != nil {
+			t.Fatalf("read presence after rollback: %v", err)
+		}
+		if !online || availability != "BUSY" {
+			t.Fatalf(
+				"expected BUSY online presence after rollback, got %s online=%t",
+				availability, online,
+			)
+		}
+
+		for _, check := range []struct {
+			name  string
+			query string
+		}{
+			{
+				"fare",
+				`SELECT COUNT(*) FROM trip_fares WHERE trip_id = $1`,
+			},
+			{
+				"completion event",
+				`SELECT COUNT(*) FROM trip_events
+				 WHERE trip_id = $1 AND event_type = 'TRIP_COMPLETED'`,
+			},
+		} {
+			var count int
+			if err := db.QueryRow(ctx, check.query, tripID).Scan(&count); err != nil {
+				t.Fatalf("check rolled-back %s: %v", check.name, err)
+			}
+			if count != 0 {
+				t.Fatalf("expected no persisted %s, got %d", check.name, count)
+			}
+		}
+
+		return
+	}
+
 	if err != nil {
 		t.Fatalf(
 			"complete trip: %v",
 			err,
 		)
+	}
+
+	if cancelTrip {
+		if err != nil {
+			t.Fatalf("cancel trip: %v", err)
+		}
+
+		var status string
+		var active bool
+		var cancelledAt *time.Time
+
+		if err := db.QueryRow(
+			ctx,
+			`SELECT status, is_active, cancelled_at
+			 FROM trips WHERE id = $1`,
+			tripID,
+		).Scan(&status, &active, &cancelledAt); err != nil {
+			t.Fatalf("read cancelled trip: %v", err)
+		}
+
+		if status != StatusCancelled || active || cancelledAt == nil {
+			t.Fatalf(
+				"invalid cancelled trip: status=%s active=%t cancelled_at=%v",
+				status, active, cancelledAt,
+			)
+		}
+
+		var requestStatus string
+		if err := db.QueryRow(
+			ctx,
+			`SELECT status FROM ride_requests WHERE id = $1`,
+			rideRequestID,
+		).Scan(&requestStatus); err != nil {
+			t.Fatalf("read cancelled ride request: %v", err)
+		}
+
+		if requestStatus != rideRequestStatusCancelled {
+			t.Fatalf("expected cancelled ride request, got %s", requestStatus)
+		}
+
+		var online bool
+		var availability string
+
+		if err := db.QueryRow(
+			ctx,
+			`SELECT is_online, availability_status
+			 FROM driver_presence WHERE driver_id = $1`,
+			driverUserID,
+		).Scan(&online, &availability); err != nil {
+			t.Fatalf("read cancellation presence: %v", err)
+		}
+
+		if online != expectedOnline ||
+			availability != expectedAvailability {
+			t.Fatalf(
+				"unexpected cancellation presence: %s online=%t",
+				availability, online,
+			)
+		}
+
+		for _, check := range []struct {
+			name  string
+			query string
+			want  int
+		}{
+			{
+				"cancellation event",
+				`SELECT COUNT(*) FROM trip_events
+				 WHERE trip_id = $1 AND event_type = 'TRIP_CANCELLED'`,
+				1,
+			},
+			{
+				"fare",
+				`SELECT COUNT(*) FROM trip_fares WHERE trip_id = $1`,
+				0,
+			},
+			{
+				"meter measurement",
+				`SELECT COUNT(*) FROM trip_meter_measurements
+				 WHERE trip_id = $1`,
+				0,
+			},
+		} {
+			var count int
+			if err := db.QueryRow(
+				ctx, check.query, tripID,
+			).Scan(&count); err != nil {
+				t.Fatalf("read %s: %v", check.name, err)
+			}
+			if count != check.want {
+				t.Fatalf(
+					"expected %d %s records, got %d",
+					check.want, check.name, count,
+				)
+			}
+		}
+
+		return
 	}
 
 	if completedFare == nil {
@@ -2029,17 +2333,18 @@ func TestCompleteTripFinalizesFareAndReleasesDriver(
 		)
 	}
 
-	if !isOnline {
-		t.Fatal(
-			"expected released driver to remain online",
+	if isOnline != expectedOnline {
+		t.Fatalf(
+			"expected released driver online=%t, got %t",
+			expectedOnline,
+			isOnline,
 		)
 	}
 
-	if availabilityStatus !=
-		driverAvailabilityAvailable {
+	if availabilityStatus != expectedAvailability {
 		t.Fatalf(
 			"expected driver %s, got %s",
-			driverAvailabilityAvailable,
+			expectedAvailability,
 			availabilityStatus,
 		)
 	}

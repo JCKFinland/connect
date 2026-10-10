@@ -46,7 +46,7 @@ var ErrTripStatusAccessDenied = errors.New(
 //
 //   - mark trip inactive
 //
-//   - release driver back to AVAILABLE
+//   - release eligible driver to AVAILABLE; otherwise OFFLINE
 //
 //   - CANCELLED:
 //
@@ -58,7 +58,7 @@ var ErrTripStatusAccessDenied = errors.New(
 //
 //   - mark the source ride request CANCELLED
 //
-//   - release driver back to AVAILABLE
+//   - release eligible driver to AVAILABLE; otherwise OFFLINE
 //
 // If any operation fails, the entire transaction is rolled back.
 func (s *tripService) UpdateStatus(
@@ -107,13 +107,27 @@ func (s *tripService) UpdateStatus(
 
 			trips := postgresrepo.NewTripRepositoryWithDB(tx)
 			rideRequests := postgresrepo.NewRideRequestRepositoryWithDB(tx)
-			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
 			tripEvents := postgresrepo.NewTripEventRepositoryWithDB(tx)
 
 			// ---------------------------------------------------------
 			// Lock trip row
 			// ---------------------------------------------------------
 
+			// Resolve assignment before acquiring permanent-driver locks.
+			// Revalidate after locking the authoritative trip row.
+			unlockedTrip, err := trips.GetByID(ctx, id)
+			if err != nil {
+				return fmt.Errorf("read trip before terminal locks: %w", err)
+			}
+			var terminalLocks *terminalDriverLocks
+			if newStatus == StatusCompleted || newStatus == StatusCancelled {
+				terminalLocks, err = lockTerminalTripDriver(
+					ctx, tx, unlockedTrip.DriverID,
+				)
+				if err != nil {
+					return err
+				}
+			}
 			currentTrip, err := trips.GetByIDForUpdate(
 				ctx,
 				id,
@@ -122,6 +136,12 @@ func (s *tripService) UpdateStatus(
 				return fmt.Errorf(
 					"get trip for status update: %w",
 					err,
+				)
+			}
+
+			if currentTrip.DriverID != unlockedTrip.DriverID {
+				return fmt.Errorf(
+					"trip driver assignment changed during terminal locking",
 				)
 			}
 
@@ -215,23 +235,13 @@ func (s *tripService) UpdateStatus(
 			// Release driver after terminal trip state
 			// ---------------------------------------------------------
 
-			if currentTrip.DriverID != "" {
-				released, err := presence.ReleaseFromTrip(
-					ctx,
-					currentTrip.DriverID,
-					currentTrip.ID,
-				)
-				if err != nil {
-					return fmt.Errorf(
-						"release driver after terminal trip: %w",
-						err,
-					)
-				}
-				if !released {
-					return fmt.Errorf(
-						"release driver after terminal trip: lifecycle authorization failed",
-					)
-				}
+			if err := releaseTerminalTripDriver(
+				ctx,
+				tx,
+				terminalLocks,
+				currentTrip.ID,
+			); err != nil {
+				return err
 			}
 
 			// ---------------------------------------------------------

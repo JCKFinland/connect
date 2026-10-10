@@ -64,9 +64,6 @@ func (s *tripService) CompleteTrip(
 			trips :=
 				postgresrepo.NewTripRepositoryWithDB(tx)
 
-			presence :=
-				postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
-
 			tripEvents :=
 				postgresrepo.NewTripEventRepositoryWithDB(tx)
 
@@ -79,10 +76,22 @@ func (s *tripService) CompleteTrip(
 			tripMeterMeasurements :=
 				postgresrepo.NewTripMeterMeasurementRepositoryWithDB(tx)
 
-			// -------------------------------------------------
-			// Lock authoritative trip row.
-			// -------------------------------------------------
+				// -------------------------------------------------
+				// Lock authoritative trip row.
+				// -------------------------------------------------
 
+			// Resolve assignment before acquiring permanent-driver locks.
+			// Revalidate after locking the authoritative trip row.
+			unlockedTrip, err := trips.GetByID(ctx, id)
+			if err != nil {
+				return fmt.Errorf("read trip before terminal locks: %w", err)
+			}
+			terminalLocks, err := lockTerminalTripDriver(
+				ctx, tx, unlockedTrip.DriverID,
+			)
+			if err != nil {
+				return err
+			}
 			currentTrip, err :=
 				trips.GetByIDForUpdate(
 					ctx,
@@ -92,6 +101,12 @@ func (s *tripService) CompleteTrip(
 				return fmt.Errorf(
 					"get trip for completion: %w",
 					err,
+				)
+			}
+
+			if currentTrip.DriverID != unlockedTrip.DriverID {
+				return fmt.Errorf(
+					"trip driver assignment changed during terminal locking",
 				)
 			}
 
@@ -376,23 +391,13 @@ func (s *tripService) CompleteTrip(
 			// Release operational driver.
 			// -------------------------------------------------
 
-			if currentTrip.DriverID != "" {
-				released, err := presence.ReleaseFromTrip(
-					ctx,
-					currentTrip.DriverID,
-					currentTrip.ID,
-				)
-				if err != nil {
-					return fmt.Errorf(
-						"release driver after completed trip: %w",
-						err,
-					)
-				}
-				if !released {
-					return fmt.Errorf(
-						"release driver after completed trip: lifecycle authorization failed",
-					)
-				}
+			if err := releaseTerminalTripDriver(
+				ctx,
+				tx,
+				terminalLocks,
+				currentTrip.ID,
+			); err != nil {
+				return err
 			}
 
 			completedFare = calculatedFare
