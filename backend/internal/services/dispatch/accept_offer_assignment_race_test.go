@@ -400,12 +400,12 @@ func TestAcceptOfferSerializesAssignmentRemoval(t *testing.T) {
 
 	offerID := uuid.NewString()
 	_, err = db.Exec(ctx, `INSERT INTO dispatch_offers
-		(id, ride_request_id, driver_id, vehicle_id, company_id, branch_id, fleet_id,
+		(id, ride_request_id, driver_id, vehicle_id, company_id, branch_id, fleet_id, assignment_id,
 		 status, offered_at, expires_at, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'PENDING',$8,$9,$8,$8)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$10,'PENDING',$8,$9,$8,$8)`,
 		offerID, rideRequestID, driverFixture.DriverID, driverFixture.VehicleID,
 		driverFixture.CompanyID, driverFixture.BranchID, driverFixture.FleetID,
-		now, now.Add(5*time.Minute))
+		now, now.Add(5*time.Minute), driverFixture.AssignmentID)
 	if err != nil {
 		t.Fatalf("create pending offer: %v", err)
 	}

@@ -14,8 +14,8 @@ import (
 )
 
 // dispatchLifecycleExpectation optionally pins eligibility to the hierarchy
-// recorded in an offer. AssignmentID may be empty for an offer that does not
-// store the assignment's ID; all four hierarchy IDs must still match.
+// recorded in an offer. New offers must pin AssignmentID; callers that
+// intentionally validate current eligibility without an offer may omit it.
 type dispatchLifecycleExpectation struct {
 	AssignmentID string
 	CompanyID    string

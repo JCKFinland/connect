@@ -804,6 +804,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 				company_id,
 				branch_id,
 				fleet_id,
+				assignment_id,
 				status,
 				offered_at,
 				expires_at,
@@ -819,6 +820,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 				$5,
 				$6,
 				$7,
+				$10,
 				'PENDING',
 				$8,
 				$9,
@@ -835,6 +837,7 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 		fleetID,
 		now,
 		now.Add(5*time.Minute),
+		driverFixture.AssignmentID,
 	); err != nil {
 		t.Fatalf(
 			"create acceptance test dispatch offer: %v",

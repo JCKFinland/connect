@@ -11,6 +11,9 @@ type DispatchOffer struct {
 	DriverID  string `db:"driver_id" json:"driver_id"`
 	VehicleID string `db:"vehicle_id" json:"vehicle_id"`
 
+	// Nil only for historical offers created before assignment pinning.
+	AssignmentID *string `db:"assignment_id" json:"assignment_id,omitempty"`
+
 	CompanyID string `db:"company_id" json:"company_id"`
 	BranchID  string `db:"branch_id" json:"branch_id"`
 	FleetID   string `db:"fleet_id" json:"fleet_id"`

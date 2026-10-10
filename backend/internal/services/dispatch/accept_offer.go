@@ -237,9 +237,16 @@ func (s *Service) AcceptOffer(
 				return ErrDispatchOfferDriverUnavailable
 			}
 
+			// Legacy offers have no trustworthy assignment identity. Reject
+			// them rather than treating a matching hierarchy as proof.
+			if offer.AssignmentID == nil || *offer.AssignmentID == "" {
+				return ErrDispatchOfferDriverNonCompliant
+			}
+
 			eligible, err := lockAndValidateDispatchLifecycle(ctx, tx, driver.UserID,
 				&dispatchLifecycleExpectation{
-					CompanyID: offer.CompanyID, BranchID: offer.BranchID,
+					AssignmentID: *offer.AssignmentID,
+					CompanyID:    offer.CompanyID, BranchID: offer.BranchID,
 					FleetID: offer.FleetID, VehicleID: offer.VehicleID,
 				}, now)
 			if err != nil {

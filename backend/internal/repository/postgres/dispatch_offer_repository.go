@@ -69,6 +69,7 @@ func (r *DispatchOfferRepository) Create(
 			company_id,
 			branch_id,
 			fleet_id,
+			assignment_id,
 			status,
 			offered_at,
 			expires_at,
@@ -81,7 +82,7 @@ func (r *DispatchOfferRepository) Create(
 		VALUES
 		(
 			$1,$2,$3,$4,$5,
-			$6,$7,'PENDING',$8,$9,
+			$6,$7,$13,'PENDING',$8,$9,
 			NULL,NULL,$10,$11,$12
 		)
 	`
@@ -101,6 +102,7 @@ func (r *DispatchOfferRepository) Create(
 		offer.CreatedBy,
 		offer.CreatedAt,
 		offer.UpdatedAt,
+		offer.AssignmentID,
 	)
 	if err != nil {
 		return fmt.Errorf(
@@ -127,6 +129,7 @@ func (r *DispatchOfferRepository) GetByID(
 			company_id,
 			branch_id,
 			fleet_id,
+			assignment_id,
 			status,
 			offered_at,
 			expires_at,
@@ -161,6 +164,7 @@ func (r *DispatchOfferRepository) GetPendingByDriver(
 			company_id,
 			branch_id,
 			fleet_id,
+			assignment_id,
 			status,
 			offered_at,
 			expires_at,
@@ -199,6 +203,7 @@ func (r *DispatchOfferRepository) GetPendingByRideRequest(
 			company_id,
 			branch_id,
 			fleet_id,
+			assignment_id,
 			status,
 			offered_at,
 			expires_at,
@@ -241,6 +246,7 @@ func (r *DispatchOfferRepository) getOne(
 		&offer.CompanyID,
 		&offer.BranchID,
 		&offer.FleetID,
+		&offer.AssignmentID,
 		&offer.Status,
 		&offer.OfferedAt,
 		&offer.ExpiresAt,
@@ -283,6 +289,7 @@ func (r *DispatchOfferRepository) GetByIDForUpdate(
 			company_id,
 			branch_id,
 			fleet_id,
+			assignment_id,
 			status,
 			offered_at,
 			expires_at,

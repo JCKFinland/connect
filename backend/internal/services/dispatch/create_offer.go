@@ -638,9 +638,10 @@ func (s *Service) CreateOffer(
 				DriverID:  driver.ID,
 				VehicleID: selectedAssignment.VehicleID,
 
-				CompanyID: selectedAssignment.CompanyID,
-				BranchID:  selectedAssignment.BranchID,
-				FleetID:   selectedAssignment.FleetID,
+				CompanyID:    selectedAssignment.CompanyID,
+				BranchID:     selectedAssignment.BranchID,
+				FleetID:      selectedAssignment.FleetID,
+				AssignmentID: &selectedAssignment.ID,
 
 				Status: dispatchOfferStatusPending,
 
