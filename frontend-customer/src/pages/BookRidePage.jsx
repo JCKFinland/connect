@@ -111,13 +111,14 @@ export default function BookRidePage() {
         notes: notes.trim(),
       });
 
-      navigate("/", {
-        replace: true,
-        state: {
-          rideRequestCreated: true,
-          rideRequestId: rideRequest?.id,
-        },
-      });
+      if (!rideRequest?.id) {
+        throw new Error("Booking response did not contain a ride request ID");
+      }
+
+      navigate(
+        `/ride-requests/${encodeURIComponent(rideRequest.id)}`,
+        { replace: true },
+      );
     } catch (requestError) {
       setError(requestError?.message ?? "Unable to book ride");
     } finally {

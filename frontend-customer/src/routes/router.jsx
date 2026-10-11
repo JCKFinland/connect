@@ -5,6 +5,7 @@ import BookRidePage from "../pages/BookRidePage";
 import HomePage from "../pages/HomePage";
 import LoginPage from "../pages/LoginPage";
 import RegisterPage from "../pages/RegisterPage";
+import RideRequestPage from "../pages/RideRequestPage";
 import TripPage from "../pages/TripPage";
 import ProtectedRoute from "./ProtectedRoute";
 
@@ -31,6 +32,10 @@ export const router = createBrowserRouter([
           {
             path: "book",
             Component: BookRidePage,
+          },
+          {
+            path: "ride-requests/:rideRequestId",
+            Component: RideRequestPage,
           },
           {
             path: "trips/:tripId",

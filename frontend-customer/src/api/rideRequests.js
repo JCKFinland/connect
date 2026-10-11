@@ -42,3 +42,22 @@ export async function createRideRequest(
 
   return response.data;
 }
+
+
+export async function getRideRequest(rideRequestId, { signal } = {}) {
+  const response = await apiRequest(
+    `/ride-requests/${encodeURIComponent(rideRequestId)}`,
+    { authenticated: true, signal },
+  );
+
+  return response.data;
+}
+
+export async function getTripByRideRequest(rideRequestId, { signal } = {}) {
+  const response = await apiRequest(
+    `/ride-requests/${encodeURIComponent(rideRequestId)}/trip`,
+    { authenticated: true, signal },
+  );
+
+  return response.data;
+}
