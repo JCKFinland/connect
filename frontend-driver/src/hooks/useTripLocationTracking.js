@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { recordTripLocation } from "../api/trips";
 
 const MINIMUM_SAMPLE_INTERVAL_MS = 5000;
+const MAXIMUM_LOCATION_ACCURACY_METERS = 50;
 
 export function useTripLocationTracking(trip) {
   const geolocationSupported = "geolocation" in navigator;
@@ -33,8 +34,26 @@ export function useTripLocationTracking(trip) {
           return;
         }
 
-        // Ignore GPS samples that the backend would reject.
-        if (typeof coords.accuracy !== "number" || coords.accuracy > 50) {
+        // Reject location samples that do not meet backend accuracy requirements.
+        if (
+          typeof coords.accuracy !== "number" ||
+          !Number.isFinite(coords.accuracy) ||
+          coords.accuracy < 0 ||
+          coords.accuracy > MAXIMUM_LOCATION_ACCURACY_METERS
+        ) {
+          if (!cancelled) {
+            const accuracy =
+              typeof coords.accuracy === "number" &&
+              Number.isFinite(coords.accuracy)
+                ? `${Math.round(coords.accuracy)} m`
+                : "unknown";
+
+            setRecordingError(
+              `Location accuracy is ${accuracy}. CONNECT requires ` +
+                `${MAXIMUM_LOCATION_ACCURACY_METERS} m or better to record trip evidence.`,
+            );
+          }
+
           return;
         }
 
