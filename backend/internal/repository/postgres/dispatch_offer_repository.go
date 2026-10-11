@@ -496,8 +496,8 @@ func (r *DispatchOfferRepository) ListDriverIDsByRideRequest(
 	return driverIDs, nil
 }
 
-// ListRedispatchableRideRequestIDs returns ride requests that are eligible
-// for another automatic dispatch attempt.
+// ListRedispatchableRideRequestIDs returns PENDING ride requests eligible
+// for initial dispatch or a subsequent automatic dispatch attempt.
 //
 // Discovery does not claim or lock a ride request. CreateOffer() acquires
 // the authoritative PostgreSQL advisory lock for the ride before performing
@@ -527,11 +527,7 @@ func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
 			OR rr.expires_at > NOW()
 		)
 
-		  AND EXISTS (
-			SELECT 1
-			FROM dispatch_offers history
-			WHERE history.ride_request_id = rr.id
-		  )
+
 
 		  AND NOT EXISTS (
 			SELECT 1
