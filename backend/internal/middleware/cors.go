@@ -13,8 +13,11 @@ func CORS() gin.HandlerFunc {
 	return cors.New(cors.Config{
 		AllowOrigins: []string{
 			"http://localhost:5173", // Customer App
+			"http://127.0.0.1:5173",
 			"http://localhost:5174", // Driver App
+			"http://127.0.0.1:5174",
 			"http://localhost:5175", // Admin Portal
+			"http://127.0.0.1:5175",
 		},
 
 		AllowMethods: []string{
