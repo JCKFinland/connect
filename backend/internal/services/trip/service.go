@@ -33,6 +33,12 @@ type Service interface {
 		userID string,
 	) (*models.Trip, error)
 
+	GetByRideRequestIDAuthorized(
+		ctx context.Context,
+		rideRequestID string,
+		userID string,
+	) (*models.Trip, error)
+
 	GetActiveByDriver(
 		ctx context.Context,
 		driverUserID string,
@@ -131,16 +137,26 @@ type Service interface {
 	) ([]*models.TripLocation, error)
 }
 
+// RideRequestAuthorizer checks access to an originating ride request.
+type RideRequestAuthorizer interface {
+	GetByIDAuthorized(
+		ctx context.Context,
+		id string,
+		userID string,
+	) (*models.RideRequest, error)
+}
+
 // Dependencies contains the resources required by the trip service.
 type Dependencies struct {
 	DB *pgxpool.Pool
 
-	Trips         repository.TripRepository
-	RideRequests  repository.RideRequestRepository
-	Presence      repository.DriverPresenceRepository
-	TripEvents    repository.TripEventRepository
-	UserRoles     repository.UserRoleRepository
-	TripLocations repository.TripLocationRepository
+	Trips             repository.TripRepository
+	RideRequests      repository.RideRequestRepository
+	RideRequestAccess RideRequestAuthorizer
+	Presence          repository.DriverPresenceRepository
+	TripEvents        repository.TripEventRepository
+	UserRoles         repository.UserRoleRepository
+	TripLocations     repository.TripLocationRepository
 
 	FareCalculator fare.Service
 }
@@ -149,12 +165,13 @@ type Dependencies struct {
 type tripService struct {
 	db *pgxpool.Pool
 
-	repo          repository.TripRepository
-	rideRequests  repository.RideRequestRepository
-	presence      repository.DriverPresenceRepository
-	tripEvents    repository.TripEventRepository
-	userRoles     repository.UserRoleRepository
-	tripLocations repository.TripLocationRepository
+	repo              repository.TripRepository
+	rideRequests      repository.RideRequestRepository
+	rideRequestAccess RideRequestAuthorizer
+	presence          repository.DriverPresenceRepository
+	tripEvents        repository.TripEventRepository
+	userRoles         repository.UserRoleRepository
+	tripLocations     repository.TripLocationRepository
 
 	fareCalculator fare.Service
 }
@@ -166,12 +183,13 @@ func NewService(
 	return &tripService{
 		db: deps.DB,
 
-		repo:          deps.Trips,
-		rideRequests:  deps.RideRequests,
-		presence:      deps.Presence,
-		tripEvents:    deps.TripEvents,
-		userRoles:     deps.UserRoles,
-		tripLocations: deps.TripLocations,
+		repo:              deps.Trips,
+		rideRequests:      deps.RideRequests,
+		rideRequestAccess: deps.RideRequestAccess,
+		presence:          deps.Presence,
+		tripEvents:        deps.TripEvents,
+		userRoles:         deps.UserRoles,
+		tripLocations:     deps.TripLocations,
 
 		fareCalculator: deps.FareCalculator,
 	}

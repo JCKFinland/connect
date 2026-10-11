@@ -645,6 +645,11 @@ func RegisterRoutes(
 				rideRequestHandler.GetByID,
 			)
 
+			rideRequests.GET(
+				"/:id/trip",
+				tripHandler.GetTripByRideRequest,
+			)
+
 			rideRequests.PUT(
 				"/:id",
 				rideRequestHandler.Update,

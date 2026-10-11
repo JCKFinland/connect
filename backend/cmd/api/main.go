@@ -276,16 +276,26 @@ func main() {
 			},
 		)
 
+	rideRequestService := rideRequestService.NewService(
+		rideRequestService.Dependencies{
+			Config:            cfg,
+			RideRequests:      rideRequestRepo,
+			UserRoles:         userRoleRepo,
+			ServiceCategories: serviceCategoryRepo,
+		},
+	)
+
 	tripService := tripservice.NewService(
 		tripservice.Dependencies{
-			DB:             db,
-			Trips:          tripRepo,
-			RideRequests:   rideRequestRepo,
-			Presence:       driverPresenceRepo,
-			TripEvents:     tripEventRepo,
-			UserRoles:      userRoleRepo,
-			TripLocations:  tripLocationRepo,
-			FareCalculator: fareservice.NewService(),
+			DB:                db,
+			Trips:             tripRepo,
+			RideRequests:      rideRequestRepo,
+			RideRequestAccess: rideRequestService,
+			Presence:          driverPresenceRepo,
+			TripEvents:        tripEventRepo,
+			UserRoles:         userRoleRepo,
+			TripLocations:     tripLocationRepo,
+			FareCalculator:    fareservice.NewService(),
 		},
 	)
 
@@ -396,15 +406,6 @@ func main() {
 			"Stripe payment callbacks enabled",
 		)
 	}
-
-	rideRequestService := rideRequestService.NewService(
-		rideRequestService.Dependencies{
-			Config:            cfg,
-			RideRequests:      rideRequestRepo,
-			UserRoles:         userRoleRepo,
-			ServiceCategories: serviceCategoryRepo,
-		},
-	)
 
 	routingService := routingservice.NewOSRMService(
 		cfg.Routing.BaseURL,

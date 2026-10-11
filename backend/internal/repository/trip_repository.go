@@ -14,6 +14,12 @@ type TripRepository interface {
 	// GetByID retrieves a trip by its ID.
 	GetByID(ctx context.Context, id string) (*models.Trip, error)
 
+	// GetIDByRideRequestID resolves the trip linked to a ride request.
+	GetIDByRideRequestID(
+		ctx context.Context,
+		rideRequestID string,
+	) (string, error)
+
 	// GetActiveByDriverID retrieves the driver's current non-terminal trip.
 	GetActiveByDriverID(
 		ctx context.Context,
