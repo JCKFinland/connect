@@ -43,6 +43,10 @@ type Service struct {
 	staleIdleCursorMu sync.Mutex
 	staleIdleCursor   string
 
+	// Independent cursor for regulatory compliance reconciliation.
+	regulatoryCursorMu sync.Mutex
+	regulatoryCursor   string
+
 	users           repository.UserRepository
 	drivers         repository.DriverRepository
 	presence        repository.DriverPresenceRepository
@@ -64,6 +68,13 @@ type Service struct {
 	// Production worker uses transactional bounded reconciliation.
 	// Tests may inject a deterministic callback.
 	reconcileStaleIdleBounded func(
+		ctx context.Context,
+		now time.Time,
+		batchSize int,
+	) (int64, error)
+
+	// Independent regulatory reconciliation pass.
+	reconcileRegulatoryBounded func(
 		ctx context.Context,
 		now time.Time,
 		batchSize int,
@@ -91,5 +102,6 @@ func NewService(
 	}
 
 	service.reconcileStaleIdleBounded = service.ReconcileStaleIdleBounded
+	service.reconcileRegulatoryBounded = service.ReconcileRegulatoryBounded
 	return service
 }

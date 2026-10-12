@@ -58,24 +58,49 @@ func (s *Service) StartStalePresenceWorker(
 	}
 
 	runCycle := func() bool {
-		_, err := s.reconcileStaleIdleBounded(
-			ctx,
-			time.Now().UTC(),
-			batchSize,
-		)
-		if err == nil {
-			return true
+		now := time.Now().UTC()
+
+		if s.reconcileStaleIdleBounded != nil {
+			_, err := s.reconcileStaleIdleBounded(
+				ctx,
+				now,
+				batchSize,
+			)
+
+			if errors.Is(err, context.Canceled) ||
+				errors.Is(err, context.DeadlineExceeded) {
+				return false
+			}
+
+			if err != nil && options.OnError != nil {
+				options.OnError(err)
+			}
 		}
 
-		if errors.Is(err, context.Canceled) {
+		if ctx.Err() != nil {
 			return false
 		}
 
-		if options.OnError != nil {
-			options.OnError(err)
+		// Regulatory reconciliation runs independently of
+		// stale-heartbeat reconciliation failures.
+		if s.reconcileRegulatoryBounded != nil {
+			_, err := s.reconcileRegulatoryBounded(
+				ctx,
+				now,
+				batchSize,
+			)
+
+			if errors.Is(err, context.Canceled) ||
+				errors.Is(err, context.DeadlineExceeded) {
+				return false
+			}
+
+			if err != nil && options.OnError != nil {
+				options.OnError(err)
+			}
 		}
 
-		return true
+		return ctx.Err() == nil
 	}
 
 	// Reconcile immediately so stale persisted state does not have to wait
