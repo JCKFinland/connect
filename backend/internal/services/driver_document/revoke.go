@@ -51,6 +51,7 @@ func (s *Service) Revoke(
 				postgresrepo.NewDriverRepositoryWithDB(tx)
 			documents :=
 				postgresrepo.NewDriverDocumentRepositoryWithDB(tx)
+			presence := postgresrepo.NewDriverPresenceRepositoryWithDB(tx)
 
 			// This first read discovers only the owning permanent driver.
 			// Authoritative lifecycle state is re-read after the aggregate lock.
@@ -76,7 +77,7 @@ func (s *Service) Revoke(
 
 			// Every regulatory eligibility mutation serializes on the permanent
 			// driver row. Keep the canonical lock order: driver -> document.
-			_, err = drivers.GetByIDForUpdate(
+			driver, err := drivers.GetByIDForUpdate(
 				ctx,
 				documentIdentity.DriverID,
 			)
@@ -145,6 +146,40 @@ func (s *Service) Revoke(
 			document.RevokedByUserID = &reviewerUserID
 			document.RevocationReason = &reason
 			document.UpdatedAt = updatedAt
+
+			// Reconcile idle operational presence in the same transaction.
+			// Presence is keyed by the platform user ID.
+			current, err := presence.GetByDriverIDForUpdate(
+				ctx,
+				driver.UserID,
+			)
+			if errors.Is(err, repository.ErrNotFound) {
+				current = nil
+			} else if err != nil {
+				return fmt.Errorf(
+					"lock presence for regulatory revocation: %w",
+					err,
+				)
+			}
+
+			if current != nil &&
+				current.IsOnline &&
+				(current.AvailabilityStatus == "AVAILABLE" ||
+					current.AvailabilityStatus == "BREAK") {
+
+				_, err := presence.UpdateAvailabilityIfIdle(
+					ctx,
+					driver.UserID,
+					"OFFLINE",
+					false,
+				)
+				if err != nil {
+					return fmt.Errorf(
+						"reconcile presence after regulatory revocation: %w",
+						err,
+					)
+				}
+			}
 
 			revoked = document
 
