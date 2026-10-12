@@ -33,7 +33,10 @@ func TestDispatchOfferAcceptRouteRequiresAuthenticationAndDriverPermission(t *te
 				dispatchHandler.AcceptOffer,
 			)`,
 	} {
-		if !strings.Contains(section, expected) {
+		if !strings.Contains(
+			strings.Join(strings.Fields(section), ""),
+			strings.Join(strings.Fields(expected), ""),
+		) {
 			t.Errorf("missing required dispatch accept route guard:\n%s", expected)
 		}
 	}

@@ -79,7 +79,10 @@ func TestCompanyRoutesEnforceRBACPermissions(t *testing.T) {
 	}
 
 	for _, expected := range required {
-		if !strings.Contains(companyRoutes, expected) {
+		if !strings.Contains(
+			strings.Join(strings.Fields(companyRoutes), ""),
+			strings.Join(strings.Fields(expected), ""),
+		) {
 			t.Errorf(
 				"company route group is missing required RBAC wiring:\n%s",
 				expected,

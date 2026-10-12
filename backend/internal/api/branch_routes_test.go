@@ -79,7 +79,10 @@ func TestBranchRoutesEnforceRBACPermissions(t *testing.T) {
 	}
 
 	for _, expected := range required {
-		if !strings.Contains(branchRoutes, expected) {
+		if !strings.Contains(
+			strings.Join(strings.Fields(branchRoutes), ""),
+			strings.Join(strings.Fields(expected), ""),
+		) {
 			t.Errorf(
 				"branch route group is missing required RBAC wiring:\n%s",
 				expected,
