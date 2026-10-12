@@ -19,6 +19,7 @@ func (r *RideRequestRepository) Create(
 	// Persistence is the final authority for a newly created ride request.
 	// Dispatch lifecycle state can only be established after creation.
 	request.Status = "PENDING"
+        request.MatchingMode = models.RideMatchingModeStandard
 	request.DispatchRetryCount = 0
 	request.NextDispatchAttemptAt = nil
 	request.LastDispatchAttemptAt = nil

@@ -2,6 +2,12 @@ package models
 
 import "time"
 
+// Ride-request matching modes are mutually exclusive.
+const (
+	RideMatchingModeStandard = "STANDARD"
+	RideMatchingModeFlex     = "FLEX"
+)
+
 // RideRequest represents a customer's request for a ride.
 type RideRequest struct {
 	BaseModel
@@ -29,6 +35,7 @@ type RideRequest struct {
 
 	PassengerCount int    `db:"passenger_count" json:"passenger_count"`
 	Status         string `db:"status" json:"status"`
+	MatchingMode   string `db:"matching_mode" json:"matching_mode"`
 
 	Notes string `db:"notes" json:"notes"`
 

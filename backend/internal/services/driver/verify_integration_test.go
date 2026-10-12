@@ -231,7 +231,7 @@ func TestVerifyRejectsExpiredDrivingLicenseWithoutGrantingRole(
 		ctx,
 		`
 			UPDATE drivers
-			SET driving_license_expiry = CURRENT_DATE - 1
+			SET driving_license_expiry = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 1
 			WHERE id = $1
 		`,
 		fixture.DriverID,

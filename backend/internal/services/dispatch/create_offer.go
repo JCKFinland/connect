@@ -287,6 +287,17 @@ func (s *Service) CreateOffer(
 			}
 
 			// ---------------------------------------------------------
+			// Standard dispatch must never mutate a FLEX request.
+			//
+			// This check occurs after FOR UPDATE and before
+			// expiration processing or offer creation.
+			if request.MatchingMode != models.RideMatchingModeStandard {
+				return fmt.Errorf(
+					"standard dispatch requires STANDARD matching mode, got %s",
+					request.MatchingMode,
+				)
+			}
+
 			// Enforce ride-request hard expiration.
 			//
 			// expires_at is the authoritative end of the matching

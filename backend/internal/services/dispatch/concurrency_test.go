@@ -12464,7 +12464,7 @@ func TestDispatchRideRechecksComplianceAfterCandidateRanking(t *testing.T) {
 			`
 				UPDATE driver_documents
 				SET
-					expires_at = CURRENT_DATE - 1,
+					expires_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 1,
 					updated_at = NOW()
 				WHERE driver_id = $1
 				  AND document_type = 'TAXI_DRIVER_LICENSE'
@@ -13588,7 +13588,7 @@ func TestAcceptOfferRejectsDriverWhoseComplianceChangedAfterOfferCreation(
 		`
 			UPDATE driver_documents
 			SET
-				expires_at = CURRENT_DATE - 1,
+				expires_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 1,
 				updated_at = NOW()
 			WHERE driver_id = $1
 			  AND document_type = 'TAXI_DRIVER_LICENSE'

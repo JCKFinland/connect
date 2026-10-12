@@ -516,6 +516,7 @@ func (r *DispatchOfferRepository) ListRedispatchableRideRequestIDs(
 		SELECT rr.id
 		FROM ride_requests rr
 		WHERE rr.status = 'PENDING'
+                  AND rr.matching_mode = 'STANDARD'
 
 		AND (
 			rr.next_dispatch_attempt_at IS NULL

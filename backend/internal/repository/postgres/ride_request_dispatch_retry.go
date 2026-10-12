@@ -84,6 +84,7 @@ func (r *RideRequestRepository) ScheduleDispatchRetry(
 
 	WHERE rr.id = params.ride_request_id
   AND rr.status = 'PENDING'
+  AND rr.matching_mode = 'STANDARD'
   AND (
         rr.expires_at IS NULL
         OR rr.expires_at > params.attempted_at

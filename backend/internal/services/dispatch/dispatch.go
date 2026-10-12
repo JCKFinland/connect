@@ -111,6 +111,13 @@ func (s *Service) DispatchRide(
 				)
 			}
 
+			if request.MatchingMode != models.RideMatchingModeStandard {
+				return fmt.Errorf(
+					"standard dispatch requires STANDARD matching mode, got %s",
+					request.MatchingMode,
+				)
+			}
+
 			if request.Status != rideRequestStatusPending {
 				return fmt.Errorf(
 					"ride request must be %s before dispatch",

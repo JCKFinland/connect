@@ -69,6 +69,7 @@ func TestRideRequestRepositoryCreateCanonicalizesInitialLifecycle(
 		RequestedVehicleType:  "STANDARD",
 		PassengerCount:        1,
 		Status:                "ACCEPTED",
+		MatchingMode:          models.RideMatchingModeFlex,
 		Notes:                 "creation lifecycle authority test",
 		RequestedAt:           now,
 		ExpiresAt:             &expiresAt,
@@ -92,6 +93,13 @@ func TestRideRequestRepositoryCreateCanonicalizesInitialLifecycle(
 
 	if err := repo.Create(ctx, request); err != nil {
 		t.Fatalf("create ride request: %v", err)
+	}
+
+	if request.MatchingMode != models.RideMatchingModeStandard {
+		t.Fatalf(
+			"expected in-memory matching mode STANDARD, got %s",
+			request.MatchingMode,
+		)
 	}
 
 	if request.Status != "PENDING" {
@@ -124,6 +132,7 @@ func TestRideRequestRepositoryCreateCanonicalizesInitialLifecycle(
 
 	var (
 		persistedStatus                string
+		persistedMatchingMode          string
 		persistedDispatchRetryCount    int
 		persistedNextDispatchAttemptAt *time.Time
 		persistedLastDispatchAttemptAt *time.Time
@@ -136,6 +145,7 @@ func TestRideRequestRepositoryCreateCanonicalizesInitialLifecycle(
 		`
 			SELECT
 				status,
+                                matching_mode,
 				dispatch_retry_count,
 				next_dispatch_attempt_at,
 				last_dispatch_attempt_at,
@@ -147,6 +157,7 @@ func TestRideRequestRepositoryCreateCanonicalizesInitialLifecycle(
 		request.ID,
 	).Scan(
 		&persistedStatus,
+		&persistedMatchingMode,
 		&persistedDispatchRetryCount,
 		&persistedNextDispatchAttemptAt,
 		&persistedLastDispatchAttemptAt,
@@ -154,6 +165,13 @@ func TestRideRequestRepositoryCreateCanonicalizesInitialLifecycle(
 		&persistedExpiresAt,
 	); err != nil {
 		t.Fatalf("read persisted ride request: %v", err)
+	}
+
+	if persistedMatchingMode != models.RideMatchingModeStandard {
+		t.Fatalf(
+			"expected persisted matching mode STANDARD, got %s",
+			persistedMatchingMode,
+		)
 	}
 
 	if persistedStatus != "PENDING" {
