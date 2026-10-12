@@ -49,11 +49,6 @@ type DriverPresenceRepository interface {
 		tripID string,
 	) (bool, error)
 
-	// ReleaseFromTrip transitions the driver to AVAILABLE only when the
-	// specified trip is terminal and inactive and no other active non-terminal
-	// trip still commits that driver.
-	//
-	// It returns false without modifying presence when release is unsafe.
 	// ReleaseFromTripWithTarget releases a terminal trip's driver
 	// to AVAILABLE or OFFLINE according to a caller-authorized
 	// eligibility decision.
@@ -65,12 +60,6 @@ type DriverPresenceRepository interface {
 		driverUserID string,
 		tripID string,
 		targetStatus string,
-	) (bool, error)
-
-	ReleaseFromTrip(
-		ctx context.Context,
-		driverID string,
-		tripID string,
 	) (bool, error)
 
 	// UpdateAvailabilityIfIdle updates a driver's manually controlled

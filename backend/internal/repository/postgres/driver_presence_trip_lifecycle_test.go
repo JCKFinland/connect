@@ -291,10 +291,11 @@ func TestDriverPresenceRepositoryTripLifecycleAuthority(t *testing.T) {
 	}
 
 	// An active trip cannot authorize release.
-	released, err := repo.ReleaseFromTrip(
+	released, err := repo.ReleaseFromTripWithTarget(
 		ctx,
 		fixture.UserID,
 		firstTripID,
+		"AVAILABLE",
 	)
 	if err != nil {
 		t.Fatalf("release active trip: %v", err)
@@ -330,10 +331,11 @@ func TestDriverPresenceRepositoryTripLifecycleAuthority(t *testing.T) {
 	secondRequestID := createRideRequest()
 	secondTripID := createTrip(secondRequestID, "ASSIGNED", true)
 
-	released, err = repo.ReleaseFromTrip(
+	released, err = repo.ReleaseFromTripWithTarget(
 		ctx,
 		fixture.UserID,
 		firstTripID,
+		"AVAILABLE",
 	)
 	if err != nil {
 		t.Fatalf("release with another active trip: %v", err)
@@ -371,10 +373,11 @@ func TestDriverPresenceRepositoryTripLifecycleAuthority(t *testing.T) {
 		t.Fatalf("terminalize second trip: %v", err)
 	}
 
-	released, err = repo.ReleaseFromTrip(
+	released, err = repo.ReleaseFromTripWithTarget(
 		ctx,
 		fixture.UserID,
 		firstTripID,
+		"AVAILABLE",
 	)
 	if err != nil {
 		t.Fatalf("release terminal trip: %v", err)
