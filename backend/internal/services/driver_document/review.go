@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/JCKFinland/connect/backend/internal/dateutil"
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
@@ -189,6 +190,34 @@ func (s *Service) review(
 					"update driver document review state: %w",
 					err,
 				)
+			}
+
+			if status == models.DriverDocumentStatusVerified &&
+				document.DocumentType == models.DriverDocumentTypeDrivingLicense {
+
+				if document.ExpiresAt == nil ||
+					dateutil.Before(*document.ExpiresAt, now) {
+
+					return fmt.Errorf(
+						"%w: driving licence expiry is missing or expired",
+						ErrInvalidDocument,
+					)
+				}
+
+				if err := drivers.UpdateDrivingLicenseExpiry(
+					ctx,
+					document.DriverID,
+					*document.ExpiresAt,
+				); err != nil {
+					if errors.Is(err, repository.ErrNotFound) {
+						return ErrDriverNotFound
+					}
+
+					return fmt.Errorf(
+						"synchronize verified driving licence expiry: %w",
+						err,
+					)
+				}
 			}
 
 			document.Status = status

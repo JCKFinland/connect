@@ -1212,9 +1212,10 @@ func TestUpdateAvailabilityRejectsDriverWithActiveTrip(t *testing.T) {
 
 	service := NewService(
 		Dependencies{
-			DB:       db,
-			Config:   cfg,
-			Presence: presenceRepo,
+			DB:         db,
+			Config:     cfg,
+			Presence:   presenceRepo,
+			Compliance: eligibleComplianceStub(),
 		},
 	)
 
@@ -3599,9 +3600,10 @@ func TestUpdateAvailabilityValidatesManualStatuses(t *testing.T) {
 
 	service := NewService(
 		Dependencies{
-			DB:       db,
-			Config:   cfg,
-			Presence: presenceRepo,
+			DB:         db,
+			Config:     cfg,
+			Presence:   presenceRepo,
+			Compliance: eligibleComplianceStub(),
 		},
 	)
 
