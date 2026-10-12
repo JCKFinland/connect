@@ -285,12 +285,7 @@ func (h *DriverPresenceHandler) UpdateAvailability(
 		c.Request.Context(),
 		req,
 	); err != nil {
-
-		response.BadRequest(
-			c,
-			err.Error(),
-		)
-
+		handlePresenceError(c, err)
 		return
 	}
 
