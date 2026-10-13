@@ -13,6 +13,14 @@ type FlexAuction struct {
 	PassengerOfferCents int64  `json:"passenger_offer_cents"`
 	Currency            string `db:"currency" json:"currency"`
 
+	// Immutable pricing provenance captured when the auction opens.
+	// Monetary values are represented in integer EUR cents.
+	BaselineCents     int64  `json:"baseline_cents"`
+	MinimumOfferCents int64  `json:"minimum_offer_cents"`
+	MaximumOfferCents int64  `json:"maximum_offer_cents"`
+	PricingProfileID  string `db:"pricing_profile_id" json:"pricing_profile_id"`
+	PricingVersion    string `db:"pricing_version" json:"pricing_version"`
+
 	Status          string  `db:"status" json:"status"`
 	SelectedOfferID *string `db:"selected_offer_id" json:"selected_offer_id,omitempty"`
 

@@ -109,6 +109,16 @@ func TestFlexAuctionRepositoryPersistence(t *testing.T) {
 		t.Fatalf("create transactional ride request: %v", err)
 	}
 
+	pricingProfileID, pricingVersion, err := createFlexPricingFixture(
+		ctx,
+		tx,
+		fixture.CompanyID,
+		fixture.BranchID,
+	)
+	if err != nil {
+		t.Fatalf("create FLEX pricing fixture: %v", err)
+	}
+
 	repo := NewFlexAuctionRepositoryWithDB(tx)
 
 	// Deliberately supply hostile lifecycle fields. Create must
@@ -120,6 +130,11 @@ func TestFlexAuctionRepositoryPersistence(t *testing.T) {
 		RideRequestID:       rideRequestID,
 		PassengerOfferCents: 12345,
 		Currency:            "EUR",
+		BaselineCents:       12345,
+		MinimumOfferCents:   11110,
+		MaximumOfferCents:   13580,
+		PricingProfileID:    pricingProfileID,
+		PricingVersion:      pricingVersion,
 		Status:              models.FlexAuctionStatusConfirmed,
 		SelectedOfferID:     &selectedOfferID,
 		OpenedAt:            now,
@@ -156,6 +171,28 @@ func TestFlexAuctionRepositoryPersistence(t *testing.T) {
 		)
 	}
 
+	assertPricingProvenance := func(
+		label string,
+		loaded *models.FlexAuction,
+	) {
+		t.Helper()
+
+		if loaded.BaselineCents != auction.BaselineCents ||
+			loaded.MinimumOfferCents != auction.MinimumOfferCents ||
+			loaded.MaximumOfferCents != auction.MaximumOfferCents ||
+			loaded.PricingProfileID != auction.PricingProfileID ||
+			loaded.PricingVersion != auction.PricingVersion {
+			t.Fatalf(
+				"%s pricing provenance mismatch: got %+v, want %+v",
+				label,
+				loaded,
+				auction,
+			)
+		}
+	}
+
+	assertPricingProvenance("GetByID", byID)
+
 	if byID.Status != models.FlexAuctionStatusOpen ||
 		byID.SelectedOfferID != nil ||
 		byID.ResolvedAt != nil {
@@ -169,6 +206,8 @@ func TestFlexAuctionRepositoryPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get auction by ride request: %v", err)
 	}
+	assertPricingProvenance("GetByRideRequestID", byRideRequest)
+
 	if byRideRequest.ID != auction.ID {
 		t.Fatalf(
 			"ride request lookup returned %s, want %s",
@@ -181,6 +220,8 @@ func TestFlexAuctionRepositoryPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lock auction: %v", err)
 	}
+	assertPricingProvenance("GetByIDForUpdate", locked)
+
 	if locked.ID != auction.ID {
 		t.Fatalf("locked unexpected auction: %s", locked.ID)
 	}
@@ -194,6 +235,11 @@ func TestFlexAuctionRepositoryPersistence(t *testing.T) {
 		RideRequestID:       rideRequestID,
 		PassengerOfferCents: 15000,
 		Currency:            "EUR",
+		BaselineCents:       15000,
+		MinimumOfferCents:   13500,
+		MaximumOfferCents:   16500,
+		PricingProfileID:    pricingProfileID,
+		PricingVersion:      pricingVersion,
 		OpenedAt:            now,
 		ExpiresAt:           now.Add(10 * time.Minute),
 	}

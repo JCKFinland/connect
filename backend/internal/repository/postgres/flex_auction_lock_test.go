@@ -96,10 +96,25 @@ func TestFlexAuctionRepositoryGetByIDForUpdateBlocksConcurrentTransaction(
 		t.Fatalf("create lock-test ride request: %v", err)
 	}
 
+	pricingProfileID, pricingVersion, err := createFlexPricingFixture(
+		ctx,
+		setupTx,
+		fixture.CompanyID,
+		fixture.BranchID,
+	)
+	if err != nil {
+		t.Fatalf("create lock-test pricing fixture: %v", err)
+	}
+
 	auction := &models.FlexAuction{
 		RideRequestID:       rideRequestID,
 		PassengerOfferCents: 1250,
 		Currency:            "EUR",
+		BaselineCents:       1250,
+		MinimumOfferCents:   1125,
+		MaximumOfferCents:   1375,
+		PricingProfileID:    pricingProfileID,
+		PricingVersion:      pricingVersion,
 		OpenedAt:            now,
 		ExpiresAt:           now.Add(10 * time.Minute),
 	}
@@ -135,6 +150,30 @@ func TestFlexAuctionRepositoryGetByIDForUpdateBlocksConcurrentTransaction(
 			rideRequestID,
 		); cleanupErr != nil {
 			t.Logf("cleanup ride request: %v", cleanupErr)
+		}
+
+		var categoryID string
+		if err := db.QueryRow(
+			cleanupCtx,
+			`SELECT service_category_id
+			 FROM fare_pricing_profiles WHERE id = $1`,
+			pricingProfileID,
+		).Scan(&categoryID); err != nil {
+			t.Logf("resolve pricing fixture category: %v", err)
+		} else {
+			if _, err := db.Exec(
+				cleanupCtx,
+				`DELETE FROM fare_pricing_profiles WHERE id = $1`,
+				pricingProfileID,
+			); err != nil {
+				t.Logf("cleanup pricing profile: %v", err)
+			} else if _, err := db.Exec(
+				cleanupCtx,
+				`DELETE FROM service_categories WHERE id = $1`,
+				categoryID,
+			); err != nil {
+				t.Logf("cleanup pricing category: %v", err)
+			}
 		}
 	}()
 

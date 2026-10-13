@@ -89,11 +89,26 @@ func TestFlexOfferRepositoryPersistence(t *testing.T) {
 		t.Fatalf("create test ride request: %v", err)
 	}
 
+	pricingProfileID, pricingVersion, err := createFlexPricingFixture(
+		ctx,
+		tx,
+		fixture.CompanyID,
+		fixture.BranchID,
+	)
+	if err != nil {
+		t.Fatalf("create FLEX offer-test pricing fixture: %v", err)
+	}
+
 	auctionRepo := NewFlexAuctionRepositoryWithDB(tx)
 	auction := &models.FlexAuction{
 		RideRequestID:       rideRequestID,
 		PassengerOfferCents: 1500,
 		Currency:            "EUR",
+		BaselineCents:       1500,
+		MinimumOfferCents:   1350,
+		MaximumOfferCents:   1650,
+		PricingProfileID:    pricingProfileID,
+		PricingVersion:      pricingVersion,
 		OpenedAt:            now,
 		ExpiresAt:           now.Add(10 * time.Minute),
 	}

@@ -95,10 +95,25 @@ func TestFlexOfferRepositoryGetByIDForUpdateBlocksConcurrentTransaction(
 		t.Fatalf("create lock-test ride request: %v", err)
 	}
 
+	pricingProfileID, pricingVersion, err := createFlexPricingFixture(
+		ctx,
+		setupTx,
+		fixture.CompanyID,
+		fixture.BranchID,
+	)
+	if err != nil {
+		t.Fatalf("create offer-lock pricing fixture: %v", err)
+	}
+
 	auction := &models.FlexAuction{
 		RideRequestID:       rideRequestID,
 		PassengerOfferCents: 1500,
 		Currency:            "EUR",
+		BaselineCents:       1500,
+		MinimumOfferCents:   1350,
+		MaximumOfferCents:   1650,
+		PricingProfileID:    pricingProfileID,
+		PricingVersion:      pricingVersion,
 		OpenedAt:            now,
 		ExpiresAt:           now.Add(10 * time.Minute),
 	}
@@ -132,6 +147,38 @@ func TestFlexOfferRepositoryGetByIDForUpdateBlocksConcurrentTransaction(
 		t.Fatalf("commit lock-test setup: %v", err)
 	}
 	setupCommitted = true
+
+	defer func() {
+		cleanupCtx := context.Background()
+
+		var categoryID string
+		if err := db.QueryRow(
+			cleanupCtx,
+			`SELECT service_category_id
+			 FROM fare_pricing_profiles WHERE id = $1`,
+			pricingProfileID,
+		).Scan(&categoryID); err != nil {
+			t.Logf("resolve offer-lock pricing category: %v", err)
+			return
+		}
+
+		if _, err := db.Exec(
+			cleanupCtx,
+			`DELETE FROM fare_pricing_profiles WHERE id = $1`,
+			pricingProfileID,
+		); err != nil {
+			t.Logf("cleanup offer-lock pricing profile: %v", err)
+			return
+		}
+
+		if _, err := db.Exec(
+			cleanupCtx,
+			`DELETE FROM service_categories WHERE id = $1`,
+			categoryID,
+		); err != nil {
+			t.Logf("cleanup offer-lock service category: %v", err)
+		}
+	}()
 
 	// Cleanup runs after all locking transactions have been released.
 	// Delete in foreign-key dependency order.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
@@ -54,15 +55,46 @@ func (r *FlexAuctionRepository) Create(
 		return errors.New("flex auction currency must be EUR")
 	}
 
+	baseline, err := flexCentsToDecimal(auction.BaselineCents)
+	if err != nil {
+		return fmt.Errorf("invalid flex baseline: %w", err)
+	}
+	minimum, err := flexCentsToDecimal(auction.MinimumOfferCents)
+	if err != nil {
+		return fmt.Errorf("invalid flex minimum offer: %w", err)
+	}
+	maximum, err := flexCentsToDecimal(auction.MaximumOfferCents)
+	if err != nil {
+		return fmt.Errorf("invalid flex maximum offer: %w", err)
+	}
+
+	if auction.MinimumOfferCents > auction.BaselineCents ||
+		auction.BaselineCents > auction.MaximumOfferCents ||
+		auction.PassengerOfferCents < auction.MinimumOfferCents ||
+		auction.PassengerOfferCents > auction.MaximumOfferCents {
+		return errors.New("flex auction pricing bounds are invalid")
+	}
+	if _, err := uuid.Parse(auction.PricingProfileID); err != nil {
+		return fmt.Errorf("invalid flex pricing profile ID: %w", err)
+	}
+	if strings.TrimSpace(auction.PricingVersion) == "" {
+		return errors.New("flex pricing version is required")
+	}
+
 	if auction.ID == "" {
 		auction.ID = uuid.NewString()
 	}
 
-	now := time.Now().UTC()
+	// PostgreSQL TIMESTAMPTZ stores microsecond precision.
+	// Normalize before persistence so returned and stored timestamps agree.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	if auction.OpenedAt.IsZero() {
 		auction.OpenedAt = now
 	}
+	auction.OpenedAt = auction.OpenedAt.UTC().Truncate(time.Microsecond)
+	auction.ExpiresAt = auction.ExpiresAt.UTC().Truncate(time.Microsecond)
+
 	if !auction.ExpiresAt.After(auction.OpenedAt) {
 		return errors.New("flex auction expiry must follow opening")
 	}
@@ -74,6 +106,7 @@ func (r *FlexAuctionRepository) Create(
 	if auction.CreatedAt.IsZero() {
 		auction.CreatedAt = now
 	}
+	auction.CreatedAt = auction.CreatedAt.UTC().Truncate(time.Microsecond)
 	auction.UpdatedAt = now
 
 	const query = `
@@ -88,11 +121,17 @@ func (r *FlexAuctionRepository) Create(
 			expires_at,
 			resolved_at,
 			created_at,
-			updated_at
+			updated_at,
+			baseline_amount,
+			minimum_offer_amount,
+			maximum_offer_amount,
+			pricing_profile_id,
+			pricing_version
 		)
 		VALUES (
 			$1, $2, $3::numeric, $4, 'OPEN',
-			NULL, $5, $6, NULL, $7, $8
+			NULL, $5, $6, NULL, $7, $8,
+			$9::numeric, $10::numeric, $11::numeric, $12, $13
 		)
 	`
 
@@ -107,6 +146,11 @@ func (r *FlexAuctionRepository) Create(
 		auction.ExpiresAt,
 		auction.CreatedAt,
 		auction.UpdatedAt,
+		baseline,
+		minimum,
+		maximum,
+		auction.PricingProfileID,
+		auction.PricingVersion,
 	)
 	if err != nil {
 		return fmt.Errorf("create flex auction: %w", err)
@@ -126,7 +170,12 @@ const flexAuctionColumns = `
 	expires_at,
 	resolved_at,
 	created_at,
-	updated_at
+	updated_at,
+	baseline_amount::text,
+	minimum_offer_amount::text,
+	maximum_offer_amount::text,
+	pricing_profile_id,
+	pricing_version
 `
 
 func (r *FlexAuctionRepository) GetByID(
@@ -172,6 +221,9 @@ func (r *FlexAuctionRepository) getOne(
 ) (*models.FlexAuction, error) {
 	auction := &models.FlexAuction{}
 	var amount string
+	var baseline string
+	var minimum string
+	var maximum string
 
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&auction.ID,
@@ -185,6 +237,11 @@ func (r *FlexAuctionRepository) getOne(
 		&auction.ResolvedAt,
 		&auction.CreatedAt,
 		&auction.UpdatedAt,
+		&baseline,
+		&minimum,
+		&maximum,
+		&auction.PricingProfileID,
+		&auction.PricingVersion,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -199,6 +256,18 @@ func (r *FlexAuctionRepository) getOne(
 	auction.PassengerOfferCents, err = flexDecimalToCents(amount)
 	if err != nil {
 		return nil, fmt.Errorf("decode flex auction amount: %w", err)
+	}
+	auction.BaselineCents, err = flexDecimalToCents(baseline)
+	if err != nil {
+		return nil, fmt.Errorf("decode flex baseline: %w", err)
+	}
+	auction.MinimumOfferCents, err = flexDecimalToCents(minimum)
+	if err != nil {
+		return nil, fmt.Errorf("decode flex minimum offer: %w", err)
+	}
+	auction.MaximumOfferCents, err = flexDecimalToCents(maximum)
+	if err != nil {
+		return nil, fmt.Errorf("decode flex maximum offer: %w", err)
 	}
 
 	return auction, nil
