@@ -71,6 +71,19 @@ func (s *Service) DispatchRide(
 		s.db,
 		func(tx pgx.Tx) error {
 
+			// Serialize standard dispatch with FLEX activation.
+			// Lock order: ride advisory lock, then ride-request row.
+			if err := postgresrepo.AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"ride-dispatch:"+rideRequestID,
+			); err != nil {
+				return fmt.Errorf(
+					"lock ride request dispatch: %w",
+					err,
+				)
+			}
+
 			// All repositories below use the same PostgreSQL transaction.
 			rideRequests := postgresrepo.NewRideRequestRepositoryWithDB(tx)
 			assignments := postgresrepo.NewDriverAssignmentRepositoryWithDB(tx)
