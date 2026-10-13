@@ -40,6 +40,11 @@ type Service struct {
 	// final locked eligibility recheck.
 	//
 	// It is nil in normal production operation.
+	// afterOfferExpiryPreflight coordinates expiry-race integration tests
+	// after the preliminary expiry read and before dispatch marking.
+	// Nil in production.
+	afterOfferExpiryPreflight func(rideRequestID string)
+
 	beforeClaimCandidate func(driverID string)
 
 	// afterSelectCandidate coordinates regulatory-revocation concurrency

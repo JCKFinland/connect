@@ -64,6 +64,19 @@ func (s *Service) DispatchRide(
 		return nil, errors.New("ride request ID is required")
 	}
 
+	// Commit standard-dispatch history independently of the matching
+	// transaction. A later no-driver result or rollback must not erase
+	// evidence that standard dispatch has begun.
+	//
+	// The matching transaction below reacquires the same advisory lock
+	// and revalidates STANDARD/PENDING before modifying the ride.
+	if err := s.BeginStandardDispatch(ctx, rideRequestID); err != nil {
+		return nil, fmt.Errorf(
+			"begin standard dispatch: %w",
+			err,
+		)
+	}
+
 	var dispatchedTrip *models.Trip
 
 	err := postgresrepo.RunInTransaction(

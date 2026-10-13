@@ -75,12 +75,61 @@ func (s *Service) CreateOffer(
 		)
 	}
 
+	// Preserve the existing expired-ride lifecycle transition.
+	//
+	// BeginStandardDispatch rejects expired requests, whereas CreateOffer
+	// must commit EXPIRED before returning ErrRideRequestExpired.
+	//
+	// This read is only an expiry-routing hint. BeginStandardDispatch
+	// and the transaction below remain the authoritative validators.
+	var requestExpiresAt *time.Time
+	var requestMatchingMode string
+
+	err := s.db.QueryRow(
+		ctx,
+		`SELECT expires_at, matching_mode
+		 FROM ride_requests
+		 WHERE id = $1`,
+		rideRequestID,
+	).Scan(
+		&requestExpiresAt,
+		&requestMatchingMode,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"check ride request before standard dispatch: %w",
+			err,
+		)
+	}
+
+	if s.afterOfferExpiryPreflight != nil {
+		s.afterOfferExpiryPreflight(rideRequestID)
+	}
+
+	alreadyExpired := requestExpiresAt != nil &&
+		!time.Now().UTC().Before(requestExpiresAt.UTC())
+
+	if requestMatchingMode == models.RideMatchingModeStandard &&
+		!alreadyExpired {
+		if err := s.BeginStandardDispatch(ctx, rideRequestID); err != nil {
+			// The ride may have expired after the preliminary read.
+			// Preserve the existing transaction's responsibility for
+			// committing EXPIRED before returning the lifecycle error.
+			if !errors.Is(err, ErrRideRequestExpired) {
+				return nil, fmt.Errorf(
+					"begin standard dispatch offer: %w",
+					err,
+				)
+			}
+		}
+	}
+
 	var (
 		createdOffer       *models.DispatchOffer
 		rideRequestExpired bool
 	)
 
-	err := postgresrepo.RunInTransaction(
+	err = postgresrepo.RunInTransaction(
 		ctx,
 		s.db,
 		func(tx pgx.Tx) error {
