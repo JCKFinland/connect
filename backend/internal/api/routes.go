@@ -661,6 +661,11 @@ func RegisterRoutes(
 			)
 
 			rideRequests.POST(
+				"/:id/activate-flex",
+				rideRequestHandler.ActivateFlex,
+			)
+
+			rideRequests.POST(
 				"/:id/dispatch",
 				rbacMiddleware.RequirePermission("rides.dispatch"),
 				dispatchHandler.DispatchRide,

@@ -278,6 +278,7 @@ func main() {
 
 	rideRequestService := rideRequestService.NewService(
 		rideRequestService.Dependencies{
+			DB:                db,
 			Config:            cfg,
 			RideRequests:      rideRequestRepo,
 			UserRoles:         userRoleRepo,
