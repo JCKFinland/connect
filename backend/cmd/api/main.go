@@ -606,6 +606,7 @@ func main() {
 	router := api.NewRouter(
 		log,
 		db,
+		cfg,
 		authHandler,
 		authMiddleware,
 		rbacMiddleware,

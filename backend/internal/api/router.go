@@ -9,6 +9,7 @@ import (
 	// Connects to the primary PostgreSQL connection pool driver.
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 )
 
@@ -16,6 +17,7 @@ import (
 func NewRouter(
 	log *slog.Logger,
 	db *pgxpool.Pool,
+	cfg *config.Config,
 	auth *AuthHandler,
 	authMiddleware *middleware.AuthMiddleware,
 	rbacMiddleware *middleware.RBACMiddleware,
@@ -72,6 +74,7 @@ func NewRouter(
 	RegisterRoutes(
 		router,
 		db,
+		cfg,
 		auth,
 		authMiddleware,
 		rbacMiddleware,

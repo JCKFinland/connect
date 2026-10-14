@@ -6,12 +6,14 @@ import (
 	// Passes the raw PostgreSQL connection pool down to operational health checks.
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 )
 
 func RegisterRoutes(
 	router *gin.Engine,
 	db *pgxpool.Pool,
+	cfg *config.Config,
 	authHandler *AuthHandler,
 	authMiddleware *middleware.AuthMiddleware,
 	rbacMiddleware *middleware.RBACMiddleware,
@@ -223,6 +225,17 @@ func RegisterRoutes(
 				"/dispatch-offers/:offer_id/reject",
 				rbacMiddleware.RequirePermission("driver.operations"),
 				dispatchHandler.RejectOffer,
+			)
+
+			// FLEX Driver Offer Operations.
+			// Authentication is inherited from the drivers group.
+			// Regulatory eligibility is enforced transactionally.
+			flexOfferHandler := NewFlexOfferHandler(db, cfg)
+
+			drivers.POST(
+				"/flex-auctions/:auction_id/offers/accept",
+				rbacMiddleware.RequirePermission("driver.operations"),
+				flexOfferHandler.SubmitAcceptFare,
 			)
 
 			// ---------------------------------------------------
