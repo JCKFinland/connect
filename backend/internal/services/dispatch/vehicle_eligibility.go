@@ -1,28 +1,9 @@
 package dispatch
 
-import "strings"
+import vehicleeligibility "github.com/JCKFinland/connect/backend/internal/services/vehicle_eligibility"
 
-func isVehicleEligible(
-	requestedType string,
-	vehicleType string,
-) bool {
-
-	requestedType = strings.ToUpper(
-		strings.TrimSpace(requestedType),
-	)
-
-	vehicleType = strings.ToUpper(
-		strings.TrimSpace(vehicleType),
-	)
-
-	switch requestedType {
-	case "STANDARD":
-		return vehicleType == "SEDAN"
-
-	case "VAN":
-		return vehicleType == "VAN"
-
-	default:
-		return false
-	}
+// Preserve the existing dispatch call sites while sharing the
+// vehicle-matching policy with FLEX.
+func isVehicleEligible(requestedType, vehicleType string) bool {
+	return vehicleeligibility.IsEligible(requestedType, vehicleType)
 }
