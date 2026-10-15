@@ -25,6 +25,23 @@ func (s *Service) SubmitAcceptFare(
 	auctionID string,
 	driverUserID string,
 ) (*models.FlexOffer, error) {
+	return s.submitOffer(
+		ctx,
+		auctionID,
+		driverUserID,
+		models.FlexOfferTypeAcceptFare,
+		0,
+	)
+}
+
+// submitOffer contains the shared transactional FLEX offer workflow.
+func (s *Service) submitOffer(
+	ctx context.Context,
+	auctionID string,
+	driverUserID string,
+	offerType string,
+	proposedAmountCents int64,
+) (*models.FlexOffer, error) {
 	if s == nil || s.db == nil || s.cfg == nil {
 		return nil, errors.New("FLEX offer service is not configured")
 	}
@@ -245,6 +262,25 @@ func (s *Service) SubmitAcceptFare(
 				return ErrAuctionNotEligible
 			}
 
+			amountCents := auction.PassengerOfferCents
+
+			switch offerType {
+			case models.FlexOfferTypeAcceptFare:
+				// Acceptance uses the authoritative passenger fare.
+
+			case models.FlexOfferTypeCounterOffer:
+				if proposedAmountCents <= 0 ||
+					proposedAmountCents == auction.PassengerOfferCents ||
+					proposedAmountCents < auction.MinimumOfferCents ||
+					proposedAmountCents > auction.MaximumOfferCents {
+					return ErrInvalidCounterOfferAmount
+				}
+				amountCents = proposedAmountCents
+
+			default:
+				return ErrAuctionNotEligible
+			}
+
 			offer := &models.FlexOffer{
 				AuctionID:          auction.ID,
 				AssignmentID:       assignment.ID,
@@ -253,7 +289,8 @@ func (s *Service) SubmitAcceptFare(
 				CompanyID:          assignment.CompanyID,
 				BranchID:           assignment.BranchID,
 				FleetID:            assignment.FleetID,
-				OfferedAmountCents: auction.PassengerOfferCents,
+				OfferedAmountCents: amountCents,
+				OfferType:          offerType,
 				OfferedAt:          submittedAt,
 				ExpiresAt:          auction.ExpiresAt.UTC(),
 			}

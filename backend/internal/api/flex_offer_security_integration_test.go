@@ -48,6 +48,12 @@ func newFlexOfferSecurityIntegrationRouter(
 		handler.SubmitAcceptFare,
 	)
 
+	drivers.POST(
+		"/flex-auctions/:auction_id/offers/counter",
+		rbacMiddleware.RequirePermission("driver.operations"),
+		handler.SubmitCounterOffer,
+	)
+
 	return router, jwtService
 }
 

@@ -238,6 +238,12 @@ func RegisterRoutes(
 				flexOfferHandler.SubmitAcceptFare,
 			)
 
+			drivers.POST(
+				"/flex-auctions/:auction_id/offers/counter",
+				rbacMiddleware.RequirePermission("driver.operations"),
+				flexOfferHandler.SubmitCounterOffer,
+			)
+
 			// ---------------------------------------------------
 			// Driver Regulatory Documents
 			// ---------------------------------------------------

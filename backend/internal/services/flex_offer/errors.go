@@ -3,6 +3,10 @@ package flex_offer
 import "errors"
 
 var (
+	ErrInvalidCounterOfferAmount = errors.New(
+		"invalid FLEX counter-offer amount",
+	)
+
 	ErrAccessDenied = errors.New(
 		"FLEX driver offer access denied",
 	)

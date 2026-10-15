@@ -54,6 +54,16 @@ func (r *FlexOfferRepository) Create(
 		return errors.New("flex offer identity fields are required")
 	}
 
+	// Preserve compatibility with existing acceptance callers.
+	// Counter-offer callers must explicitly select COUNTER_OFFER.
+	if offer.OfferType == "" {
+		offer.OfferType = models.FlexOfferTypeAcceptFare
+	}
+	if offer.OfferType != models.FlexOfferTypeAcceptFare &&
+		offer.OfferType != models.FlexOfferTypeCounterOffer {
+		return errors.New("invalid FLEX offer type")
+	}
+
 	amount, err := flexCentsToDecimal(offer.OfferedAmountCents)
 	if err != nil {
 		return fmt.Errorf("invalid flex offer amount: %w", err)
@@ -91,6 +101,7 @@ func (r *FlexOfferRepository) Create(
 			branch_id,
 			fleet_id,
 			offered_amount,
+			offer_type,
 			status,
 			offered_at,
 			expires_at,
@@ -101,7 +112,7 @@ func (r *FlexOfferRepository) Create(
 		VALUES (
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9::numeric,
-			'PENDING', $10, $11, NULL, $12, $13
+			$10, 'PENDING', $11, $12, NULL, $13, $14
 		)
 	`
 
@@ -117,6 +128,7 @@ func (r *FlexOfferRepository) Create(
 		offer.BranchID,
 		offer.FleetID,
 		amount,
+		offer.OfferType,
 		offer.OfferedAt,
 		offer.ExpiresAt,
 		offer.CreatedAt,
@@ -139,6 +151,7 @@ const flexOfferColumns = `
 	branch_id,
 	fleet_id,
 	offered_amount::text,
+	offer_type,
 	status,
 	offered_at,
 	expires_at,
@@ -235,6 +248,7 @@ func scanFlexOffer(row pgx.Row) (*models.FlexOffer, error) {
 		&offer.BranchID,
 		&offer.FleetID,
 		&amount,
+		&offer.OfferType,
 		&offer.Status,
 		&offer.OfferedAt,
 		&offer.ExpiresAt,

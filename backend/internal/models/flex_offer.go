@@ -19,6 +19,10 @@ type FlexOffer struct {
 
 	OfferedAmountCents int64 `json:"offered_amount_cents"`
 
+	// OfferType distinguishes acceptance from a driver counter-offer.
+	// It is assigned at creation and must not change afterward.
+	OfferType string `db:"offer_type" json:"offer_type"`
+
 	Status string `db:"status" json:"status"`
 
 	OfferedAt   time.Time  `db:"offered_at" json:"offered_at"`
@@ -28,6 +32,11 @@ type FlexOffer struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
+
+const (
+	FlexOfferTypeAcceptFare   = "ACCEPT_FARE"
+	FlexOfferTypeCounterOffer = "COUNTER_OFFER"
+)
 
 const (
 	FlexOfferStatusPending   = "PENDING"
