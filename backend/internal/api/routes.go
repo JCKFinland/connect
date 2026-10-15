@@ -40,6 +40,9 @@ func RegisterRoutes(
 ) {
 
 	// Establishes a base versioning group to prevent breaking mobile client contracts during API updates.
+	// Shared FLEX handler serves authenticated driver and passenger routes.
+	flexOfferHandler := NewFlexOfferHandler(db, cfg)
+
 	v1 := router.Group("/api/v1")
 	{
 		// ---------------------------------------------------
@@ -230,7 +233,7 @@ func RegisterRoutes(
 			// FLEX Driver Offer Operations.
 			// Authentication is inherited from the drivers group.
 			// Regulatory eligibility is enforced transactionally.
-			flexOfferHandler := NewFlexOfferHandler(db, cfg)
+			// FLEX handler is initialized once for driver and passenger routes.
 
 			drivers.POST(
 				"/flex-auctions/:auction_id/offers/accept",
@@ -687,6 +690,11 @@ func RegisterRoutes(
 			rideRequests.POST(
 				"/:id/flex-auctions",
 				rideRequestHandler.InitiateFlexAuction,
+			)
+
+			rideRequests.GET(
+				"/:id/flex-auctions/:auction_id/offers",
+				flexOfferHandler.ListPassengerOffers,
 			)
 
 			rideRequests.POST(
