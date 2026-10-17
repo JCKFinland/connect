@@ -33,6 +33,7 @@ func RegisterRoutes(
 	paymentTransactionHandler *PaymentTransactionHandler,
 	paymentExecutionHandler *PaymentExecutionHandler,
 	paymentCallbackHandler *PaymentCallbackHandler,
+	flexWebhookHandler *FlexAuthorizationWebhookHandler,
 	rideRequestHandler *RideRequestHandler,
 	serviceCategoryHandler *ServiceCategoryHandler,
 	fareEstimateHandler *FareEstimateHandler,
@@ -59,6 +60,13 @@ func RegisterRoutes(
 		registerPaymentCallbackRoutes(
 			v1,
 			paymentCallbackHandler,
+		)
+
+		// Stripe FLEX authorization webhooks are authenticated
+		// cryptographically, not with CONNECT customer JWTs.
+		registerFlexAuthorizationWebhookRoutes(
+			v1,
+			flexWebhookHandler,
 		)
 
 		// Attaches the explicit closure checking database connectivity metrics.
@@ -739,5 +747,21 @@ func registerPaymentExecutionRoutes(
 	payments.POST(
 		"/:id/transactions/:transaction_id/execute",
 		handler.Execute,
+	)
+}
+
+// registerFlexAuthorizationWebhookRoutes registers the public
+// Stripe webhook endpoint only when FLEX is configured.
+func registerFlexAuthorizationWebhookRoutes(
+	v1 *gin.RouterGroup,
+	handler *FlexAuthorizationWebhookHandler,
+) {
+	if handler == nil {
+		return
+	}
+
+	v1.POST(
+		"/flex/webhooks/stripe",
+		handler.Handle,
 	)
 }

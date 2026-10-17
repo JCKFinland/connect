@@ -37,7 +37,6 @@ import (
 	companyservice "github.com/JCKFinland/connect/backend/internal/services/company"
 
 	dispatchofferservice "github.com/JCKFinland/connect/backend/internal/services/dispatch_offer"
-
 	fleetservice "github.com/JCKFinland/connect/backend/internal/services/fleet"
 
 	vehicleservice "github.com/JCKFinland/connect/backend/internal/services/vehicle"
@@ -75,6 +74,17 @@ func main() {
 	if err != nil {
 		// Hard exit if application settings are corrupt or missing.
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Reject incomplete FLEX Stripe configuration before initializing
+	// application services or opening the HTTP listener.
+	if err := config.ValidateStripeFlexConfiguration(cfg.Stripe); err != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"FLEX Stripe configuration error: %v\n",
+			err,
+		)
 		os.Exit(1)
 	}
 
@@ -439,6 +449,27 @@ func main() {
 	)
 	_ = dispatchOfferService
 
+	// ----------------------------------------------------------------------
+	// Stripe FLEX Authorization Webhook
+	// ----------------------------------------------------------------------
+
+	flexWebhookHandler, err := buildFlexWebhookHandler(
+		db,
+		cfg.Stripe,
+	)
+	if err != nil {
+		log.Error(
+			"failed to initialize Stripe FLEX webhook",
+			"error",
+			err,
+		)
+		os.Exit(1)
+	}
+
+	if flexWebhookHandler != nil {
+		log.Info("Stripe FLEX authorization webhook enabled")
+	}
+
 	dispatchService := dispatchservice.NewService(
 		dispatchservice.Dependencies{
 			DB:           db,
@@ -626,6 +657,7 @@ func main() {
 		paymentTransactionHandler,
 		paymentExecutionHandler,
 		paymentCallbackHandler,
+		flexWebhookHandler,
 		rideRequestHandler,
 		serviceCategoryHandler,
 		fareEstimateHandler,

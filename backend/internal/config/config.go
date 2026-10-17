@@ -50,8 +50,9 @@ type DocumentStorageConfig struct {
 
 // StripeConfig contains Stripe payment-provider configuration.
 type StripeConfig struct {
-	SecretKey     string
-	WebhookSecret string
+	SecretKey         string
+	WebhookSecret     string
+	FlexWebhookSecret string
 }
 
 // Config represents the application's configuration.
@@ -201,6 +202,10 @@ func Load() (*Config, error) {
 
 			WebhookSecret: GetEnv(
 				"STRIPE_WEBHOOK_SECRET",
+				"",
+			),
+			FlexWebhookSecret: GetEnv(
+				"STRIPE_FLEX_WEBHOOK_SECRET",
 				"",
 			),
 		},
