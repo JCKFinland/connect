@@ -267,6 +267,40 @@ func (s *Service) ConfirmAuthorizedRide(
 				return ErrFlexConfirmationNotEligible
 			}
 
+			// Validate frozen auction pricing provenance against the
+			// selected driver's organization before creating a trip.
+			//
+			// Do not require IsActive here: the auction may have
+			// captured a valid historical pricing version.
+			pricingProfiles := postgresrepo.
+				NewFarePricingProfileRepositoryWithDB(tx)
+
+			pricingProfile, err := pricingProfiles.GetByID(
+				ctx, auction.PricingProfileID,
+			)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrFlexConfirmationNotEligible
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"resolve FLEX confirmation pricing profile: %w",
+					err,
+				)
+			}
+
+			if pricingProfile == nil ||
+				pricingProfile.CompanyID != offer.CompanyID ||
+				pricingProfile.Version != auction.PricingVersion ||
+				pricingProfile.Currency != auction.Currency ||
+				pricingProfile.Currency != "EUR" ||
+				(pricingProfile.BranchID != nil &&
+					*pricingProfile.BranchID != offer.BranchID) ||
+				(request.ServiceCategoryID != nil &&
+					*request.ServiceCategoryID !=
+						pricingProfile.ServiceCategoryID) {
+				return ErrFlexConfirmationNotEligible
+			}
+
 			pickupAddress := request.PickupAddress
 			pickupLatitude := request.PickupLatitude
 			pickupLongitude := request.PickupLongitude

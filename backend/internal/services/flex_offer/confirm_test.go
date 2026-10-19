@@ -140,6 +140,52 @@ func TestConfirmAuthorizedRideSuccess(t *testing.T) {
 		t.Fatalf("unexpected confirmed trip: %+v", trip)
 	}
 
+	// The confirmed trip must resolve to the exact negotiated
+	// amount backed by the authorized Stripe payment.
+	contract, err := postgresrepo.ResolveConfirmedFlexFareContract(
+		ctx,
+		f.DB,
+		trip.ID,
+	)
+	if err != nil {
+		t.Fatalf("resolve confirmed FLEX fare contract: %v", err)
+	}
+	if contract == nil {
+		t.Fatal("confirmed FLEX trip has no fare contract")
+	}
+	if contract.TripID != trip.ID ||
+		contract.AmountCents != offer.OfferedAmountCents ||
+		contract.Currency != "EUR" {
+		t.Fatalf(
+			"confirmed FLEX fare contract mismatch: contract=%+v offer=%+v",
+			contract,
+			offer,
+		)
+	}
+
+	var auctionProfileID string
+	var auctionPricingVersion string
+	if err := f.DB.QueryRow(ctx, `
+		SELECT pricing_profile_id, pricing_version
+		FROM flex_auctions
+		WHERE id = $1
+	`, f.AuctionID).Scan(
+		&auctionProfileID,
+		&auctionPricingVersion,
+	); err != nil {
+		t.Fatalf("read frozen FLEX pricing provenance: %v", err)
+	}
+
+	if contract.PricingProfileID != auctionProfileID ||
+		contract.PricingVersion != auctionPricingVersion {
+		t.Fatalf(
+			"FLEX pricing provenance mismatch: contract=%+v profile=%s version=%s",
+			contract,
+			auctionProfileID,
+			auctionPricingVersion,
+		)
+	}
+
 	var tripCount int
 	var persistedTripStatus string
 	err = f.DB.QueryRow(ctx, `
