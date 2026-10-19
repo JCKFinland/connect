@@ -61,7 +61,25 @@ func TestGoOnlineRejectsBusyDriverWithActiveTrip(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf(
+			"create isolated customer fixture: %v",
+			err,
+		)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(
+			context.Background(),
+		); err != nil {
+			t.Errorf(
+				"cleanup isolated customer fixture: %v",
+				err,
+			)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -908,100 +926,44 @@ func TestUpdateAvailabilityRejectsDriverWithActiveTrip(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
-
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
-
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
-	)
-
-	// ---------------------------------------------------------
-	// Preserve John's current presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence: %v",
-			err,
-		)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					last_heartbeat_at = $4,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
+
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
+	}
+	defer func() {
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
+		}
+	}()
+
+	johnUserID := driverFixture.UserID
+	johnVehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
 
 	// ---------------------------------------------------------
 	// Avoid interfering with an existing active trip.
@@ -1033,8 +995,9 @@ func TestUpdateAvailabilityRejectsDriverWithActiveTrip(t *testing.T) {
 	}
 
 	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
+		t.Fatalf(
+			"isolated driver unexpectedly has %d active trips",
+			existingActiveTripCount,
 		)
 	}
 
@@ -1123,6 +1086,16 @@ func TestUpdateAvailabilityRejectsDriverWithActiveTrip(t *testing.T) {
 		)
 	}
 
+	defer func() {
+		if _, cleanupErr := db.Exec(
+			context.Background(),
+			`DELETE FROM ride_requests WHERE id = $1`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Errorf("cleanup presence-guard ride request: %v", cleanupErr)
+		}
+	}()
+
 	_, err = db.Exec(
 		ctx,
 		`
@@ -1176,34 +1149,12 @@ func TestUpdateAvailabilityRejectsDriverWithActiveTrip(t *testing.T) {
 		)
 	}
 	defer func() {
-		cleanupCtx := context.Background()
-
 		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM trips
-				WHERE id = $1
-			`,
+			context.Background(),
+			`DELETE FROM trips WHERE id = $1`,
 			tripID,
 		); cleanupErr != nil {
-			t.Logf(
-				"cleanup active presence-guard trip: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM ride_requests
-				WHERE id = $1
-			`,
-			rideRequestID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup presence-guard ride request: %v",
-				cleanupErr,
-			)
+			t.Errorf("cleanup active presence-guard trip: %v", cleanupErr)
 		}
 	}()
 
@@ -1324,100 +1275,44 @@ func TestGoOfflineRejectsDriverWithActiveTrip(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
-
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
-
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
-	)
-
-	// ---------------------------------------------------------
-	// Preserve John's current presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence: %v",
-			err,
-		)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					last_heartbeat_at = $4,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
+
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
+	}
+	defer func() {
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
+		}
+	}()
+
+	johnUserID := driverFixture.UserID
+	johnVehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
 
 	// ---------------------------------------------------------
 	// Avoid interfering with an existing active trip.
@@ -1449,8 +1344,9 @@ func TestGoOfflineRejectsDriverWithActiveTrip(t *testing.T) {
 	}
 
 	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
+		t.Fatalf(
+			"isolated driver unexpectedly has %d active trips",
+			existingActiveTripCount,
 		)
 	}
 
@@ -1539,6 +1435,19 @@ func TestGoOfflineRejectsDriverWithActiveTrip(t *testing.T) {
 		)
 	}
 
+	defer func() {
+		if _, cleanupErr := db.Exec(
+			context.Background(),
+			`DELETE FROM ride_requests WHERE id = $1`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Errorf(
+				"cleanup presence-guard ride request: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
 	_, err = db.Exec(
 		ctx,
 		`
@@ -1592,32 +1501,13 @@ func TestGoOfflineRejectsDriverWithActiveTrip(t *testing.T) {
 		)
 	}
 	defer func() {
-		cleanupCtx := context.Background()
-
 		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM trips
-				WHERE id = $1
-			`,
+			context.Background(),
+			`DELETE FROM trips WHERE id = $1`,
 			tripID,
 		); cleanupErr != nil {
-			t.Logf(
+			t.Errorf(
 				"cleanup active presence-guard trip: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM ride_requests
-				WHERE id = $1
-			`,
-			rideRequestID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup presence-guard ride request: %v",
 				cleanupErr,
 			)
 		}
@@ -2477,110 +2367,29 @@ func TestHeartbeatSucceedsForBusyOnlineDriver(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf("acquire John dispatch fixture lock: %v", err)
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-	// ---------------------------------------------------------
-	// Preserve original heartbeat/location state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeading            *float64
-		originalSpeed              *float64
-		originalAccuracy           *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				heading,
-				speed,
-				accuracy,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeading,
-		&originalSpeed,
-		&originalAccuracy,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original heartbeat state: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					heading = $6,
-					speed = $7,
-					accuracy = $8,
-					last_heartbeat_at = $9,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeading,
-			originalSpeed,
-			originalAccuracy,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore heartbeat state: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
+
+	johnUserID := driverFixture.UserID
 
 	// ---------------------------------------------------------
 	// Put driver online and BUSY.
@@ -2769,110 +2578,29 @@ func TestHeartbeatRejectsOfflineDriverAndPreservesLocation(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf("acquire John dispatch fixture lock: %v", err)
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-	// ---------------------------------------------------------
-	// Preserve original state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeading            *float64
-		originalSpeed              *float64
-		originalAccuracy           *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				heading,
-				speed,
-				accuracy,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeading,
-		&originalSpeed,
-		&originalAccuracy,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original offline-heartbeat state: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					heading = $6,
-					speed = $7,
-					accuracy = $8,
-					last_heartbeat_at = $9,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeading,
-			originalSpeed,
-			originalAccuracy,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore offline heartbeat state: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
+
+	johnUserID := driverFixture.UserID
 
 	// ---------------------------------------------------------
 	// Establish deterministic OFFLINE location/heartbeat state.
@@ -3101,113 +2829,29 @@ func TestHeartbeatRejectsInvalidTelemetryAndPreservesState(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-	// ---------------------------------------------------------
-	// Preserve original state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeading            *float64
-		originalSpeed              *float64
-		originalAccuracy           *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				heading,
-				speed,
-				accuracy,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeading,
-		&originalSpeed,
-		&originalAccuracy,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original invalid-telemetry state: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					heading = $6,
-					speed = $7,
-					accuracy = $8,
-					last_heartbeat_at = $9,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeading,
-			originalSpeed,
-			originalAccuracy,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore invalid-telemetry state: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
+
+	johnUserID := driverFixture.UserID
 
 	// ---------------------------------------------------------
 	// Establish deterministic valid ONLINE + AVAILABLE state.
@@ -3488,112 +3132,29 @@ func TestUpdateAvailabilityValidatesManualStatuses(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-	); err != nil {
-		t.Fatalf(
-			"load original availability state: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-		); restoreErr != nil {
-			t.Logf(
-				"restore availability state: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
 
-	// Ensure the shared fixture is idle so valid manual transitions
-	// are allowed during this test.
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active trip: %v",
-			err,
-		)
-	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
-		)
-	}
+	johnUserID := driverFixture.UserID
 
 	presenceRepo :=
 		postgresrepo.NewDriverPresenceRepository(db)
@@ -3811,180 +3372,35 @@ func TestGoOfflineRejectsMissingPresenceRow(t *testing.T) {
 	defer db.Close()
 
 	// ---------------------------------------------------------
-	// 3. Serialize access to John's shared fixture.
+	// 3. Create disposable driver and presence fixtures.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-	// ---------------------------------------------------------
-	// 4. Preserve the COMPLETE driver_presence row.
-	// ---------------------------------------------------------
-
-	var (
-		originalDriverID           string
-		originalCompanyID          string
-		originalBranchID           *string
-		originalVehicleID          *string
-		originalAssignmentID       *string
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeading            *float64
-		originalSpeed              *float64
-		originalAccuracy           *float64
-		originalHeartbeat          *time.Time
-		originalCreatedAt          time.Time
-		originalUpdatedAt          time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				driver_id,
-				company_id,
-				branch_id,
-				vehicle_id,
-				assignment_id,
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				heading,
-				speed,
-				accuracy,
-				last_heartbeat_at,
-				created_at,
-				updated_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalDriverID,
-		&originalCompanyID,
-		&originalBranchID,
-		&originalVehicleID,
-		&originalAssignmentID,
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeading,
-		&originalSpeed,
-		&originalAccuracy,
-		&originalHeartbeat,
-		&originalCreatedAt,
-		&originalUpdatedAt,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence row: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
-	// ---------------------------------------------------------
-	// 5. Always restore the deleted presence row.
-	// ---------------------------------------------------------
-
 	defer func() {
-		restoreCtx := context.Background()
-
-		if _, restoreErr := db.Exec(
-			restoreCtx,
-			`
-				INSERT INTO driver_presence
-				(
-					driver_id,
-					company_id,
-					branch_id,
-					vehicle_id,
-					assignment_id,
-					is_online,
-					availability_status,
-					latitude,
-					longitude,
-					heading,
-					speed,
-					accuracy,
-					last_heartbeat_at,
-					created_at,
-					updated_at
-				)
-				VALUES
-				(
-					$1,$2,$3,$4,$5,
-					$6,$7,$8,$9,$10,
-					$11,$12,$13,$14,$15
-				)
-				ON CONFLICT (driver_id)
-				DO UPDATE SET
-					company_id = EXCLUDED.company_id,
-					branch_id = EXCLUDED.branch_id,
-					vehicle_id = EXCLUDED.vehicle_id,
-					assignment_id = EXCLUDED.assignment_id,
-					is_online = EXCLUDED.is_online,
-					availability_status = EXCLUDED.availability_status,
-					latitude = EXCLUDED.latitude,
-					longitude = EXCLUDED.longitude,
-					heading = EXCLUDED.heading,
-					speed = EXCLUDED.speed,
-					accuracy = EXCLUDED.accuracy,
-					last_heartbeat_at = EXCLUDED.last_heartbeat_at,
-					created_at = EXCLUDED.created_at,
-					updated_at = EXCLUDED.updated_at
-			`,
-			originalDriverID,
-			originalCompanyID,
-			originalBranchID,
-			originalVehicleID,
-			originalAssignmentID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeading,
-			originalSpeed,
-			originalAccuracy,
-			originalHeartbeat,
-			originalCreatedAt,
-			originalUpdatedAt,
-		); restoreErr != nil {
-			t.Logf(
-				"restore deleted driver presence row: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
 
+	johnUserID := driverFixture.UserID
+
 	// ---------------------------------------------------------
-	// 6. Temporarily delete John's presence row.
+	// 4. Delete only the disposable driver's presence row.
 	// ---------------------------------------------------------
 
 	result, err := db.Exec(
@@ -4117,166 +3533,29 @@ func TestUpdateAvailabilityRejectsMissingPresenceRow(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-	var (
-		originalDriverID           string
-		originalCompanyID          string
-		originalBranchID           *string
-		originalVehicleID          *string
-		originalAssignmentID       *string
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeading            *float64
-		originalSpeed              *float64
-		originalAccuracy           *float64
-		originalHeartbeat          *time.Time
-		originalCreatedAt          time.Time
-		originalUpdatedAt          time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				driver_id,
-				company_id,
-				branch_id,
-				vehicle_id,
-				assignment_id,
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				heading,
-				speed,
-				accuracy,
-				last_heartbeat_at,
-				created_at,
-				updated_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalDriverID,
-		&originalCompanyID,
-		&originalBranchID,
-		&originalVehicleID,
-		&originalAssignmentID,
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeading,
-		&originalSpeed,
-		&originalAccuracy,
-		&originalHeartbeat,
-		&originalCreatedAt,
-		&originalUpdatedAt,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence row: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
 	defer func() {
-		restoreCtx := context.Background()
-
-		if _, restoreErr := db.Exec(
-			restoreCtx,
-			`
-				INSERT INTO driver_presence
-				(
-					driver_id,
-					company_id,
-					branch_id,
-					vehicle_id,
-					assignment_id,
-					is_online,
-					availability_status,
-					latitude,
-					longitude,
-					heading,
-					speed,
-					accuracy,
-					last_heartbeat_at,
-					created_at,
-					updated_at
-				)
-				VALUES
-				(
-					$1,$2,$3,$4,$5,
-					$6,$7,$8,$9,$10,
-					$11,$12,$13,$14,$15
-				)
-				ON CONFLICT (driver_id)
-				DO UPDATE SET
-					company_id = EXCLUDED.company_id,
-					branch_id = EXCLUDED.branch_id,
-					vehicle_id = EXCLUDED.vehicle_id,
-					assignment_id = EXCLUDED.assignment_id,
-					is_online = EXCLUDED.is_online,
-					availability_status = EXCLUDED.availability_status,
-					latitude = EXCLUDED.latitude,
-					longitude = EXCLUDED.longitude,
-					heading = EXCLUDED.heading,
-					speed = EXCLUDED.speed,
-					accuracy = EXCLUDED.accuracy,
-					last_heartbeat_at = EXCLUDED.last_heartbeat_at,
-					created_at = EXCLUDED.created_at,
-					updated_at = EXCLUDED.updated_at
-			`,
-			originalDriverID,
-			originalCompanyID,
-			originalBranchID,
-			originalVehicleID,
-			originalAssignmentID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeading,
-			originalSpeed,
-			originalAccuracy,
-			originalHeartbeat,
-			originalCreatedAt,
-			originalUpdatedAt,
-		); restoreErr != nil {
-			t.Logf(
-				"restore deleted driver presence row: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
+
+	johnUserID := driverFixture.UserID
 
 	result, err := db.Exec(
 		ctx,
@@ -4405,184 +3684,35 @@ func TestHeartbeatRejectsMissingPresenceRow(t *testing.T) {
 	defer db.Close()
 
 	// ---------------------------------------------------------
-	// 3. Serialize access to John's shared fixture.
+	// 3. Create disposable driver and presence fixtures.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	const johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-	// ---------------------------------------------------------
-	// 4. Preserve the COMPLETE driver_presence row.
-	//
-	// Heartbeat must not recreate a missing presence row, so
-	// this shared fixture is temporarily removed and restored
-	// after the assertion.
-	// ---------------------------------------------------------
-
-	var (
-		originalDriverID           string
-		originalCompanyID          string
-		originalBranchID           *string
-		originalVehicleID          *string
-		originalAssignmentID       *string
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeading            *float64
-		originalSpeed              *float64
-		originalAccuracy           *float64
-		originalHeartbeat          *time.Time
-		originalCreatedAt          time.Time
-		originalUpdatedAt          time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				driver_id,
-				company_id,
-				branch_id,
-				vehicle_id,
-				assignment_id,
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				heading,
-				speed,
-				accuracy,
-				last_heartbeat_at,
-				created_at,
-				updated_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalDriverID,
-		&originalCompanyID,
-		&originalBranchID,
-		&originalVehicleID,
-		&originalAssignmentID,
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeading,
-		&originalSpeed,
-		&originalAccuracy,
-		&originalHeartbeat,
-		&originalCreatedAt,
-		&originalUpdatedAt,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence row: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
-	// ---------------------------------------------------------
-	// 5. Always restore the deleted presence row.
-	// ---------------------------------------------------------
-
 	defer func() {
-		restoreCtx := context.Background()
-
-		if _, restoreErr := db.Exec(
-			restoreCtx,
-			`
-				INSERT INTO driver_presence
-				(
-					driver_id,
-					company_id,
-					branch_id,
-					vehicle_id,
-					assignment_id,
-					is_online,
-					availability_status,
-					latitude,
-					longitude,
-					heading,
-					speed,
-					accuracy,
-					last_heartbeat_at,
-					created_at,
-					updated_at
-				)
-				VALUES
-				(
-					$1,$2,$3,$4,$5,
-					$6,$7,$8,$9,$10,
-					$11,$12,$13,$14,$15
-				)
-				ON CONFLICT (driver_id)
-				DO UPDATE SET
-					company_id = EXCLUDED.company_id,
-					branch_id = EXCLUDED.branch_id,
-					vehicle_id = EXCLUDED.vehicle_id,
-					assignment_id = EXCLUDED.assignment_id,
-					is_online = EXCLUDED.is_online,
-					availability_status = EXCLUDED.availability_status,
-					latitude = EXCLUDED.latitude,
-					longitude = EXCLUDED.longitude,
-					heading = EXCLUDED.heading,
-					speed = EXCLUDED.speed,
-					accuracy = EXCLUDED.accuracy,
-					last_heartbeat_at = EXCLUDED.last_heartbeat_at,
-					created_at = EXCLUDED.created_at,
-					updated_at = EXCLUDED.updated_at
-			`,
-			originalDriverID,
-			originalCompanyID,
-			originalBranchID,
-			originalVehicleID,
-			originalAssignmentID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeading,
-			originalSpeed,
-			originalAccuracy,
-			originalHeartbeat,
-			originalCreatedAt,
-			originalUpdatedAt,
-		); restoreErr != nil {
-			t.Logf(
-				"restore deleted driver presence row: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
 
+	johnUserID := driverFixture.UserID
+
 	// ---------------------------------------------------------
-	// 6. Temporarily delete John's presence row.
+	// 4. Delete only the disposable driver's presence row.
 	// ---------------------------------------------------------
 
 	result, err := db.Exec(
