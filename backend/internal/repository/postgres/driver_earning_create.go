@@ -43,12 +43,20 @@ func (r *DriverEarningRepository) CreateFromPaidPayment(
 			tf.id,
 			p.id,
 			p.amount,
+			CASE
+			    WHEN rr.matching_mode = 'FLEX'
+			        THEN ROUND(p.amount * 0.07, 2)
+			    ELSE 0
+			END,
 			0,
 			0,
 			0,
 			0,
-			0,
-			p.amount,
+			CASE
+			    WHEN rr.matching_mode = 'FLEX'
+			        THEN p.amount - ROUND(p.amount * 0.07, 2)
+			    ELSE p.amount
+			END,
 			p.currency,
 			'PENDING'
 		FROM payments p
@@ -57,6 +65,8 @@ func (r *DriverEarningRepository) CreateFromPaidPayment(
 		INNER JOIN trip_fares tf
 			ON tf.id = p.fare_id
 			AND tf.trip_id = t.id
+                INNER JOIN ride_requests rr
+                    ON rr.id = t.ride_request_id
 		WHERE p.id = $1
 		  AND p.status = 'PAID'
 		  AND t.status = 'COMPLETED'

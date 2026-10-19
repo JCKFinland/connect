@@ -79,21 +79,72 @@ func TestDeleteAuthorizedRequiresTerminalTrip(t *testing.T) {
 	// trips.driver_id uses users.id.
 	// ---------------------------------------------------------
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Logf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+	driverFixture, cleanupDriver, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupDriver(context.Background()); err != nil {
+			t.Logf("cleanup isolated driver fixture: %v", err)
+		}
+	}()
 
-		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
+	johnUserID := driverFixture.UserID
+	johnVehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
 
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
+	systemAdminUserID, cleanupAdmin, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated administrator user: %v", err)
+	}
+	defer func() {
+		if err := cleanupAdmin(context.Background()); err != nil {
+			t.Logf("cleanup isolated administrator: %v", err)
+		}
+	}()
 
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
+	var systemAdminRoleID string
+	if err := db.QueryRow(
+		ctx,
+		`SELECT id FROM roles WHERE name = 'SYSTEM_ADMIN'`,
+	).Scan(&systemAdminRoleID); err != nil {
+		t.Fatalf("resolve SYSTEM_ADMIN role: %v", err)
+	}
 
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`,
+		systemAdminUserID,
+		systemAdminRoleID,
+	); err != nil {
+		t.Fatalf("assign isolated SYSTEM_ADMIN role: %v", err)
+	}
 
-		systemAdminUserID = "ac03d190-c1fb-44b7-a7b5-08e3a43b29af"
-	)
+	defer func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2`,
+			systemAdminUserID,
+			systemAdminRoleID,
+		); err != nil {
+			t.Logf("cleanup isolated administrator role: %v", err)
+		}
+	}()
 
 	// ---------------------------------------------------------
 	// 5. Construct the real service dependencies used by

@@ -127,6 +127,39 @@ func (s *tripService) CompleteTrip(
 				)
 			}
 
+			// Pricing mode belongs to the originating ride request.
+			// Resolve it inside the locked completion transaction.
+			rideRequests :=
+				postgresrepo.NewRideRequestRepositoryWithDB(tx)
+
+			rideRequest, err := rideRequests.GetByID(
+				ctx,
+				currentTrip.RideRequestID,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"get originating ride request for completion: %w",
+					err,
+				)
+			}
+
+			if rideRequest.CustomerID != currentTrip.CustomerID {
+				return fmt.Errorf(
+					"trip customer does not match originating ride request",
+				)
+			}
+
+			if rideRequest.MatchingMode != models.RideMatchingModeStandard &&
+				rideRequest.MatchingMode != models.RideMatchingModeFlex {
+				return fmt.Errorf(
+					"unsupported trip matching mode: %s",
+					rideRequest.MatchingMode,
+				)
+			}
+
+			isFlex := rideRequest.MatchingMode ==
+				models.RideMatchingModeFlex
+
 			if currentTrip.PricingProfileID == nil ||
 				*currentTrip.PricingProfileID == "" {
 				return fmt.Errorf(
@@ -160,14 +193,13 @@ func (s *tripService) CompleteTrip(
 
 			if currentTrip.ServiceCategoryID == nil ||
 				*currentTrip.ServiceCategoryID == "" {
-				return fmt.Errorf(
-					"trip has no frozen service category",
-				)
-			}
-
-			if pricingProfile.ServiceCategoryID !=
+				if !isFlex {
+					return fmt.Errorf(
+						"trip has no frozen service category",
+					)
+				}
+			} else if pricingProfile.ServiceCategoryID !=
 				*currentTrip.ServiceCategoryID {
-
 				return fmt.Errorf(
 					"frozen pricing profile service category does not match trip service category",
 				)
@@ -256,45 +288,74 @@ func (s *tripService) CompleteTrip(
 			// trip lifecycle state is changed.
 			// -------------------------------------------------
 
-			calculatedFare, err :=
-				s.fareCalculator.Calculate(
+			var calculatedFare *models.TripFare
+
+			if isFlex {
+				// FLEX is a fixed contractual fare. GPS measurements
+				// remain authoritative operational evidence, but must
+				// never recalculate the negotiated passenger price.
+				contract, err :=
+					postgresrepo.ResolveConfirmedFlexFareContract(
+						ctx,
+						tx,
+						currentTrip.ID,
+					)
+				if err != nil {
+					return fmt.Errorf(
+						"resolve authorized FLEX fare contract: %w",
+						err,
+					)
+				}
+
+				calculatedFare, err = fare.BuildFlexFixedFare(
+					fare.FlexFixedFareInput{
+						TripID:           currentTrip.ID,
+						AmountCents:      contract.AmountCents,
+						Currency:         contract.Currency,
+						PricingProfileID: contract.PricingProfileID,
+						PricingVersion:   contract.PricingVersion,
+						CalculatedAt:     time.Now().UTC(),
+					},
+				)
+				if err != nil {
+					return fmt.Errorf(
+						"build authorized FLEX fixed fare: %w",
+						err,
+					)
+				}
+			} else {
+				// STANDARD retains the existing GPS-metered
+				// calculation and frozen pricing inputs.
+				calculatedFare, err = s.fareCalculator.Calculate(
 					fare.CalculationInput{
 						TripID: currentTrip.ID,
 
-						DistanceMeters: measurement.DistanceMeters,
-
+						DistanceMeters:  measurement.DistanceMeters,
 						DurationSeconds: measurement.DurationSeconds,
-
-						WaitingSeconds: measurement.WaitingDurationSeconds,
+						WaitingSeconds:  measurement.WaitingDurationSeconds,
 
 						Pricing: fare.PricingSnapshot{
-							BaseFare: pricingProfile.BaseFare,
-
-							DistanceRatePerKM: pricingProfile.DistanceRatePerKM,
-
-							TimeRatePerMinute: pricingProfile.TimeRatePerMinute,
-
+							BaseFare:             pricingProfile.BaseFare,
+							DistanceRatePerKM:    pricingProfile.DistanceRatePerKM,
+							TimeRatePerMinute:    pricingProfile.TimeRatePerMinute,
 							WaitingRatePerMinute: pricingProfile.WaitingRatePerMinute,
-
-							BookingFee: pricingProfile.BookingFee,
-
-							SurgeMultiplier: pricingProfile.SurgeMultiplier,
-
-							Currency: pricingProfile.Currency,
-
-							PricingVersion: pricingProfile.Version,
+							BookingFee:           pricingProfile.BookingFee,
+							SurgeMultiplier:      pricingProfile.SurgeMultiplier,
+							Currency:             pricingProfile.Currency,
+							PricingVersion:       pricingProfile.Version,
 						},
 					},
 				)
-			if err != nil {
-				return fmt.Errorf(
-					"calculate trip fare: %w",
-					err,
-				)
-			}
+				if err != nil {
+					return fmt.Errorf(
+						"calculate trip fare: %w",
+						err,
+					)
+				}
 
-			calculatedFare.PricingProfileID =
-				currentTrip.PricingProfileID
+				calculatedFare.PricingProfileID =
+					currentTrip.PricingProfileID
+			}
 
 			// -------------------------------------------------
 			// Persist authoritative operational meter values.
@@ -398,6 +459,26 @@ func (s *tripService) CompleteTrip(
 				currentTrip.ID,
 			); err != nil {
 				return err
+			}
+
+			// -------------------------------------------------
+			// Atomically create the durable FLEX settlement.
+			//
+			// This uses the current completion transaction.
+			// No Stripe request occurs during trip completion.
+			// -------------------------------------------------
+
+			if isFlex {
+				if _, err := postgresrepo.CreateFlexSettlementFromCompletedTripTx(
+					ctx,
+					tx,
+					currentTrip.ID,
+				); err != nil {
+					return fmt.Errorf(
+						"create completed FLEX trip settlement: %w",
+						err,
+					)
+				}
 			}
 
 			completedFare = calculatedFare

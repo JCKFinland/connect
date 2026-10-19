@@ -72,7 +72,16 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 	// 3. Create an isolated driver fixture.
 	// ---------------------------------------------------------
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Logf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -284,6 +293,55 @@ func TestCompleteTripRollsBackWhenFarePersistenceFails(
 
 	rideRequestID := uuid.NewString()
 	tripID := uuid.NewString()
+
+	// Register cleanup before fixture inserts so partial setup failures
+	// cannot leave test-owned records behind.
+	//
+	// Deferred cleanup executes before the earlier driver fixture
+	// cleanup and before db.Close(), while the pool remains open.
+	// Only this test's generated records are removed.
+	defer func() {
+		cleanupCtx := context.Background()
+
+		for _, item := range []struct {
+			name  string
+			query string
+			id    string
+		}{
+			{
+				name:  "rollback trip",
+				query: "DELETE FROM trips WHERE id = $1",
+				id:    tripID,
+			},
+			{
+				name:  "rollback ride request",
+				query: "DELETE FROM ride_requests WHERE id = $1",
+				id:    rideRequestID,
+			},
+			{
+				name:  "rollback pricing profile",
+				query: "DELETE FROM fare_pricing_profiles WHERE id = $1",
+				id:    pricingProfileID,
+			},
+			{
+				name:  "rollback service category",
+				query: "DELETE FROM service_categories WHERE id = $1",
+				id:    serviceCategoryID,
+			},
+		} {
+			if _, cleanupErr := db.Exec(
+				cleanupCtx,
+				item.query,
+				item.id,
+			); cleanupErr != nil {
+				t.Errorf(
+					"cleanup %s: %v",
+					item.name,
+					cleanupErr,
+				)
+			}
+		}
+	}()
 
 	now := time.Now().UTC()
 	pricingEffectiveFrom := now.Add(-time.Hour)
@@ -982,7 +1040,16 @@ func runTerminalCompletionScenario(
 	// 3. Create an isolated driver fixture.
 	// ---------------------------------------------------------
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Logf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -1243,6 +1310,66 @@ func runTerminalCompletionScenario(
 	now := time.Now().UTC()
 	pricingEffectiveFrom := now.Add(-time.Hour)
 
+	defer func() {
+		cleanupCtx := context.Background()
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM trips
+				WHERE id = $1
+			`,
+			tripID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback trip: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM ride_requests
+				WHERE id = $1
+			`,
+			rideRequestID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback ride request: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM fare_pricing_profiles
+				WHERE id = $1
+			`,
+			pricingProfileID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback pricing profile: %v",
+				cleanupErr,
+			)
+		}
+
+		if _, cleanupErr := db.Exec(
+			cleanupCtx,
+			`
+				DELETE FROM service_categories
+				WHERE id = $1
+			`,
+			serviceCategoryID,
+		); cleanupErr != nil {
+			t.Logf(
+				"cleanup rollback service category: %v",
+				cleanupErr,
+			)
+		}
+	}()
+
 	_, err = db.Exec(
 		ctx,
 		`
@@ -1454,66 +1581,6 @@ func runTerminalCompletionScenario(
 			err,
 		)
 	}
-
-	defer func() {
-		cleanupCtx := context.Background()
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM trips
-				WHERE id = $1
-			`,
-			tripID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup rollback trip: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM ride_requests
-				WHERE id = $1
-			`,
-			rideRequestID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup rollback ride request: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM fare_pricing_profiles
-				WHERE id = $1
-			`,
-			pricingProfileID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup rollback pricing profile: %v",
-				cleanupErr,
-			)
-		}
-
-		if _, cleanupErr := db.Exec(
-			cleanupCtx,
-			`
-				DELETE FROM service_categories
-				WHERE id = $1
-			`,
-			serviceCategoryID,
-		); cleanupErr != nil {
-			t.Logf(
-				"cleanup rollback service category: %v",
-				cleanupErr,
-			)
-		}
-	}()
 
 	// The rollback scenario deliberately creates a second active trip.
 	// This represents conflicting operational state that must prevent release.

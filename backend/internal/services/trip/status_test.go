@@ -97,19 +97,44 @@ func TestUpdateStatusRejectsDirectCompletion(t *testing.T) {
 	// trips.driver_id and driver_presence.driver_id use users.id.
 	// ---------------------------------------------------------
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Logf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+	driverFixture, cleanupDriver, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupDriver(context.Background()); err != nil {
+			t.Logf("cleanup isolated driver fixture: %v", err)
+		}
+	}()
 
-		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
+	johnUserID := driverFixture.UserID
+	johnVehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
 
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
-
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
-	)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
+	}
+	defer func() {
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Logf("cleanup isolated driver presence: %v", err)
+		}
+	}()
 
 	// ---------------------------------------------------------
 	// 5. Ensure John has DRIVER authorization for the real
