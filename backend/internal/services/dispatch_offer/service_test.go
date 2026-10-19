@@ -13,90 +13,129 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func TestDispatchOfferAccept(t *testing.T) {
 	ctx := context.Background()
 
-	// ---------------------------------------------------------
-	// Move to backend root so config.Load() can find .env.
-	// ---------------------------------------------------------
-
 	originalDir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf(
-			"get working directory: %v",
-			err,
-		)
+		t.Fatalf("get working directory: %v", err)
 	}
 
 	if err := os.Chdir("../../.."); err != nil {
-		t.Fatalf(
-			"change to backend root: %v",
-			err,
-		)
+		t.Fatalf("change to backend root: %v", err)
 	}
 
 	defer func() {
 		_ = os.Chdir(originalDir)
 	}()
 
-	// ---------------------------------------------------------
-	// Load CONNECT configuration.
-	// ---------------------------------------------------------
-
 	cfg, err := config.Load()
 	if err != nil {
-		t.Fatalf(
-			"load CONNECT configuration: %v",
-			err,
-		)
+		t.Fatalf("load CONNECT configuration: %v", err)
 	}
 
-	// ---------------------------------------------------------
-	// Connect using CONNECT's normal PostgreSQL configuration.
-	// ---------------------------------------------------------
+	if cfg.Database.Name != "connect_integration_test" {
+		t.Fatalf(
+			"unsafe integration database: %s",
+			cfg.Database.Name,
+		)
+	}
 
 	db, err := database.Connect(cfg)
 	if err != nil {
-		t.Fatalf(
-			"connect database: %v",
-			err,
-		)
+		t.Fatalf("connect database: %v", err)
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	// Create an independent customer.
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer: %v", err)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer: %v", err)
+		}
+	}()
+
+	// Create an independent company, branch, fleet, driver,
+	// vehicle, and driver assignment.
+	driverFixture, cleanupDriver, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupDriver(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver: %v", err)
+		}
+	}()
+
+	// Create a disposable ride request.
+	rideRequestID := uuid.NewString()
+
+	_, err = db.Exec(
+		ctx,
+		`
+        INSERT INTO ride_requests (
+            id,
+            customer_id,
+            pickup_address,
+            pickup_latitude,
+            pickup_longitude,
+            destination_address,
+            destination_latitude,
+            destination_longitude,
+            requested_vehicle_type,
+            passenger_count,
+            status,
+            notes,
+            requested_at,
+            expires_at,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            $1, $2,
+            'CONNECT isolated offer pickup',
+            60.2055, 24.6559,
+            'CONNECT isolated offer destination',
+            60.1719, 24.9414,
+            'STANDARD',
+            1,
+            'MATCHING',
+            'CONNECT isolated dispatch-offer lifecycle test',
+            NOW(),
+            NOW() + INTERVAL '10 minutes',
+            NOW(),
+            NOW()
+        )
+        `,
+		rideRequestID,
+		customerID,
+	)
+	if err != nil {
+		t.Fatalf("create isolated ride request: %v", err)
+	}
+
+	defer func() {
+		_, err := db.Exec(
 			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+			`DELETE FROM ride_requests WHERE id = $1`,
+			rideRequestID,
+		)
+		if err != nil {
+			t.Errorf("cleanup isolated ride request: %v", err)
 		}
 	}()
 
 	repo := postgresrepo.NewDispatchOfferRepository(db)
-
-	expireStaleTestOffers(
-		t,
-		repo,
-	)
 
 	service := NewService(
 		Dependencies{
@@ -106,50 +145,30 @@ func TestDispatchOfferAccept(t *testing.T) {
 		},
 	)
 
-	// ---------------------------------------------------------
-	// Create test offer.
-	// ---------------------------------------------------------
-
+	// The operational offer driver references drivers.id.
 	offer := &models.DispatchOffer{
-		RideRequestID: "65836dd1-d6e2-4c67-a349-50e081975c78",
-
-		DriverID:  "39175f42-0c89-4d45-96be-ed5367506e36",
-		VehicleID: "6dce24b5-b257-447a-99e0-ef439fbd0e17",
-
-		CompanyID: "345c5e3e-b07a-4e16-837d-e5d32254d6f3",
-		BranchID:  "186f7570-6902-41a2-a1f9-d509a4d90fcb",
-		FleetID:   "dc46fc5c-7290-462c-a423-22b3c46b7c99",
+		RideRequestID: rideRequestID,
+		DriverID:      driverFixture.DriverID,
+		VehicleID:     driverFixture.VehicleID,
+		CompanyID:     driverFixture.CompanyID,
+		BranchID:      driverFixture.BranchID,
+		FleetID:       driverFixture.FleetID,
+		AssignmentID:  &driverFixture.AssignmentID,
 	}
 
-	if err := service.Create(
-		ctx,
-		offer,
-	); err != nil {
-		t.Fatalf(
-			"create dispatch offer: %v",
-			err,
-		)
+	if err := service.Create(ctx, offer); err != nil {
+		t.Fatalf("create isolated dispatch offer: %v", err)
 	}
 
-	// ---------------------------------------------------------
-	// Always clean test row afterward.
-	// ---------------------------------------------------------
-
+	// Remove only this test's offer.
 	defer func() {
-		_, cleanupErr := db.Exec(
-			ctx,
-			`
-				DELETE FROM dispatch_offers
-				WHERE id = $1
-			`,
+		_, err := db.Exec(
+			context.Background(),
+			`DELETE FROM dispatch_offers WHERE id = $1`,
 			offer.ID,
 		)
-
-		if cleanupErr != nil {
-			t.Logf(
-				"cleanup dispatch offer: %v",
-				cleanupErr,
-			)
+		if err != nil {
+			t.Errorf("cleanup isolated dispatch offer: %v", err)
 		}
 	}()
 
@@ -258,109 +277,105 @@ func TestDispatchOfferReject(t *testing.T) {
 		t.Fatalf("load CONNECT configuration: %v", err)
 	}
 
+	if cfg.Database.Name != "connect_integration_test" {
+		t.Fatalf(
+			"unsafe integration database: %s",
+			cfg.Database.Name,
+		)
+	}
+
 	db, err := database.Connect(cfg)
 	if err != nil {
 		t.Fatalf("connect database: %v", err)
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	// Create an independent customer.
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer: %v", err)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer: %v", err)
+		}
+	}()
+
+	// Create an independent company, branch, fleet, driver,
+	// vehicle, and driver assignment.
+	driverFixture, cleanupDriver, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupDriver(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver: %v", err)
+		}
+	}()
+
+	// Create a disposable ride request.
+	rideRequestID := uuid.NewString()
+
+	_, err = db.Exec(
+		ctx,
+		`
+        INSERT INTO ride_requests (
+            id,
+            customer_id,
+            pickup_address,
+            pickup_latitude,
+            pickup_longitude,
+            destination_address,
+            destination_latitude,
+            destination_longitude,
+            requested_vehicle_type,
+            passenger_count,
+            status,
+            notes,
+            requested_at,
+            expires_at,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            $1, $2,
+            'CONNECT isolated offer pickup',
+            60.2055, 24.6559,
+            'CONNECT isolated offer destination',
+            60.1719, 24.9414,
+            'STANDARD',
+            1,
+            'MATCHING',
+            'CONNECT isolated dispatch-offer lifecycle test',
+            NOW(),
+            NOW() + INTERVAL '10 minutes',
+            NOW(),
+            NOW()
+        )
+        `,
+		rideRequestID,
+		customerID,
+	)
+	if err != nil {
+		t.Fatalf("create isolated ride request: %v", err)
+	}
+
+	defer func() {
+		_, err := db.Exec(
 			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+			`DELETE FROM ride_requests WHERE id = $1`,
+			rideRequestID,
+		)
+		if err != nil {
+			t.Errorf("cleanup isolated ride request: %v", err)
 		}
 	}()
 
 	repo := postgresrepo.NewDispatchOfferRepository(db)
-
-	expireStaleTestOffers(
-		t,
-		repo,
-	)
-
-	const rideRequestID = "65836dd1-d6e2-4c67-a349-50e081975c78"
-
-	// ---------------------------------------------------------
-	// Preserve the original ride-request status.
-	// ---------------------------------------------------------
-
-	var originalStatus string
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT status
-			FROM ride_requests
-			WHERE id = $1
-		`,
-		rideRequestID,
-	).Scan(&originalStatus); err != nil {
-		t.Fatalf(
-			"get original ride request status: %v",
-			err,
-		)
-	}
-
-	defer func() {
-		_, restoreErr := db.Exec(
-			ctx,
-			`
-				UPDATE ride_requests
-				SET
-					status = $2,
-					updated_at = NOW()
-				WHERE id = $1
-			`,
-			rideRequestID,
-			originalStatus,
-		)
-
-		if restoreErr != nil {
-			t.Logf(
-				"restore ride request status: %v",
-				restoreErr,
-			)
-		}
-	}()
-
-	// ---------------------------------------------------------
-	// A live dispatch offer belongs to a MATCHING request.
-	// ---------------------------------------------------------
-
-	if _, err := db.Exec(
-		ctx,
-		`
-			UPDATE ride_requests
-			SET
-				status = 'MATCHING',
-				updated_at = NOW()
-			WHERE id = $1
-		`,
-		rideRequestID,
-	); err != nil {
-		t.Fatalf(
-			"prepare MATCHING ride request: %v",
-			err,
-		)
-	}
 
 	service := NewService(
 		Dependencies{
@@ -370,33 +385,31 @@ func TestDispatchOfferReject(t *testing.T) {
 		},
 	)
 
+	// The operational offer driver references drivers.id.
 	offer := &models.DispatchOffer{
 		RideRequestID: rideRequestID,
-
-		DriverID:  "39175f42-0c89-4d45-96be-ed5367506e36",
-		VehicleID: "6dce24b5-b257-447a-99e0-ef439fbd0e17",
-
-		CompanyID: "345c5e3e-b07a-4e16-837d-e5d32254d6f3",
-		BranchID:  "186f7570-6902-41a2-a1f9-d509a4d90fcb",
-		FleetID:   "dc46fc5c-7290-462c-a423-22b3c46b7c99",
+		DriverID:      driverFixture.DriverID,
+		VehicleID:     driverFixture.VehicleID,
+		CompanyID:     driverFixture.CompanyID,
+		BranchID:      driverFixture.BranchID,
+		FleetID:       driverFixture.FleetID,
+		AssignmentID:  &driverFixture.AssignmentID,
 	}
 
-	if err := service.Create(
-		ctx,
-		offer,
-	); err != nil {
-		t.Fatalf(
-			"create dispatch offer: %v",
-			err,
-		)
+	if err := service.Create(ctx, offer); err != nil {
+		t.Fatalf("create isolated dispatch offer: %v", err)
 	}
 
+	// Remove only this test's offer.
 	defer func() {
-		_, _ = db.Exec(
-			ctx,
+		_, err := db.Exec(
+			context.Background(),
 			`DELETE FROM dispatch_offers WHERE id = $1`,
 			offer.ID,
 		)
+		if err != nil {
+			t.Errorf("cleanup isolated dispatch offer: %v", err)
+		}
 	}()
 
 	rejected, err := service.Reject(
