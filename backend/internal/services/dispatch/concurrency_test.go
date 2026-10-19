@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
@@ -68,7 +67,17 @@ func TestCreateOfferConcurrentSameRide(t *testing.T) {
 	// 3. Create an isolated eligible driver fixture.
 	// ---------------------------------------------------------
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -582,7 +591,17 @@ func TestAcceptOfferConcurrentSameOffer(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	// A disposable hierarchy prevents existing active trips from silently
 	// skipping the acceptance regression. Never mutate John's shared fixture.
@@ -1249,7 +1268,17 @@ func TestDispatchRetryBackoffPersistence(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	rideRequestID := uuid.NewString()
 	now := time.Now().UTC()
@@ -1542,7 +1571,18 @@ func TestCreateOfferResetsDispatchRetryState(t *testing.T) {
 		)
 	}
 	defer db.Close()
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -1921,7 +1961,17 @@ func TestCreateOfferRejectsExpiredRideAndPersistsExpiredState(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	rideRequestID := uuid.NewString()
 
@@ -2205,7 +2255,17 @@ func TestCreateOfferCapsOfferExpiryAtRideExpiry(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -2587,6 +2647,7 @@ func TestCreateOfferRejectsDriverWithStaleHeartbeat(t *testing.T) {
 			"get working directory: %v",
 			err,
 		)
+
 	}
 
 	if err := os.Chdir("../../.."); err != nil {
@@ -2628,47 +2689,50 @@ func TestCreateOfferRejectsDriverWithStaleHeartbeat(t *testing.T) {
 	}
 	defer db.Close()
 
-	// ---------------------------------------------------------
-	// 3. Serialize access to John's shared dispatch fixture.
-	// ---------------------------------------------------------
-
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	// ---------------------------------------------------------
+	// Use a disposable driver hierarchy instead of John's shared records.
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
+		}
+	}()
 
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
+	}
+	defer func() {
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
+		}
+	}()
 
-		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
-	)
+	johnUserID := driverFixture.UserID
+	johnDriverID := driverFixture.DriverID
 
 	offerRepo :=
 		postgresrepo.NewDispatchOfferRepository(db)
 
 	// ---------------------------------------------------------
+	// 4. Remove only genuinely expired pending offers	// ---------------------------------------------------------
 	// 4. Remove only genuinely expired pending offers before
 	//    checking whether John's controlled fixture is free.
 	// ---------------------------------------------------------
@@ -2683,101 +2747,17 @@ func TestCreateOfferRejectsDriverWithStaleHeartbeat(t *testing.T) {
 		)
 	}
 
-	var existingPendingOfferCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM dispatch_offers
-			WHERE driver_id = $1
-			  AND status = 'PENDING'
-		`,
-		johnDriverID,
-	).Scan(
-		&existingPendingOfferCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing pending driver offer: %v",
-			err,
-		)
-	}
-
-	if existingPendingOfferCount != 0 {
-		t.Skip(
-			"John already has an active PENDING dispatch offer",
-		)
-	}
+	// Isolated drivers have no preexisting pending offers.
 
 	// ---------------------------------------------------------
+	// 5. Preserve John's complete relevant presence state.	// ---------------------------------------------------------
 	// 5. Preserve John's complete relevant presence state.
 	// ---------------------------------------------------------
 
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence: %v",
-			err,
-		)
-	}
-
-	defer func() {
-		_, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		)
-
-		if restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
-		}
-	}()
+	// The isolated presence record is removed during cleanup.
 
 	// ---------------------------------------------------------
+	// 6. Make John look AVAILABLE	// ---------------------------------------------------------
 	// 6. Make John look AVAILABLE but deliberately stale.
 	//
 	// Everything except heartbeat freshness is valid.
@@ -3087,6 +3067,7 @@ func TestCreateOfferRejectsDriverWithFutureHeartbeat(t *testing.T) {
 			"get working directory: %v",
 			err,
 		)
+
 	}
 
 	if err := os.Chdir("../../.."); err != nil {
@@ -3128,47 +3109,50 @@ func TestCreateOfferRejectsDriverWithFutureHeartbeat(t *testing.T) {
 	}
 	defer db.Close()
 
-	// ---------------------------------------------------------
-	// 3. Serialize access to John's shared dispatch fixture.
-	// ---------------------------------------------------------
-
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	// ---------------------------------------------------------
+	// Use disposable driver records rather than John's shared fixture.
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
+		}
+	}()
 
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
+	}
+	defer func() {
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
+		}
+	}()
 
-		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
-	)
+	johnUserID := driverFixture.UserID
+	johnDriverID := driverFixture.DriverID
 
 	offerRepo :=
 		postgresrepo.NewDispatchOfferRepository(db)
 
 	// ---------------------------------------------------------
+	// 4. Remove only genuinely expired pending offers	// ---------------------------------------------------------
 	// 4. Remove only genuinely expired pending offers before
 	//    checking whether John's controlled fixture is free.
 	// ---------------------------------------------------------
@@ -3183,101 +3167,16 @@ func TestCreateOfferRejectsDriverWithFutureHeartbeat(t *testing.T) {
 		)
 	}
 
-	var existingPendingOfferCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM dispatch_offers
-			WHERE driver_id = $1
-			  AND status = 'PENDING'
-		`,
-		johnDriverID,
-	).Scan(
-		&existingPendingOfferCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing pending driver offer: %v",
-			err,
-		)
-	}
-
-	if existingPendingOfferCount != 0 {
-		t.Skip(
-			"John already has an active PENDING dispatch offer",
-		)
-	}
+	// Isolated drivers have no preexisting pending offers.
 
 	// ---------------------------------------------------------
+	// 5. Preserve John's complete relevant presence state.	// ---------------------------------------------------------
 	// 5. Preserve John's complete relevant presence state.
 	// ---------------------------------------------------------
 
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
+	// Isolated presence is removed by its cleanup function.
 
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence: %v",
-			err,
-		)
-	}
-
-	defer func() {
-		_, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		)
-
-		if restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
-		}
-	}()
-
-	// 6. Make John look AVAILABLE but deliberately future-dated.
+	// 6. Make John look AVAILABLE	// 6. Make John look AVAILABLE but deliberately future-dated.
 	//
 	// Everything except heartbeat timestamp validity is correct.
 	// Dispatch must reject heartbeats that appear to come from
@@ -3582,6 +3481,7 @@ func TestCreateOfferRejectsDriverWithMissingHeartbeat(t *testing.T) {
 			"get working directory: %v",
 			err,
 		)
+
 	}
 
 	if err := os.Chdir("../../.."); err != nil {
@@ -3623,49 +3523,44 @@ func TestCreateOfferRejectsDriverWithMissingHeartbeat(t *testing.T) {
 	}
 	defer db.Close()
 
-	// ---------------------------------------------------------
-	// 3. Serialize access to John's shared dispatch fixture.
-	// ---------------------------------------------------------
-
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
-	)
-
-	offerRepo :=
-		postgresrepo.NewDispatchOfferRepository(db)
-
 	// ---------------------------------------------------------
+	// 3. Create disposable driver and presence fixtures.
+	driverFixture, cleanupDriverFixture, err := testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
+		}
+	}()
+	cleanupPresence, err := testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
+	}
+	defer func() {
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
+		}
+	}()
+	johnUserID := driverFixture.UserID
+	johnDriverID := driverFixture.DriverID
+	offerRepo := postgresrepo.NewDispatchOfferRepository(db)
+
 	// 4. Remove only genuinely expired pending offers before
-	//    checking whether John's controlled fixture is free.
+	//    using the isolated driver fixture.
 	// ---------------------------------------------------------
 
 	if _, err := offerRepo.ExpireStalePending(
@@ -3678,101 +3573,9 @@ func TestCreateOfferRejectsDriverWithMissingHeartbeat(t *testing.T) {
 		)
 	}
 
-	var existingPendingOfferCount int
+	// Isolated presence is owned by the fixture cleanup.
 
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM dispatch_offers
-			WHERE driver_id = $1
-			  AND status = 'PENDING'
-		`,
-		johnDriverID,
-	).Scan(
-		&existingPendingOfferCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing pending driver offer: %v",
-			err,
-		)
-	}
-
-	if existingPendingOfferCount != 0 {
-		t.Skip(
-			"John already has an active PENDING dispatch offer",
-		)
-	}
-
-	// ---------------------------------------------------------
-	// 5. Preserve John's complete relevant presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original driver presence: %v",
-			err,
-		)
-	}
-
-	defer func() {
-		_, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		)
-
-		if restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
-		}
-	}()
-	// ---------------------------------------------------------
-	// 6. Make John look AVAILABLE but without a heartbeat.
+	// 6. Make the isolated driver AVAILABLE but without a heartbeat.
 	//
 	// Everything except heartbeat presence is valid.
 	// A driver with no heartbeat timestamp is not dispatchable.
@@ -3936,7 +3739,7 @@ func TestCreateOfferRejectsDriverWithMissingHeartbeat(t *testing.T) {
 	// so ErrNoAvailableDrivers and successful dispatch are both
 	// acceptable outcomes.
 	//
-	// The invariant is that stale John must never receive it.
+	// The invariant is that the driver without a heartbeat must never receive it.
 	// ---------------------------------------------------------
 
 	offer, err := service.CreateOffer(
@@ -3968,7 +3771,7 @@ func TestCreateOfferRejectsDriverWithMissingHeartbeat(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 11. Verify persistence also contains no offer for John.
+	// 11. Verify persistence also contains no offer for the isolated driver.
 	// ---------------------------------------------------------
 
 	var johnOfferCount int
@@ -4000,7 +3803,7 @@ func TestCreateOfferRejectsDriverWithMissingHeartbeat(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 12. Verify John's stale presence was not mutated merely
+	// 12. Verify the isolated driver presence was not mutated merely
 	//     because dispatch rejected him.
 	// ---------------------------------------------------------
 
@@ -4062,6 +3865,7 @@ func TestDispatchRideRejectsDriverWithStaleHeartbeat(t *testing.T) {
 			"get working directory: %v",
 			err,
 		)
+
 	}
 
 	if err := os.Chdir("../../.."); err != nil {
@@ -4099,146 +3903,53 @@ func TestDispatchRideRejectsDriverWithStaleHeartbeat(t *testing.T) {
 	}
 	defer db.Close()
 
-	// ---------------------------------------------------------
-	// Serialize access to John's shared dispatch fixture.
-	// ---------------------------------------------------------
-
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
-		}
-	}()
-
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-
-		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
-	)
-
-	// ---------------------------------------------------------
-	// Make sure John is not already committed to an active trip.
-	// ---------------------------------------------------------
-
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active John trip: %v",
-			err,
-		)
-	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
-		)
-	}
-
-	// ---------------------------------------------------------
-	// Preserve John's presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original John presence: %v",
-			err,
-		)
-	}
-
-	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John presence: %v",
-				restoreErr,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
 	// ---------------------------------------------------------
-	// Make John otherwise eligible but with a stale heartbeat.
+	// Create isolated driver and presence fixtures.
+	// ---------------------------------------------------------
+
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
+		}
+	}()
+
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
+	}
+	defer func() {
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
+		}
+	}()
+
+	johnUserID := driverFixture.UserID
+	johnDriverID := driverFixture.DriverID
+
+	// Isolated drivers have no preexisting active trips.
+
+	// Isolated presence is removed by fixture cleanup.
+
+	// ---------------------------------------------------------
+	// Make the isolated driver otherwise eligible but with a stale heartbeat.
 	// ---------------------------------------------------------
 
 	staleHeartbeat :=
@@ -4382,7 +4093,7 @@ func TestDispatchRideRejectsDriverWithStaleHeartbeat(t *testing.T) {
 	// Another legitimate driver may be selected, so successful
 	// dispatch and ErrNoAvailableDrivers are both acceptable.
 	//
-	// John specifically must never be selected.
+	// The isolated stale-heartbeat driver must never be selected.
 	// ---------------------------------------------------------
 
 	trip, err := service.DispatchRide(
@@ -4446,7 +4157,7 @@ func TestDispatchRideRejectsDriverWithStaleHeartbeat(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// John's presence must not be mutated by rejecting him.
+	// The isolated driver's presence must not be mutated by rejecting him.
 	// ---------------------------------------------------------
 
 	var (
@@ -4564,6 +4275,7 @@ func TestRejectOfferDoesNotResurrectExpiredRide(t *testing.T) {
 			"get working directory: %v",
 			err,
 		)
+
 	}
 
 	if err := os.Chdir("../../.."); err != nil {
@@ -4594,88 +4306,37 @@ func TestRejectOfferDoesNotResurrectExpiredRide(t *testing.T) {
 	}
 	defer db.Close()
 
-	// This test uses John's operational driver fixture because
-	// dispatch_offers.driver_id has a foreign-key relationship
-	// to drivers.id.
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-
-		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
-
-		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
-
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
-
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
-	)
-
-	offerRepo :=
-		postgresrepo.NewDispatchOfferRepository(db)
-
-	// Remove only genuinely stale offers before checking whether
-	// the shared fixture is currently available.
-	if _, err := offerRepo.ExpireStalePending(
-		ctx,
-		time.Now().UTC(),
-	); err != nil {
-		t.Fatalf(
-			"expire stale offers before rejection lifecycle test: %v",
-			err,
-		)
+	// Create disposable organizational and driver records.
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
+	defer func() {
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
+		}
+	}()
 
-	var existingPendingOfferCount int
+	johnDriverID := driverFixture.DriverID
+	johnVehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
 
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM dispatch_offers
-			WHERE driver_id = $1
-			  AND status = 'PENDING'
-		`,
-		johnDriverID,
-	).Scan(
-		&existingPendingOfferCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing pending driver offer: %v",
-			err,
-		)
-	}
-
-	if existingPendingOfferCount != 0 {
-		t.Skip(
-			"John already has an active PENDING dispatch offer",
-		)
-	}
+	offerRepo := postgresrepo.NewDispatchOfferRepository(db)
 
 	rideRequestID := uuid.NewString()
 	offerID := uuid.NewString()
@@ -4986,7 +4647,17 @@ func TestAcceptOfferExpiredRidePersistsTerminalState(t *testing.T) {
 	// Serialize access to John's shared integration fixture.
 	// ---------------------------------------------------------
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	// A disposable hierarchy prevents existing active trips from silently
 	// skipping the acceptance regression. Never mutate John's shared fixture.
@@ -5471,7 +5142,17 @@ func TestRedispatchWorkerExpiresRideWaitingInBackoff(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	rideRequestID := uuid.NewString()
 
@@ -5694,6 +5375,7 @@ func TestRedispatchDiscoveryCannotDispatchRideExpiredAfterDiscovery(t *testing.T
 			"get working directory: %v",
 			err,
 		)
+
 	}
 
 	if err := os.Chdir("../../.."); err != nil {
@@ -5724,46 +5406,34 @@ func TestRedispatchDiscoveryCannotDispatchRideExpiredAfterDiscovery(t *testing.T
 	}
 	defer db.Close()
 
-	// Historical dispatch activity uses John's real driver/vehicle
-	// fixture. Serialize access with the rest of the dispatch tests.
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	// Use an isolated driver and organization for historical dispatch.
+	driverFixture, cleanupDriverFixture, err := testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
+		}
+	}()
 
-		johnDriverID = "39175f42-0c89-4d45-96be-ed5367506e36"
-
-		johnVehicleID = "6dce24b5-b257-447a-99e0-ef439fbd0e17"
-
-		companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
-
-		branchID = "186f7570-6902-41a2-a1f9-d509a4d90fcb"
-
-		fleetID = "dc46fc5c-7290-462c-a423-22b3c46b7c99"
-	)
+	johnDriverID := driverFixture.DriverID
+	johnVehicleID := driverFixture.VehicleID
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
+	fleetID := driverFixture.FleetID
 
 	rideRequestID := uuid.NewString()
 	historicalOfferID := uuid.NewString()
@@ -6191,6 +5861,7 @@ func TestDispatchRideRejectsDriverWithFutureHeartbeat(t *testing.T) {
 			"heartbeat timeout must be greater than zero, got %v",
 			cfg.Presence.HeartbeatTimeout,
 		)
+
 	}
 
 	db, err := database.Connect(cfg)
@@ -6199,126 +5870,41 @@ func TestDispatchRideRejectsDriverWithFutureHeartbeat(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
 
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active John trip: %v",
-			err,
-		)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip("John already has an active trip")
-	}
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original John presence: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John presence: %v",
-				restoreErr,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
+
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
+	}
+	defer func() {
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
+		}
+	}()
+
+	johnUserID := driverFixture.UserID
 
 	futureHeartbeat :=
 		time.Now().UTC().Add(5 * time.Minute)
@@ -6615,136 +6201,45 @@ func TestDispatchRideRejectsDriverWithMissingHeartbeat(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	// ---------------------------------------------------------
-	// Make sure John is not already committed to an active trip.
-	// ---------------------------------------------------------
-
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active John trip: %v",
-			err,
-		)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip("John already has an active trip")
-	}
-
-	// ---------------------------------------------------------
-	// Preserve John's presence state.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original John presence: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John presence: %v",
-				restoreErr,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
+	}
+	defer func() {
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
+		}
+	}()
+
+	johnUserID := driverFixture.UserID
+
 	// ---------------------------------------------------------
+	// Make the isolated driver otherwise eligible.
+	// ---------------------------------------------------------
+
 	// Make John otherwise eligible but remove his heartbeat.
 	// ---------------------------------------------------------
 
@@ -7061,7 +6556,17 @@ func TestDispatchRideAcceptsDriverWithFreshHeartbeat(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -7689,6 +7194,7 @@ func TestDispatchRideRejectsDriverWithInvalidLocation(t *testing.T) {
 			"heartbeat timeout must be greater than zero, got %v",
 			cfg.Presence.HeartbeatTimeout,
 		)
+
 	}
 
 	db, err := database.Connect(cfg)
@@ -7697,140 +7203,50 @@ func TestDispatchRideRejectsDriverWithInvalidLocation(t *testing.T) {
 	}
 	defer db.Close()
 
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
+
 	// ---------------------------------------------------------
 	// Serialize access to John's shared dispatch fixture.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	// ---------------------------------------------------------
-	// John must not already own an active trip.
-	// ---------------------------------------------------------
-
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active John trip: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip("John already has an active trip")
-	}
-
-	// ---------------------------------------------------------
-	// Preserve John's existing presence.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original John presence: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John presence: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
 
+	johnUserID := driverFixture.UserID
+
 	// ---------------------------------------------------------
+	// Isolated driver has invalid latitude but fresh heartbeat.
+	// ---------------------------------------------------------
+
 	// Make John look operational except for invalid latitude.
 	//
 	// Latitude is deliberately missing.
@@ -8171,6 +7587,7 @@ func TestDispatchRideRejectsDriverWithoutActiveAssignment(t *testing.T) {
 			"heartbeat timeout must be greater than zero, got %v",
 			cfg.Presence.HeartbeatTimeout,
 		)
+
 	}
 
 	db, err := database.Connect(cfg)
@@ -8179,173 +7596,51 @@ func TestDispatchRideRejectsDriverWithoutActiveAssignment(t *testing.T) {
 	}
 	defer db.Close()
 
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
+
 	// ---------------------------------------------------------
 	// Serialize access to John's shared fixture.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	// ---------------------------------------------------------
-	// John must not already have an active trip.
-	// ---------------------------------------------------------
-
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active John trip: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip("John already has an active trip")
-	}
-
-	// ---------------------------------------------------------
-	// Preserve John's presence.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original John presence: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John presence: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// Find John's current active assignment.
-	//
-	// CONNECT defines an active assignment as:
-	//
-	//     unassigned_at IS NULL
-	// ---------------------------------------------------------
-
-	var johnAssignmentID string
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND unassigned_at IS NULL
-			LIMIT 1
-		`,
-		johnUserID,
-	).Scan(
-		&johnAssignmentID,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			t.Skip("John has no active assignment fixture")
-		}
-
-		t.Fatalf(
-			"load John active assignment: %v",
-			err,
-		)
-	}
+	johnUserID := driverFixture.UserID
+	johnAssignmentID := driverFixture.AssignmentID
 
 	// ---------------------------------------------------------
+	// Close the disposable driver's active assignment.
+	// ---------------------------------------------------------
+
 	// Temporarily close John's assignment.
 	//
 	// This makes him operationally ineligible while leaving his
@@ -8369,26 +7664,6 @@ func TestDispatchRideRejectsDriverWithoutActiveAssignment(t *testing.T) {
 		)
 	}
 
-	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_assignments
-				SET
-					unassigned_at = NULL,
-					updated_at = NOW()
-				WHERE id = $1
-			`,
-			johnAssignmentID,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John active assignment: %v",
-				restoreErr,
-			)
-		}
-	}()
-
-	// ---------------------------------------------------------
 	// Give John otherwise-valid presence.
 	//
 	// Fresh heartbeat.
@@ -8743,213 +8018,46 @@ func TestDispatchRideRejectsDriverWithInactiveVehicle(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	// ---------------------------------------------------------
-	// John must not already have an active trip.
-	// ---------------------------------------------------------
-
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active John trip: %v",
-			err,
-		)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip("John already has an active trip")
-	}
-
-	// ---------------------------------------------------------
-	// Preserve John's presence.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original John presence: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John presence: %v",
-				restoreErr,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// Resolve John's actual active assignment and assigned vehicle.
-	// ---------------------------------------------------------
-
-	var johnVehicleID string
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT vehicle_id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND unassigned_at IS NULL
-			LIMIT 1
-		`,
-		johnUserID,
-	).Scan(
-		&johnVehicleID,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			t.Skip("John has no active assignment fixture")
-		}
-
-		t.Fatalf(
-			"load John's assigned vehicle: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
-	// ---------------------------------------------------------
-	// Preserve vehicle active state.
-	// ---------------------------------------------------------
-
-	var originalVehicleIsActive bool
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT is_active
-			FROM vehicles
-			WHERE id = $1
-			  AND deleted_at IS NULL
-		`,
-		johnVehicleID,
-	).Scan(
-		&originalVehicleIsActive,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			t.Skip("John's assigned vehicle fixture does not exist")
-		}
-
-		t.Fatalf(
-			"load John's vehicle active state: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE vehicles
-				SET
-					is_active = $2,
-					updated_at = NOW()
-				WHERE id = $1
-			`,
-			johnVehicleID,
-			originalVehicleIsActive,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John's vehicle active state: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
 
+	johnUserID := driverFixture.UserID
+	johnVehicleID := driverFixture.VehicleID
+
 	// ---------------------------------------------------------
+	// Deactivate only the disposable assigned vehicle.
+	// ---------------------------------------------------------
+
 	// Make John otherwise fully dispatch eligible.
 	// ---------------------------------------------------------
 
@@ -9302,214 +8410,46 @@ func TestDispatchRideRejectsDriverWithIneligibleVehicleType(t *testing.T) {
 	}
 	defer db.Close()
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(context.Background()); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	// ---------------------------------------------------------
-	// John must not already have an active trip.
-	// ---------------------------------------------------------
-
-	var activeTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(&activeTripCount); err != nil {
-		t.Fatalf(
-			"check existing active John trip: %v",
-			err,
-		)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
-	if activeTripCount != 0 {
-		t.Skip("John already has an active trip")
-	}
-
-	// ---------------------------------------------------------
-	// Preserve John's presence.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original John presence: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John presence: %v",
-				restoreErr,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// Resolve John's active assignment and vehicle.
-	// ---------------------------------------------------------
-
-	var johnVehicleID string
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT vehicle_id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND unassigned_at IS NULL
-			LIMIT 1
-		`,
-		johnUserID,
-	).Scan(&johnVehicleID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			t.Skip("John has no active assignment fixture")
-		}
-
-		t.Fatalf(
-			"load John's assigned vehicle: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
-	// ---------------------------------------------------------
-	// Preserve John's actual vehicle type and active state.
-	// ---------------------------------------------------------
-
-	var (
-		originalVehicleType     string
-		originalVehicleIsActive bool
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				vehicle_type,
-				is_active
-			FROM vehicles
-			WHERE id = $1
-			  AND deleted_at IS NULL
-		`,
-		johnVehicleID,
-	).Scan(
-		&originalVehicleType,
-		&originalVehicleIsActive,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			t.Skip("John's assigned vehicle fixture does not exist")
-		}
-
-		t.Fatalf(
-			"load John's assigned vehicle: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE vehicles
-				SET
-					vehicle_type = $2,
-					is_active = $3,
-					updated_at = NOW()
-				WHERE id = $1
-			`,
-			johnVehicleID,
-			originalVehicleType,
-			originalVehicleIsActive,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John's vehicle: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
 
+	johnUserID := driverFixture.UserID
+	johnVehicleID := driverFixture.VehicleID
+
 	// ---------------------------------------------------------
+	// Keep disposable vehicle active but incompatible with STANDARD.
+	// ---------------------------------------------------------
+
 	// Make John otherwise completely eligible.
 	// ---------------------------------------------------------
 
@@ -9880,217 +8820,46 @@ func TestDispatchRideSkipsDriverLockedByConcurrentDispatch(t *testing.T) {
 	defer db.Close()
 
 	// ---------------------------------------------------------
-	// Serialize modifications to John's shared integration fixture.
+	// ---------------------------------------------------------
+	// Create isolated fixtures for the concurrent dispatch test.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(context.Background()); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
 
-	const (
-		customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
-		johnUserID = "ba7cead1-34a0-4df1-ade4-145441ee8559"
-	)
-
-	// ---------------------------------------------------------
-	// John must not already own an active trip.
-	// ---------------------------------------------------------
-
-	var activeTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		johnUserID,
-	).Scan(&activeTripCount); err != nil {
-		t.Fatalf(
-			"check existing active John trip: %v",
-			err,
-		)
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
 	}
-
-	if activeTripCount != 0 {
-		t.Skip("John already has an active trip")
-	}
-
-	// ---------------------------------------------------------
-	// Preserve John's presence.
-	// ---------------------------------------------------------
-
-	var (
-		originalIsOnline           bool
-		originalAvailabilityStatus string
-		originalLatitude           *float64
-		originalLongitude          *float64
-		originalHeartbeat          *time.Time
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				is_online,
-				availability_status,
-				latitude,
-				longitude,
-				last_heartbeat_at
-			FROM driver_presence
-			WHERE driver_id = $1
-		`,
-		johnUserID,
-	).Scan(
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalLatitude,
-		&originalLongitude,
-		&originalHeartbeat,
-	); err != nil {
-		t.Fatalf(
-			"load original John presence: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE driver_presence
-				SET
-					is_online = $2,
-					availability_status = $3,
-					latitude = $4,
-					longitude = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			johnUserID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalLatitude,
-			originalLongitude,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John presence: %v",
-				restoreErr,
-			)
+		if err := cleanupDriverFixture(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver fixture: %v", err)
 		}
 	}()
 
-	// ---------------------------------------------------------
-	// Resolve John's active assignment and vehicle.
-	// ---------------------------------------------------------
-
-	var johnVehicleID string
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT vehicle_id
-			FROM driver_assignments
-			WHERE driver_id = $1
-			  AND unassigned_at IS NULL
-			LIMIT 1
-		`,
-		johnUserID,
-	).Scan(&johnVehicleID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			t.Skip("John has no active assignment fixture")
-		}
-
-		t.Fatalf(
-			"load John's active assignment: %v",
-			err,
-		)
+	cleanupPresence, err :=
+		testutil.CreateDriverPresenceFixture(ctx, db, driverFixture)
+	if err != nil {
+		t.Fatalf("create isolated driver presence: %v", err)
 	}
-
-	// ---------------------------------------------------------
-	// Preserve vehicle eligibility state.
-	// ---------------------------------------------------------
-
-	var (
-		originalVehicleType     string
-		originalVehicleIsActive bool
-	)
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT
-				vehicle_type,
-				is_active
-			FROM vehicles
-			WHERE id = $1
-			  AND deleted_at IS NULL
-		`,
-		johnVehicleID,
-	).Scan(
-		&originalVehicleType,
-		&originalVehicleIsActive,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			t.Skip("John's assigned vehicle fixture does not exist")
-		}
-
-		t.Fatalf(
-			"load John's assigned vehicle: %v",
-			err,
-		)
-	}
-
 	defer func() {
-		if _, restoreErr := db.Exec(
-			context.Background(),
-			`
-				UPDATE vehicles
-				SET
-					vehicle_type = $2,
-					is_active = $3,
-					updated_at = NOW()
-				WHERE id = $1
-			`,
-			johnVehicleID,
-			originalVehicleType,
-			originalVehicleIsActive,
-		); restoreErr != nil {
-			t.Logf(
-				"restore John's vehicle: %v",
-				restoreErr,
-			)
+		if err := cleanupPresence(context.Background()); err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
 		}
 	}()
 
-	// ---------------------------------------------------------
+	johnUserID := driverFixture.UserID
+	johnVehicleID := driverFixture.VehicleID
+
 	// Make John fully eligible and place him exactly at pickup.
 	//
 	// We deliberately control all ordinary eligibility gates so
@@ -10497,7 +9266,17 @@ func TestDispatchRideRechecksHeartbeatAfterCandidateRanking(t *testing.T) {
 	// Create an isolated, regulatorily compliant driver.
 	// ---------------------------------------------------------
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err := testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
@@ -10891,7 +9670,17 @@ func TestDispatchRideRechecksAssignmentAfterCandidateRanking(t *testing.T) {
 	// Isolated, regulatorily compliant dispatch candidate.
 	// ---------------------------------------------------------
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err := testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
@@ -11281,7 +10070,17 @@ func TestDispatchRideRechecksVehicleActivityAfterCandidateRanking(t *testing.T) 
 	// Isolated, regulatorily compliant dispatch candidate.
 	// ---------------------------------------------------------
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err := testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
@@ -11675,7 +10474,17 @@ func TestDispatchRideRechecksVehicleTypeAfterCandidateRanking(t *testing.T) {
 	// Isolated, regulatorily compliant dispatch candidate.
 	// ---------------------------------------------------------
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err := testutil.CreateDriverFixture(ctx, db)
 	if err != nil {
@@ -12080,7 +10889,17 @@ func TestDispatchRideRechecksComplianceAfterCandidateRanking(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -12634,7 +11453,17 @@ func TestDispatchRideSkipsRegulatorilyNonCompliantDriver(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -13143,7 +11972,17 @@ func TestAcceptOfferRejectsDriverWhoseComplianceChangedAfterOfferCreation(
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	// ---------------------------------------------------------
 	// 1. Create an isolated operational driver.
@@ -13802,7 +12641,17 @@ func TestCreateOfferSkipsRegulatorilyNonCompliantDriver(
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	// ---------------------------------------------------------
 	// 1. Create an otherwise eligible isolated driver.
