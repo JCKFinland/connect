@@ -60,35 +60,19 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 	defer db.Close()
 
 	// ---------------------------------------------------------
-	// 2. Serialize access to John's shared dispatch fixture.
+	// 2. Create an isolated customer for the disposable trip.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
-
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -193,41 +177,6 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 	}()
 
 	// ---------------------------------------------------------
-	// 3. Avoid interfering with an existing real active trip.
-	// ---------------------------------------------------------
-
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		driverID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active trip: %v",
-			err,
-		)
-	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
-		)
-	}
-
-	// ---------------------------------------------------------
 	// 4. Preserve presence state.
 	// ---------------------------------------------------------
 
@@ -284,54 +233,6 @@ func TestUnassignRejectsActiveTripAndPreservesAssignmentState(t *testing.T) {
 			"expected driver presence vehicle_id to be populated",
 		)
 	}
-
-	// Restore shared fixture even if this test fails.
-	defer func() {
-		restoreCtx := context.Background()
-
-		if _, restoreErr := db.Exec(
-			restoreCtx,
-			`
-				UPDATE driver_assignments
-				SET
-					unassigned_at = NULL,
-					updated_at = NOW()
-				WHERE id = $1
-			`,
-			activeAssignment.ID,
-		); restoreErr != nil {
-			t.Logf(
-				"restore active assignment: %v",
-				restoreErr,
-			)
-		}
-
-		if _, restoreErr := db.Exec(
-			restoreCtx,
-			`
-				UPDATE driver_presence
-				SET
-					assignment_id = $2,
-					vehicle_id = $3,
-					is_online = $4,
-					availability_status = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			driverID,
-			originalAssignmentID,
-			originalVehicleID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore driver presence: %v",
-				restoreErr,
-			)
-		}
-	}()
 
 	// ---------------------------------------------------------
 	// 5. Mark driver BUSY.
@@ -684,35 +585,19 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 	defer db.Close()
 
 	// ---------------------------------------------------------
-	// 2. Serialize John's shared integration fixture.
+	// 2. Create an isolated customer for the rollback test.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf(
-			"acquire John dispatch fixture lock: %v",
-			err,
-		)
+		t.Fatalf("create isolated customer fixture: %v", err)
 	}
-
 	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release John dispatch fixture lock: %v",
-				err,
-			)
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
 		}
 	}()
-
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -801,39 +686,19 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 3. Do not interfere with an existing real active trip.
+	// 3. Remove disposable presence before driver cleanup.
 	// ---------------------------------------------------------
 
-	var existingActiveTripCount int
-
-	if err := db.QueryRow(
-		ctx,
-		`
-			SELECT COUNT(*)
-			FROM trips
-			WHERE driver_id = $1
-			  AND is_active = TRUE
-			  AND deleted_at IS NULL
-			  AND status NOT IN (
-			        'COMPLETED',
-			        'CANCELLED'
-			  )
-		`,
-		driverID,
-	).Scan(
-		&existingActiveTripCount,
-	); err != nil {
-		t.Fatalf(
-			"check existing active trip: %v",
-			err,
+	defer func() {
+		_, err := db.Exec(
+			context.Background(),
+			`DELETE FROM driver_presence WHERE driver_id = $1`,
+			driverID,
 		)
-	}
-
-	if existingActiveTripCount != 0 {
-		t.Skip(
-			"John already has an active trip",
-		)
-	}
+		if err != nil {
+			t.Errorf("cleanup isolated driver presence: %v", err)
+		}
+	}()
 
 	// ---------------------------------------------------------
 	// 4. Preserve presence state.
@@ -842,9 +707,6 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 	var (
 		originalPresenceAssignmentID *string
 		originalPresenceVehicleID    *string
-		originalIsOnline             bool
-		originalAvailabilityStatus   string
-		originalHeartbeat            *time.Time
 	)
 
 	if err := db.QueryRow(
@@ -852,10 +714,7 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 		`
 			SELECT
 				assignment_id,
-				vehicle_id,
-				is_online,
-				availability_status,
-				last_heartbeat_at
+				vehicle_id
 			FROM driver_presence
 			WHERE driver_id = $1
 		`,
@@ -863,9 +722,6 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 	).Scan(
 		&originalPresenceAssignmentID,
 		&originalPresenceVehicleID,
-		&originalIsOnline,
-		&originalAvailabilityStatus,
-		&originalHeartbeat,
 	); err != nil {
 		t.Fatalf(
 			"load original driver presence: %v",
@@ -890,55 +746,8 @@ func TestAssignRejectsActiveTripAndRollsBackNewAssignment(t *testing.T) {
 	}
 
 	// ---------------------------------------------------------
-	// 5. Always restore John's shared fixture.
+	// 5. Disposable fixture requires no shared-state restoration.
 	// ---------------------------------------------------------
-
-	defer func() {
-		restoreCtx := context.Background()
-
-		if _, restoreErr := db.Exec(
-			restoreCtx,
-			`
-				UPDATE driver_assignments
-				SET
-					unassigned_at = NULL,
-					updated_at = NOW()
-				WHERE id = $1
-			`,
-			originalAssignment.ID,
-		); restoreErr != nil {
-			t.Logf(
-				"restore original assignment: %v",
-				restoreErr,
-			)
-		}
-
-		if _, restoreErr := db.Exec(
-			restoreCtx,
-			`
-				UPDATE driver_presence
-				SET
-					assignment_id = $2,
-					vehicle_id = $3,
-					is_online = $4,
-					availability_status = $5,
-					last_heartbeat_at = $6,
-					updated_at = NOW()
-				WHERE driver_id = $1
-			`,
-			driverID,
-			originalPresenceAssignmentID,
-			originalPresenceVehicleID,
-			originalIsOnline,
-			originalAvailabilityStatus,
-			originalHeartbeat,
-		); restoreErr != nil {
-			t.Logf(
-				"restore original presence: %v",
-				restoreErr,
-			)
-		}
-	}()
 
 	// ---------------------------------------------------------
 	// 6. Fixture preparation:
@@ -1394,34 +1203,9 @@ func TestAssignDerivesAuthenticatedDriverScopeAndRejectsForeignVehicle(
 	defer db.Close()
 
 	// ---------------------------------------------------------
-	// 2. Serialize fixture-backed assignment integration tests.
+	// 2. Use independent disposable organizational fixtures.
 	// ---------------------------------------------------------
 
-	releaseFixtureLock, err :=
-		testutil.AcquirePostgresFixtureLock(
-			ctx,
-			db,
-			"dispatch-fixture:john",
-		)
-	if err != nil {
-		t.Fatalf(
-			"acquire assignment fixture lock: %v",
-			err,
-		)
-	}
-
-	defer func() {
-		if err := releaseFixtureLock(
-			context.Background(),
-		); err != nil {
-			t.Logf(
-				"release assignment fixture lock: %v",
-				err,
-			)
-		}
-	}()
-
-	// ---------------------------------------------------------
 	// 3. Create two completely isolated organizational scopes.
 	// ---------------------------------------------------------
 
