@@ -15,6 +15,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/models"
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	"github.com/JCKFinland/connect/backend/internal/services/ride_request"
+	"github.com/JCKFinland/connect/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -48,25 +49,17 @@ func setupFlexHTTPIntegration(t *testing.T) (*pgxpool.Pool, string) {
 	}
 	t.Cleanup(db.Close)
 
-	var customerID string
-	err = db.QueryRow(
-		context.Background(),
-		`
-		SELECT u.id
-		FROM users u
-		JOIN user_roles ur ON ur.user_id = u.id
-		JOIN roles r ON r.id = ur.role_id
-		WHERE u.deleted_at IS NULL
-		GROUP BY u.id
-		HAVING BOOL_OR(r.name = 'CUSTOMER')
-		   AND COUNT(*) FILTER (WHERE r.name <> 'CUSTOMER') = 0
-		ORDER BY u.id
-		LIMIT 1
-		`,
-	).Scan(&customerID)
+	customerID, cleanupCustomer, err :=
+		testutil.CreateAuthorizedCustomerFixture(context.Background(), db)
 	if err != nil {
-		t.Fatalf("resolve CUSTOMER fixture: %v", err)
+		t.Fatalf("create isolated FLEX activation customer: %v", err)
 	}
+
+	t.Cleanup(func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated FLEX activation customer: %v", err)
+		}
+	})
 
 	return db, customerID
 }

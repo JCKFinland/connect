@@ -4096,6 +4096,23 @@ func TestDispatchRideRejectsDriverWithStaleHeartbeat(t *testing.T) {
 	// The isolated stale-heartbeat driver must never be selected.
 	// ---------------------------------------------------------
 
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
+
 	trip, err := service.DispatchRide(
 		ctx,
 		rideRequestID,
@@ -6028,6 +6045,23 @@ func TestDispatchRideRejectsDriverWithFutureHeartbeat(t *testing.T) {
 		},
 	)
 
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
+
 	trip, err := service.DispatchRide(
 		ctx,
 		rideRequestID,
@@ -6371,6 +6405,23 @@ func TestDispatchRideRejectsDriverWithMissingHeartbeat(t *testing.T) {
 	// Another legitimate driver may still be selected.
 	// John specifically must never be selected.
 	// ---------------------------------------------------------
+
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
 
 	trip, err := service.DispatchRide(
 		ctx,
@@ -7392,6 +7443,23 @@ func TestDispatchRideRejectsDriverWithInvalidLocation(t *testing.T) {
 	// John must never be selected.
 	// ---------------------------------------------------------
 
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
+
 	trip, dispatchErr := service.DispatchRide(
 		ctx,
 		rideRequestID,
@@ -7845,6 +7913,23 @@ func TestDispatchRideRejectsDriverWithoutActiveAssignment(t *testing.T) {
 	// John must never receive it.
 	// ---------------------------------------------------------
 
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
+
 	trip, dispatchErr := service.DispatchRide(
 		ctx,
 		rideRequestID,
@@ -8239,6 +8324,23 @@ func TestDispatchRideRejectsDriverWithInactiveVehicle(t *testing.T) {
 	// Another eligible driver may legitimately win.
 	// John, whose assigned vehicle is inactive, must not.
 	// ---------------------------------------------------------
+
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
 
 	trip, dispatchErr := service.DispatchRide(
 		ctx,
@@ -8653,6 +8755,23 @@ func TestDispatchRideRejectsDriverWithIneligibleVehicleType(t *testing.T) {
 	// Another compatible driver may receive the ride.
 	// John must never receive a STANDARD ride while driving VAN.
 	// ---------------------------------------------------------
+
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
 
 	trip, dispatchErr := service.DispatchRide(
 		ctx,
@@ -9072,6 +9191,23 @@ func TestDispatchRideSkipsDriverLockedByConcurrentDispatch(t *testing.T) {
 		)
 	defer cancel()
 
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
+
 	trip, dispatchErr := service.DispatchRide(
 		dispatchCtx,
 		rideRequestID,
@@ -9469,6 +9605,23 @@ func TestDispatchRideRechecksHeartbeatAfterCandidateRanking(t *testing.T) {
 	// Execute real direct dispatch.
 	// ---------------------------------------------------------
 
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
+
 	trip, dispatchErr := service.DispatchRide(
 		ctx,
 		rideRequestID,
@@ -9856,6 +10009,23 @@ func TestDispatchRideRechecksAssignmentAfterCandidateRanking(t *testing.T) {
 	// ---------------------------------------------------------
 	// Execute real direct dispatch.
 	// ---------------------------------------------------------
+
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
 
 	trip, dispatchErr := service.DispatchRide(
 		ctx,
@@ -10263,6 +10433,23 @@ func TestDispatchRideRechecksVehicleActivityAfterCandidateRanking(t *testing.T) 
 	// Execute real direct dispatch.
 	// ---------------------------------------------------------
 
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
+
 	trip, dispatchErr := service.DispatchRide(
 		ctx,
 		rideRequestID,
@@ -10665,6 +10852,23 @@ func TestDispatchRideRechecksVehicleTypeAfterCandidateRanking(t *testing.T) {
 	// ---------------------------------------------------------
 	// Execute real direct dispatch.
 	// ---------------------------------------------------------
+
+	// CONNECT_DISPATCH_PRICING_FIXTURE
+	cleanupDispatchPricing, pricingFixtureErr :=
+		testutil.AttachDispatchPricingFixture(
+			ctx,
+			db,
+			rideRequestID,
+			driverFixture.CompanyID,
+		)
+	if pricingFixtureErr != nil {
+		t.Fatalf("create isolated dispatch pricing fixture: %v", pricingFixtureErr)
+	}
+	defer func() {
+		if cleanupErr := cleanupDispatchPricing(context.Background()); cleanupErr != nil {
+			t.Errorf("cleanup isolated dispatch pricing fixture: %v", cleanupErr)
+		}
+	}()
 
 	trip, dispatchErr := service.DispatchRide(
 		ctx,
