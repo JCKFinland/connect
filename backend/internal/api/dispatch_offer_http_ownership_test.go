@@ -58,6 +58,16 @@ func TestDispatchOfferAcceptHTTPRejectsOtherDriverOwnership(t *testing.T) {
 			t.Errorf("cleanup intruder: %v", err)
 		}
 	}()
+	customerID, cleanupCustomer, err := testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup ownership customer: %v", err)
+		}
+	}()
+
 	categoryID, rideID, offerID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Now().UTC()
 	// Delete dependent rows before fixture cleanup; no existing rows are modified.
@@ -83,7 +93,7 @@ func TestDispatchOfferAcceptHTTPRejectsOtherDriverOwnership(t *testing.T) {
 	}
 	// The request and offer are real PostgreSQL rows. Authorization must reject
 	// the non-owner before any trip-acceptance side effects occur.
-	_, err = db.Exec(ctx, `INSERT INTO ride_requests (id,customer_id,pickup_address,pickup_latitude,pickup_longitude,destination_address,destination_latitude,destination_longitude,requested_vehicle_type,service_category_id,passenger_count,status,requested_at,expires_at,created_at,updated_at) VALUES ($1,$2,'Test pickup',60.2,24.6,'Test destination',60.3,24.7,'STANDARD',$3,1,'MATCHING',$4,$5,$4,$4)`, rideID, "49c61249-8b7d-4afd-a559-6d54567ee164", categoryID, now, now.Add(10*time.Minute))
+	_, err = db.Exec(ctx, `INSERT INTO ride_requests (id,customer_id,pickup_address,pickup_latitude,pickup_longitude,destination_address,destination_latitude,destination_longitude,requested_vehicle_type,service_category_id,passenger_count,status,requested_at,expires_at,created_at,updated_at) VALUES ($1,$2,'Test pickup',60.2,24.6,'Test destination',60.3,24.7,'STANDARD',$3,1,'MATCHING',$4,$5,$4,$4)`, rideID, customerID, categoryID, now, now.Add(10*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

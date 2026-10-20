@@ -15,6 +15,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/repository"
 	"github.com/JCKFinland/connect/backend/internal/services/fare_estimate"
 	ride_request "github.com/JCKFinland/connect/backend/internal/services/ride_request"
+	"github.com/JCKFinland/connect/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -61,22 +62,50 @@ func setupFlexAuctionHTTPDatabase(
 	}
 	t.Cleanup(db.Close)
 
-	var customerID string
-	err = db.QueryRow(context.Background(), `
-		SELECT u.id
-		FROM users u
-		JOIN user_roles ur ON ur.user_id = u.id
-		JOIN roles r ON r.id = ur.role_id
-		WHERE u.deleted_at IS NULL
-		GROUP BY u.id
-		HAVING BOOL_OR(r.name = 'CUSTOMER')
-		   AND COUNT(*) FILTER (WHERE r.name <> 'CUSTOMER') = 0
-		ORDER BY u.id
-		LIMIT 1
-	`).Scan(&customerID)
+	ctx := context.Background()
+
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
 	if err != nil {
-		t.Fatalf("resolve test customer: %v", err)
+		t.Fatalf("create isolated FLEX HTTP customer: %v", err)
 	}
+
+	t.Cleanup(func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup FLEX HTTP customer: %v", err)
+		}
+	})
+
+	var customerRoleID string
+	err = db.QueryRow(ctx, `
+		SELECT id
+		FROM roles
+		WHERE name = 'CUSTOMER'
+	`).Scan(&customerRoleID)
+	if err != nil {
+		t.Fatalf("resolve CUSTOMER role: %v", err)
+	}
+
+	_, err = db.Exec(ctx, `
+		INSERT INTO user_roles (user_id, role_id)
+		VALUES ($1, $2)
+	`, customerID, customerRoleID)
+	if err != nil {
+		t.Fatalf("assign FLEX HTTP customer role: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, err := db.Exec(
+			context.Background(),
+			`DELETE FROM user_roles
+			 WHERE user_id = $1 AND role_id = $2`,
+			customerID,
+			customerRoleID,
+		)
+		if err != nil {
+			t.Errorf("cleanup FLEX HTTP customer role: %v", err)
+		}
+	})
 
 	return db, customerID
 }

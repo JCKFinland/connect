@@ -50,7 +50,15 @@ func TestApplyResultIsSerializedIdempotentAndPreservesProviderIdentity(
 	// Build a self-contained completed-trip, fare, and payment fixture.
 	// The test verifies transactional reconciliation between the provider
 	// transaction and the authoritative aggregate payment.
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err := testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create reconciliation customer: %v", err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup reconciliation customer: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(

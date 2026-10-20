@@ -55,7 +55,55 @@ func newPaymentTransactionTestFixture(
 		t.Fatalf("connect database: %v", err)
 	}
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err := testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		db.Close()
+		t.Fatalf("create payment customer: %v", err)
+	}
+
+	cleanupSetupFailure := func(rideID, tripID string) {
+		cleanupCtx := context.Background()
+
+		deleteRow := func(label, query string, id string) {
+			if _, err := db.Exec(cleanupCtx, query, id); err != nil {
+				t.Errorf("cleanup payment fixture %s: %v", label, err)
+			}
+		}
+
+		if tripID != "" {
+			deleteRow(
+				"transactions",
+				`DELETE FROM payment_transactions
+				 WHERE payment_id IN (
+					 SELECT id FROM payments WHERE trip_id = $1
+				 )`,
+				tripID,
+			)
+			deleteRow(
+				"payments",
+				`DELETE FROM payments WHERE trip_id = $1`,
+				tripID,
+			)
+			deleteRow(
+				"trip fares",
+				`DELETE FROM trip_fares WHERE trip_id = $1`,
+				tripID,
+			)
+			deleteRow(
+				"trip",
+				`DELETE FROM trips WHERE id = $1`,
+				tripID,
+			)
+		}
+
+		if rideID != "" {
+			deleteRow(
+				"ride request",
+				`DELETE FROM ride_requests WHERE id = $1`,
+				rideID,
+			)
+		}
+	}
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -63,6 +111,7 @@ func newPaymentTransactionTestFixture(
 			db,
 		)
 	if err != nil {
+		_ = cleanupCustomer(ctx)
 		db.Close()
 
 		t.Fatalf(
@@ -126,7 +175,9 @@ func newPaymentTransactionTestFixture(
 		now.Add(30*time.Minute),
 	)
 	if err != nil {
+		cleanupSetupFailure(rideRequestID, "")
 		_ = cleanupDriverFixture(ctx)
+		_ = cleanupCustomer(ctx)
 		db.Close()
 
 		t.Fatalf(
@@ -188,7 +239,9 @@ func newPaymentTransactionTestFixture(
 		now,
 	)
 	if err != nil {
+		cleanupSetupFailure(rideRequestID, tripID)
 		_ = cleanupDriverFixture(ctx)
+		_ = cleanupCustomer(ctx)
 		db.Close()
 
 		t.Fatalf(
@@ -223,7 +276,9 @@ func newPaymentTransactionTestFixture(
 		now,
 	)
 	if err != nil {
+		cleanupSetupFailure(rideRequestID, tripID)
 		_ = cleanupDriverFixture(ctx)
+		_ = cleanupCustomer(ctx)
 		db.Close()
 
 		t.Fatalf(
@@ -242,7 +297,9 @@ func newPaymentTransactionTestFixture(
 			"CARD",
 		)
 	if err != nil {
+		cleanupSetupFailure(rideRequestID, tripID)
 		_ = cleanupDriverFixture(ctx)
+		_ = cleanupCustomer(ctx)
 		db.Close()
 
 		t.Fatalf(
@@ -306,6 +363,9 @@ func newPaymentTransactionTestFixture(
 			)
 		}
 
+		if err := cleanupCustomer(cleanupCtx); err != nil {
+			t.Errorf("cleanup payment customer: %v", err)
+		}
 		db.Close()
 	})
 
