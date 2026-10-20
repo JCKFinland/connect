@@ -64,6 +64,10 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() (exitCode int) {
 
 	// ----------------------------------------------------------------------
 	// Configuration
@@ -74,7 +78,7 @@ func main() {
 	if err != nil {
 		// Hard exit if application settings are corrupt or missing.
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Reject incomplete FLEX Stripe configuration before initializing
@@ -85,7 +89,7 @@ func main() {
 			"FLEX Stripe configuration error: %v\n",
 			err,
 		)
-		os.Exit(1)
+		return 1
 	}
 
 	// Instantiates structured logging matching the current environment (e.g., JSON for Production).
@@ -104,7 +108,7 @@ func main() {
 	db, err := database.Connect(cfg)
 	if err != nil {
 		log.Error("Database connection failed", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	// Ensures database connections safely close when the main function terminates.
 	defer db.Close()
@@ -112,7 +116,7 @@ func main() {
 	// Automatically executes SQL schema migrations to keep database tables updated.
 	if err := database.RunMigrations(cfg, log); err != nil {
 		log.Error("Migration failed", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// ----------------------------------------------------------------------
@@ -248,7 +252,7 @@ func main() {
 				"error",
 				err,
 			)
-			os.Exit(1)
+			return 1
 		}
 
 		driverDocumentStorage = localDocumentStorage
@@ -259,7 +263,7 @@ func main() {
 			"driver",
 			cfg.DocumentStorage.Driver,
 		)
-		os.Exit(1)
+		return 1
 	}
 
 	driverComplianceService := drivercomplianceservice.NewService(
@@ -364,7 +368,7 @@ func main() {
 				"error",
 				err,
 			)
-			os.Exit(1)
+			return 1
 		}
 
 		paymentExecutionService :=
@@ -415,7 +419,7 @@ func main() {
 				"error",
 				err,
 			)
-			os.Exit(1)
+			return 1
 		}
 
 		if err := paymentCallbackRegistry.Register(
@@ -427,7 +431,7 @@ func main() {
 				"error",
 				err,
 			)
-			os.Exit(1)
+			return 1
 		}
 
 		paymentCallbackHandler =
@@ -463,7 +467,7 @@ func main() {
 			"error",
 			err,
 		)
-		os.Exit(1)
+		return 1
 	}
 
 	if flexWebhookHandler != nil {
@@ -486,6 +490,117 @@ func main() {
 	)
 
 	// ----------------------------------------------------------------------
+	// FLEX settlement discovery lifecycle startup
+	// ----------------------------------------------------------------------
+	// Financial processing remains disabled unless explicitly enabled.
+	flexWorkerEnabled, err := cfg.FlexSettlementWorker.Enabled()
+	if err != nil {
+		log.Error(
+			"invalid FLEX settlement worker activation",
+			"error",
+			err,
+		)
+		return 1
+	}
+
+	flexWorkerFailure := make(chan error, 1)
+	serverFailure := make(chan error, 1)
+	var flexController *flexSettlementController
+
+	if flexWorkerEnabled {
+		flexDependencies, err := newFlexSettlementWorkerDependencies(
+			cfg.Stripe.SecretKey,
+		)
+		if err != nil {
+			log.Error(
+				"failed to initialize FLEX settlement dependencies",
+				"error",
+				err,
+			)
+			return 1
+		}
+
+		flexLifecycle, err := buildFlexSettlementWorker(
+			db,
+			flexDependencies,
+			50,
+		)
+		if err != nil {
+			log.Error(
+				"failed to build FLEX settlement worker",
+				"error",
+				err,
+			)
+			return 1
+		}
+
+		flexController, err = newFlexSettlementController(
+			cfg,
+			flexLifecycle,
+		)
+		if err != nil {
+			log.Error(
+				"failed to configure FLEX settlement controller",
+				"error",
+				err,
+			)
+			return 1
+		}
+
+		// Protect startup failures after a financial worker has
+		// begun. Deferred cleanup runs before PostgreSQL closes.
+		defer func() {
+			if err := waitForFlexShutdown(
+				flexController,
+				30*time.Second,
+			); err != nil {
+				log.Error(
+					"FLEX cleanup encountered an error",
+					"error",
+					err,
+				)
+				exitCode = 1
+			}
+		}()
+
+		if err := flexController.Start(
+			context.Background(),
+			flexSettlementWorkerOptions(
+				func(err error) {
+					log.Error(
+						"FLEX settlement discovery error",
+						"error",
+						err,
+					)
+				},
+			),
+			func(err error) {
+				log.Error(
+					"FLEX settlement worker exited unexpectedly",
+					"error",
+					err,
+				)
+
+				select {
+				case flexWorkerFailure <- err:
+				default:
+				}
+			},
+		); err != nil {
+			log.Error(
+				"failed to start FLEX settlement worker",
+				"error",
+				err,
+			)
+			return 1
+		}
+
+		log.Info("FLEX settlement discovery worker enabled")
+	} else {
+		log.Info("FLEX settlement discovery worker disabled")
+	}
+
+	// ----------------------------------------------------------------------
 	// Automatic Redispatch Worker
 	// ----------------------------------------------------------------------
 
@@ -495,13 +610,26 @@ func main() {
 		context.Background(),
 	)
 
-	go dispatchService.StartRedispatchWorker(
-		redispatchCtx,
-		dispatchservice.RedispatchWorkerOptions{
-			Interval:  2 * time.Second,
-			BatchSize: 100,
-		},
-	)
+	redispatchDone := make(chan struct{})
+
+	// Ensure startup errors cannot close PostgreSQL while
+	// redispatch still has an active database operation.
+	defer func() {
+		cancelRedispatch()
+		<-redispatchDone
+	}()
+
+	go func() {
+		defer close(redispatchDone)
+
+		dispatchService.StartRedispatchWorker(
+			redispatchCtx,
+			dispatchservice.RedispatchWorkerOptions{
+				Interval:  2 * time.Second,
+				BatchSize: 100,
+			},
+		)
+	}()
 
 	// Tracks driver shifts, live maps, and online/offline status values.
 	presenceService := presence.NewService(
@@ -531,19 +659,32 @@ func main() {
 		context.Background(),
 	)
 
-	go presenceService.StartStalePresenceWorker(
-		stalePresenceCtx,
-		presence.StalePresenceWorkerOptions{
-			Interval: cfg.Presence.HeartbeatTimeout / 2,
-			OnError: func(err error) {
-				log.Error(
-					"stale presence reconciliation failed",
-					"error",
-					err,
-				)
+	stalePresenceDone := make(chan struct{})
+
+	// Ensure startup errors cannot close PostgreSQL while
+	// stale-presence reconciliation is still running.
+	defer func() {
+		cancelStalePresence()
+		<-stalePresenceDone
+	}()
+
+	go func() {
+		defer close(stalePresenceDone)
+
+		presenceService.StartStalePresenceWorker(
+			stalePresenceCtx,
+			presence.StalePresenceWorkerOptions{
+				Interval: cfg.Presence.HeartbeatTimeout / 2,
+				OnError: func(err error) {
+					log.Error(
+						"stale presence reconciliation failed",
+						"error",
+						err,
+					)
+				},
 			},
-		},
-	)
+		)
+	}()
 
 	// Matches trip orders to close by active drivers using presence data.
 	assignmentService := assignment.NewService(
@@ -694,7 +835,10 @@ func main() {
 				err,
 			)
 
-			os.Exit(1)
+			select {
+			case serverFailure <- err:
+			default:
+			}
 		}
 	}()
 
@@ -710,9 +854,33 @@ func main() {
 		os.Interrupt,
 		syscall.SIGTERM,
 	)
+	defer signal.Stop(quit)
 
 	// Pauses execution stream here until a cancellation signal arrives.
-	<-quit
+	shutdown := waitForShutdownDecision(
+		quit,
+		flexWorkerFailure,
+		serverFailure,
+	)
+
+	shutdownReason := shutdown.Reason
+	emergencyShutdown := shutdown.Emergency
+
+	if shutdown.Err != nil {
+		log.Error(
+			"CONNECT shutting down after internal failure",
+			"reason",
+			shutdownReason,
+			"error",
+			shutdown.Err,
+		)
+	}
+
+	log.Info(
+		"CONNECT shutdown initiated",
+		"reason",
+		shutdownReason,
+	)
 
 	log.Info("Shutdown signal received")
 
@@ -720,26 +888,35 @@ func main() {
 	// waiting for the HTTP server to shut down.
 	close(realtimeShutdown)
 
-	// Stop background lifecycle processing before shutting down the HTTP server.
-	cancelRedispatch()
-	cancelStalePresence()
+	// A nil *flexSettlementController must not become a
+	// non-nil flexShutdownWaiter interface when FLEX is disabled.
+	var shutdownFlexWorker flexShutdownWaiter
+	if flexController != nil {
+		shutdownFlexWorker = flexController
+	}
 
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
-		10*time.Second,
-	)
-	defer cancel()
+	// Complete all shutdown barriers before deferred database cleanup.
+	shutdownErr := coordinateShutdown(shutdownDependencies{
+		HTTPServer:          server,
+		Emergency:           emergencyShutdown,
+		HTTPTimeout:         10 * time.Second,
+		FlexWorker:          shutdownFlexWorker,
+		FlexTimeout:         30 * time.Second,
+		CancelRedispatch:    cancelRedispatch,
+		RedispatchDone:      redispatchDone,
+		CancelStalePresence: cancelStalePresence,
+		StalePresenceDone:   stalePresenceDone,
+	})
 
-	// Forces server down neatly without terminating active passenger/driver operations abruptly.
-	if err := server.Shutdown(ctx); err != nil {
+	if shutdownErr != nil {
 		log.Error(
-			"Graceful shutdown failed",
+			"CONNECT shutdown completed with errors",
 			"error",
-			err,
+			shutdownErr,
 		)
-
-		os.Exit(1)
 	}
 
 	log.Info("CONNECT Backend stopped")
+
+	return shutdownExitCode(shutdown, shutdownErr)
 }

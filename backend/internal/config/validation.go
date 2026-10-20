@@ -65,5 +65,11 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("ROUTING_BASE_URL is required")
 	}
 
+	if err := ValidateFlexSettlementWorkerConfiguration(
+		cfg,
+	); err != nil {
+		return err
+	}
+
 	return nil
 }
