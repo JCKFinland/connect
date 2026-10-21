@@ -137,6 +137,24 @@ func TestFlexSettlementHealthLifecycle(t *testing.T) {
 		t.Fatal("oldest pending capture timestamp missing")
 	}
 
+	var expectedOldestPending time.Time
+	if err := db.QueryRow(ctx, `
+		SELECT MIN(created_at)
+		FROM flex_settlements
+		WHERE status = 'PENDING'
+		  AND capture_requested_at IS NULL
+	`).Scan(&expectedOldestPending); err != nil {
+		t.Fatalf("read expected oldest pending timestamp: %v", err)
+	}
+
+	if !stalePending.OldestPendingCaptureAt.Equal(expectedOldestPending) {
+		t.Fatalf(
+			"oldest pending timestamp mismatch: got=%s want=%s",
+			stalePending.OldestPendingCaptureAt,
+			expectedOldestPending,
+		)
+	}
+
 	if _, err := db.Exec(ctx, `
 		UPDATE flex_settlements
 		SET created_at = $2
@@ -212,6 +230,27 @@ func TestFlexSettlementHealthLifecycle(t *testing.T) {
 
 	if aged.OldestRecoveryAt == nil {
 		t.Fatal("oldest recovery timestamp missing")
+	}
+
+	var expectedOldestRecovery time.Time
+	if err := db.QueryRow(ctx, `
+		SELECT MIN(created_at)
+		FROM flex_settlements
+		WHERE status IN ('PENDING', 'PROCESSING')
+		  AND (
+			status = 'PROCESSING'
+			OR capture_requested_at IS NOT NULL
+		  )
+	`).Scan(&expectedOldestRecovery); err != nil {
+		t.Fatalf("read expected oldest recovery timestamp: %v", err)
+	}
+
+	if !aged.OldestRecoveryAt.Equal(expectedOldestRecovery) {
+		t.Fatalf(
+			"oldest recovery timestamp mismatch: got=%s want=%s",
+			aged.OldestRecoveryAt,
+			expectedOldestRecovery,
+		)
 	}
 
 	verifier := &flexRecoveryFakeVerifier{
