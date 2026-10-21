@@ -69,6 +69,82 @@ func TestFlexSettlementHealthLifecycle(t *testing.T) {
 		t.Fatal("new settlement missing from pending monitoring")
 	}
 
+	if baseline.StalePendingCaptureCount > baseline.PendingCaptureCount {
+		t.Fatal("invalid baseline stale pending count")
+	}
+
+	// Preserve this fixture's timestamp even if a later assertion fails.
+	var originalCreatedAt time.Time
+	if err := db.QueryRow(ctx, `
+		SELECT created_at
+		FROM flex_settlements
+		WHERE id = $1
+	`, settlement.ID).Scan(&originalCreatedAt); err != nil {
+		t.Fatalf("read original settlement timestamp: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if _, err := db.Exec(context.Background(), `
+			UPDATE flex_settlements
+			SET created_at = $2
+			WHERE id = $1
+		`, settlement.ID, originalCreatedAt); err != nil {
+			t.Errorf("restore settlement timestamp: %v", err)
+		}
+	})
+
+	// Check this fixture directly rather than assuming the database
+	// contains no unrelated stale pending settlements.
+	if !originalCreatedAt.After(
+		baseline.ObservedAt.Add(-staleAfter),
+	) {
+		t.Fatalf(
+			"fixture settlement unexpectedly stale: created=%s observed=%s",
+			originalCreatedAt,
+			baseline.ObservedAt,
+		)
+	}
+
+	commandTag, err := db.Exec(ctx, `
+		UPDATE flex_settlements
+		SET created_at = clock_timestamp() - interval '2 minutes'
+		WHERE id = $1
+		  AND status = 'PENDING'
+		  AND capture_requested_at IS NULL
+	`, settlement.ID)
+	if err != nil {
+		t.Fatalf("age pending settlement: %v", err)
+	}
+	if commandTag.RowsAffected() != 1 {
+		t.Fatalf(
+			"expected one aged pending settlement, got %d",
+			commandTag.RowsAffected(),
+		)
+	}
+
+	stalePending := read()
+
+	if stalePending.StalePendingCaptureCount !=
+		baseline.StalePendingCaptureCount+1 {
+		t.Fatalf(
+			"stale pending capture not counted: before=%d after=%d",
+			baseline.StalePendingCaptureCount,
+			stalePending.StalePendingCaptureCount,
+		)
+	}
+
+	if stalePending.OldestPendingCaptureAt == nil {
+		t.Fatal("oldest pending capture timestamp missing")
+	}
+
+	if _, err := db.Exec(ctx, `
+		UPDATE flex_settlements
+		SET created_at = $2
+		WHERE id = $1
+	`, settlement.ID, originalCreatedAt); err != nil {
+		t.Fatalf("restore pending settlement timestamp: %v", err)
+	}
+
 	_, claimed, err := postgresrepo.ClaimFlexSettlementProcessing(
 		ctx, db, settlement.ID,
 	)
@@ -107,7 +183,7 @@ func TestFlexSettlementHealthLifecycle(t *testing.T) {
 	}
 
 	// Age only this test settlement.
-	commandTag, err := db.Exec(ctx, `
+	commandTag, err = db.Exec(ctx, `
 		UPDATE flex_settlements
 		SET created_at = clock_timestamp() - interval '2 minutes'
 		WHERE id = $1
