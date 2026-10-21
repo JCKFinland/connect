@@ -112,6 +112,24 @@ func RegisterRoutes(
 		}
 
 		// ---------------------------------------------------
+		// Platform-Wide FLEX Settlement Health
+		// ---------------------------------------------------
+		//
+		// This independent admin group does not inherit
+		// the existing /admin/ping users.read permission.
+		// Access requires a dedicated financial-monitoring
+		// permission granted only to SYSTEM_ADMIN.
+		settlementHealthAdmin := v1.Group("/admin")
+		settlementHealthAdmin.Use(authMiddleware.RequireAuth())
+		settlementHealthAdmin.Use(
+			rbacMiddleware.RequirePermission("flex_settlements.health.read"),
+		)
+		settlementHealthAdmin.GET(
+			"/flex-settlements/health",
+			FlexSettlementHealthHandler(db),
+		)
+
+		// ---------------------------------------------------
 		// Driver Operations Routing Group (/api/v1/driver/*)
 		// ---------------------------------------------------
 
