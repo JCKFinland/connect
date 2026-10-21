@@ -107,6 +107,7 @@ func TestFlexSettlementWorkerAllowsConfiguredStripeKey(
 		},
 	}
 
+	cfg.App.Env = "development"
 	cfg.Stripe.SecretKey = "sk_test_configuration_only"
 
 	if err := ValidateFlexSettlementWorkerConfiguration(

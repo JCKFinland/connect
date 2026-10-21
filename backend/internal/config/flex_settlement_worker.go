@@ -49,9 +49,44 @@ func ValidateFlexSettlementWorkerConfiguration(
 		return err
 	}
 
-	if enabled && strings.TrimSpace(cfg.Stripe.SecretKey) == "" {
+	if !enabled {
+		return nil
+	}
+
+	key := strings.TrimSpace(cfg.Stripe.SecretKey)
+	if key == "" {
 		return fmt.Errorf(
 			"%w: STRIPE_SECRET_KEY required when worker enabled",
+			ErrInvalidFlexSettlementWorkerConfiguration,
+		)
+	}
+
+	switch cfg.App.Env {
+	case "development", "test":
+		if !strings.HasPrefix(key, "sk_test_") {
+			return fmt.Errorf(
+				"%w: non-production worker requires Stripe test-mode secret key",
+				ErrInvalidFlexSettlementWorkerConfiguration,
+			)
+		}
+	case "production":
+		if !strings.HasPrefix(key, "sk_live_") {
+			return fmt.Errorf(
+				"%w: production worker requires Stripe live-mode secret key",
+				ErrInvalidFlexSettlementWorkerConfiguration,
+			)
+		}
+	default:
+		return fmt.Errorf(
+			"%w: unsupported application environment",
+			ErrInvalidFlexSettlementWorkerConfiguration,
+		)
+	}
+
+	if cfg.Database.Name == "connect_settlement_test" &&
+		cfg.App.Env != "test" {
+		return fmt.Errorf(
+			"%w: settlement test database requires APP_ENV=test",
 			ErrInvalidFlexSettlementWorkerConfiguration,
 		)
 	}

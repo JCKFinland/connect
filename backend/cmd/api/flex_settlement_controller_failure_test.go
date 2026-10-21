@@ -13,6 +13,12 @@ import (
 
 func enabledFlexControllerConfig() *config.Config {
 	return &config.Config{
+		App: config.AppConfig{
+			Env: "test",
+		},
+		Database: config.DatabaseConfig{
+			Name: "connect_settlement_test",
+		},
 		FlexSettlementWorker: config.FlexSettlementWorkerConfig{
 			EnabledRaw: "true",
 		},

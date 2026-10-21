@@ -129,6 +129,12 @@ func TestFlexSettlementControllerEnabledRequiresLifecycle(
 	t *testing.T,
 ) {
 	cfg := &config.Config{
+		App: config.AppConfig{
+			Env: "test",
+		},
+		Database: config.DatabaseConfig{
+			Name: "connect_settlement_test",
+		},
 		FlexSettlementWorker: config.FlexSettlementWorkerConfig{
 			EnabledRaw: "true",
 		},
@@ -149,6 +155,12 @@ func TestFlexSettlementControllerStartAndShutdown(
 	t *testing.T,
 ) {
 	cfg := &config.Config{
+		App: config.AppConfig{
+			Env: "test",
+		},
+		Database: config.DatabaseConfig{
+			Name: "connect_settlement_test",
+		},
 		FlexSettlementWorker: config.FlexSettlementWorkerConfig{
 			EnabledRaw: "true",
 		},
@@ -206,6 +218,12 @@ func TestFlexSettlementControllerRejectsDoubleStart(
 	t *testing.T,
 ) {
 	cfg := &config.Config{
+		App: config.AppConfig{
+			Env: "test",
+		},
+		Database: config.DatabaseConfig{
+			Name: "connect_settlement_test",
+		},
 		FlexSettlementWorker: config.FlexSettlementWorkerConfig{
 			EnabledRaw: "true",
 		},
