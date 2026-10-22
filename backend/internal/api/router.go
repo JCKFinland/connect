@@ -42,7 +42,13 @@ func NewRouter(
 	serviceCategoryHandler *ServiceCategoryHandler,
 	fareEstimateHandler *FareEstimateHandler,
 	dispatchHandler *DispatchHandler,
+	passengerAuthorizationHandlers ...*PassengerFlexAuthorizationHandler,
 ) *gin.Engine {
+
+	var passengerAuthorizationHandler *PassengerFlexAuthorizationHandler
+	if len(passengerAuthorizationHandlers) > 0 {
+		passengerAuthorizationHandler = passengerAuthorizationHandlers[0]
+	}
 
 	// Instantiates a blank Gin engine instance without default middleware (like default logger/recovery).
 	router := gin.New()
@@ -100,6 +106,7 @@ func NewRouter(
 		serviceCategoryHandler,
 		fareEstimateHandler,
 		dispatchHandler,
+		passengerAuthorizationHandler,
 	)
 
 	// Returns the ready-to-run HTTP network multiplexer pool back to main.go.

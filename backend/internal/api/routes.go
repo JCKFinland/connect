@@ -38,6 +38,7 @@ func RegisterRoutes(
 	serviceCategoryHandler *ServiceCategoryHandler,
 	fareEstimateHandler *FareEstimateHandler,
 	dispatchHandler *DispatchHandler,
+	passengerAuthorizationHandlers ...*PassengerFlexAuthorizationHandler,
 ) {
 
 	// Establishes a base versioning group to prevent breaking mobile client contracts during API updates.
@@ -727,6 +728,16 @@ func RegisterRoutes(
 				"/:id/flex-auctions/:auction_id/offers/:offer_id/select",
 				flexOfferHandler.SelectPassengerOffer,
 			)
+
+			// Register passenger authorization only when startup
+			// explicitly supplies an initialized service.
+			if len(passengerAuthorizationHandlers) > 0 &&
+				passengerAuthorizationHandlers[0] != nil {
+				rideRequests.POST(
+					"/:id/flex-auctions/:auction_id/authorize",
+					passengerAuthorizationHandlers[0].Authorize,
+				)
+			}
 
 			rideRequests.POST(
 				"/:id/dispatch",

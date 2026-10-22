@@ -474,6 +474,27 @@ func run() (exitCode int) {
 		log.Info("Stripe FLEX authorization webhook enabled")
 	}
 
+	// Passenger authorization is enabled only when the FLEX
+	// webhook reconciliation handler initialized successfully.
+	passengerAuthorizationHandler, err :=
+		buildPassengerFlexAuthorizationHandler(
+			db,
+			cfg.Stripe,
+			flexWebhookHandler,
+		)
+	if err != nil {
+		log.Error(
+			"failed to initialize passenger FLEX authorization",
+			"error",
+			err,
+		)
+		return 1
+	}
+
+	if passengerAuthorizationHandler != nil {
+		log.Info("Passenger FLEX authorization endpoint enabled")
+	}
+
 	dispatchService := dispatchservice.NewService(
 		dispatchservice.Dependencies{
 			DB:           db,
@@ -803,6 +824,7 @@ func run() (exitCode int) {
 		serviceCategoryHandler,
 		fareEstimateHandler,
 		dispatchHandler,
+		passengerAuthorizationHandler,
 	)
 	// ----------------------------------------------------------------------
 	// HTTP Server Configuration
