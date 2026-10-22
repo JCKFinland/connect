@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -56,11 +57,34 @@ func ReadFlexSettlementHealthSnapshot(
 		)
 	}
 
+	return readFlexSettlementHealthSnapshotAt(
+		ctx, db, staleAfter, nil,
+	)
+}
+
+type flexSettlementHealthQuerier interface {
+	QueryRow(
+		context.Context,
+		string,
+		...any,
+	) pgx.Row
+}
+
+// readFlexSettlementHealthSnapshotAt keeps the production clock
+// authoritative while allowing repository tests to supply a fixed
+// observation timestamp.
+func readFlexSettlementHealthSnapshotAt(
+	ctx context.Context,
+	db flexSettlementHealthQuerier,
+	staleAfter time.Duration,
+	observedAt *time.Time,
+) (*FlexSettlementHealthSnapshot, error) {
 	snapshot := &FlexSettlementHealthSnapshot{}
 
 	const query = `
         WITH observation AS (
-            SELECT clock_timestamp() AS observed_at
+            SELECT COALESCE($2::timestamptz, clock_timestamp())
+                AS observed_at
         )
         SELECT
             observation.observed_at,
@@ -116,6 +140,7 @@ func ReadFlexSettlementHealthSnapshot(
 		ctx,
 		query,
 		staleAfter.String(),
+		observedAt,
 	).Scan(
 		&snapshot.ObservedAt,
 		&snapshot.PendingCaptureCount,
