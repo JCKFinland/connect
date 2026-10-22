@@ -38,11 +38,79 @@ func toPassengerFlexOfferResponse(
 	}
 }
 
-// ListPassengerOffers exposes only pending, unexpired offers
 // for a FLEX auction owned by the authenticated passenger.
 //
 // This endpoint does not select offers, authorize payments,
 // reserve drivers, or create trips.
+
+// SelectPassengerOffer reserves a passenger-owned FLEX offer for
+// payment authorization. It does not create a trip or charge funds.
+func (h *FlexOfferHandler) SelectPassengerOffer(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil {
+		response.Unauthorized(c, "Authenticated user not found")
+		return
+	}
+
+	rideRequestID := c.Param("id")
+	auctionID := c.Param("auction_id")
+	offerID := c.Param("offer_id")
+
+	if _, err := uuid.Parse(rideRequestID); err != nil {
+		response.BadRequest(c, "Invalid ride request ID")
+		return
+	}
+
+	if _, err := uuid.Parse(auctionID); err != nil {
+		response.BadRequest(c, "Invalid FLEX auction ID")
+		return
+	}
+
+	if _, err := uuid.Parse(offerID); err != nil {
+		response.BadRequest(c, "Invalid FLEX offer ID")
+		return
+	}
+
+	selected, err := h.service.SelectPassengerOffer(
+		c.Request.Context(),
+		rideRequestID,
+		auctionID,
+		offerID,
+		user.ID,
+	)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, flex_offer.ErrPassengerSelectionAccessDenied):
+			response.Forbidden(
+				c,
+				"You are not authorized to select this FLEX offer",
+			)
+
+		case errors.Is(err, repository.ErrNotFound),
+			errors.Is(err, pgx.ErrNoRows):
+			response.NotFound(c, "FLEX offer not found")
+
+		case errors.Is(err, flex_offer.ErrPassengerSelectionNotEligible):
+			response.Conflict(
+				c,
+				"FLEX offer is no longer eligible for selection",
+			)
+
+		default:
+			response.InternalServerError(c)
+		}
+		return
+	}
+
+	response.OK(
+		c,
+		"FLEX offer selected; payment authorization required",
+		toPassengerFlexOfferResponse(selected),
+	)
+}
+
+// ListPassengerOffers exposes only pending, unexpired offers
 func (h *FlexOfferHandler) ListPassengerOffers(c *gin.Context) {
 	user, ok := middleware.CurrentUser(c)
 	if !ok || user == nil {

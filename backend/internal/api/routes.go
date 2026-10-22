@@ -724,6 +724,11 @@ func RegisterRoutes(
 			)
 
 			rideRequests.POST(
+				"/:id/flex-auctions/:auction_id/offers/:offer_id/select",
+				flexOfferHandler.SelectPassengerOffer,
+			)
+
+			rideRequests.POST(
 				"/:id/dispatch",
 				rbacMiddleware.RequirePermission("rides.dispatch"),
 				dispatchHandler.DispatchRide,
