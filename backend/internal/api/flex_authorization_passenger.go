@@ -27,7 +27,8 @@ type PassengerFlexAuthorizationExecutor interface {
 
 // PassengerFlexAuthorizationHandler exposes pre-trip authorization.
 type PassengerFlexAuthorizationHandler struct {
-	executor PassengerFlexAuthorizationExecutor
+	confirmationHandler *PassengerFlexConfirmationHandler
+	executor            PassengerFlexAuthorizationExecutor
 }
 
 func NewPassengerFlexAuthorizationHandler(
@@ -164,4 +165,15 @@ func (h *PassengerFlexAuthorizationHandler) Authorize(
 		"FLEX authorization processed",
 		public,
 	)
+}
+
+// SetConfirmationHandler attaches the optional passenger confirmation
+// dependency during startup, before the router begins serving requests.
+func (h *PassengerFlexAuthorizationHandler) SetConfirmationHandler(
+	confirmation *PassengerFlexConfirmationHandler,
+) {
+	if h == nil {
+		return
+	}
+	h.confirmationHandler = confirmation
 }

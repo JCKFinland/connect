@@ -495,6 +495,30 @@ func run() (exitCode int) {
 		log.Info("Passenger FLEX authorization endpoint enabled")
 	}
 
+	// Passenger confirmation is available only when the
+	// authorization and webhook reconciliation pathway is enabled.
+	passengerConfirmationHandler, err :=
+		buildPassengerFlexConfirmationHandler(
+			db,
+			cfg,
+			passengerAuthorizationHandler,
+		)
+	if err != nil {
+		log.Error(
+			"failed to initialize passenger FLEX confirmation",
+			"error",
+			err,
+		)
+		return 1
+	}
+
+	if passengerConfirmationHandler != nil {
+		passengerAuthorizationHandler.SetConfirmationHandler(
+			passengerConfirmationHandler,
+		)
+		log.Info("Passenger FLEX confirmation endpoint enabled")
+	}
+
 	dispatchService := dispatchservice.NewService(
 		dispatchservice.Dependencies{
 			DB:           db,

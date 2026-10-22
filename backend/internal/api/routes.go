@@ -738,6 +738,14 @@ func RegisterRoutes(
 					passengerAuthorizationHandlers[0].Authorize,
 				)
 			}
+			if len(passengerAuthorizationHandlers) > 0 &&
+				passengerAuthorizationHandlers[0] != nil &&
+				passengerAuthorizationHandlers[0].confirmationHandler != nil {
+				RegisterPassengerFlexConfirmationRoute(
+					rideRequests,
+					passengerAuthorizationHandlers[0].confirmationHandler,
+				)
+			}
 
 			rideRequests.POST(
 				"/:id/dispatch",
