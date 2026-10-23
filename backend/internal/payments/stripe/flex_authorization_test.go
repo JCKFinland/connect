@@ -109,8 +109,18 @@ func TestFlexAdapterRecoversByRetrieval(t *testing.T) {
 	req := flexTestRequest()
 	req.ProviderAuthorizationID = "pi_flex_123"
 	retrieveCalls := 0
+	createCalls := 0
 
 	client := &recordingPaymentIntentClient{
+		create: func(
+			_ context.Context,
+			_ *stripego.PaymentIntentCreateParams,
+		) (*stripego.PaymentIntent, error) {
+			createCalls++
+			return nil, errors.New(
+				"recovery must never create a PaymentIntent",
+			)
+		},
 		retrieve: func(
 			_ context.Context,
 			id string,
@@ -133,6 +143,12 @@ func TestFlexAdapterRecoversByRetrieval(t *testing.T) {
 
 	if err != nil {
 		t.Fatal(err)
+	}
+	if createCalls != 0 {
+		t.Fatalf(
+			"known-provider recovery created %d PaymentIntents",
+			createCalls,
+		)
 	}
 	if retrieveCalls != 1 || !result.Authorized ||
 		result.RequiresCustomerAction {
