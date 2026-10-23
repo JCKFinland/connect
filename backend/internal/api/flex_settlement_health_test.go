@@ -151,6 +151,24 @@ func TestFlexSettlementHealthHandlerSnapshot(t *testing.T) {
 		t.Fatal("snapshot observation timestamp is missing")
 	}
 
+	if !strings.Contains(
+		recorder.Body.String(),
+		`"authorization_health"`,
+	) {
+		t.Fatal("authorization health snapshot missing")
+	}
+
+	for _, required := range []string{
+		`"processing_without_provider_count"`,
+		`"processing_with_provider_count"`,
+		`"stale_processing_without_provider_count"`,
+		`"stale_processing_with_provider_count"`,
+	} {
+		if !strings.Contains(recorder.Body.String(), required) {
+			t.Fatalf("missing authorization health field: %s", required)
+		}
+	}
+
 	if body.Data.StaleAfterSeconds != 900 {
 		t.Fatalf(
 			"expected 900-second threshold, got %d",

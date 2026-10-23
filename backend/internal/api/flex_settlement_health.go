@@ -29,7 +29,33 @@ func FlexSettlementHealthHandler(db *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		authorizationSnapshot, err := postgres.ReadFlexAuthorizationHealthSnapshot(
+			c.Request.Context(),
+			db,
+			flexSettlementHealthStaleAfter,
+		)
+		if err != nil {
+			response.InternalServerError(c)
+			return
+		}
+
 		response.OK(c, "FLEX settlement health snapshot", gin.H{
+			"authorization_health": gin.H{
+				"observed_at": authorizationSnapshot.ObservedAt,
+				"stale_after_seconds": int64(
+					flexSettlementHealthStaleAfter.Seconds(),
+				),
+				"pending_count":                           authorizationSnapshot.PendingCount,
+				"processing_without_provider_count":       authorizationSnapshot.ProcessingWithoutProviderCount,
+				"processing_with_provider_count":          authorizationSnapshot.ProcessingWithProviderCount,
+				"authorized_count":                        authorizationSnapshot.AuthorizedCount,
+				"stale_pending_count":                     authorizationSnapshot.StalePendingCount,
+				"stale_processing_without_provider_count": authorizationSnapshot.StaleProcessingWithoutProviderCount,
+				"stale_processing_with_provider_count":    authorizationSnapshot.StaleProcessingWithProviderCount,
+				"oldest_pending_at":                       authorizationSnapshot.OldestPendingAt,
+				"oldest_processing_without_provider_at":   authorizationSnapshot.OldestProcessingWithoutProviderAt,
+				"oldest_processing_with_provider_at":      authorizationSnapshot.OldestProcessingWithProviderAt,
+			},
 			"observed_at":                 snapshot.ObservedAt,
 			"stale_after_seconds":         int64(flexSettlementHealthStaleAfter.Seconds()),
 			"pending_capture_count":       snapshot.PendingCaptureCount,
