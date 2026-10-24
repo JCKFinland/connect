@@ -17,6 +17,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/middleware"
 	"github.com/JCKFinland/connect/backend/internal/realtime"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	flexauthorization "github.com/JCKFinland/connect/backend/internal/services/flex_authorization"
 
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/JCKFinland/connect/backend/internal/security"
@@ -549,6 +550,7 @@ func run() (exitCode int) {
 	}
 
 	flexWorkerFailure := make(chan error, 1)
+	var recoveryWorkerFailure chan error
 	serverFailure := make(chan error, 1)
 	var flexController *flexSettlementController
 
@@ -643,6 +645,123 @@ func run() (exitCode int) {
 		log.Info("FLEX settlement discovery worker enabled")
 	} else {
 		log.Info("FLEX settlement discovery worker disabled")
+	}
+
+	// ----------------------------------------------------------------------
+	// FLEX authorization recovery lifecycle startup
+	// ----------------------------------------------------------------------
+	// Recovery is independent from settlement and disabled by default.
+	recoveryWorkerEnabled, err :=
+		cfg.FlexAuthorizationRecoveryWorker.Enabled()
+	if err != nil {
+		log.Error(
+			"invalid FLEX authorization recovery worker activation",
+			"error",
+			err,
+		)
+		return 1
+	}
+
+	var recoveryController *flexAuthorizationRecoveryController
+
+	if recoveryWorkerEnabled {
+		recoveryWorkerFailure = make(chan error, 1)
+
+		recoveryDependencies, err :=
+			newFlexAuthorizationRecoveryDependencies(
+				cfg.Stripe.SecretKey,
+			)
+		if err != nil {
+			log.Error(
+				"failed to initialize FLEX authorization recovery dependencies",
+				"error",
+				err,
+			)
+			return 1
+		}
+
+		recoveryLifecycle, err :=
+			buildFlexAuthorizationRecoveryLifecycle(
+				db,
+				recoveryDependencies,
+				5*time.Minute,
+				25,
+			)
+		if err != nil {
+			log.Error(
+				"failed to build FLEX authorization recovery lifecycle",
+				"error",
+				err,
+			)
+			return 1
+		}
+
+		recoveryController, err =
+			newFlexAuthorizationRecoveryController(
+				cfg,
+				recoveryLifecycle,
+			)
+		if err != nil {
+			log.Error(
+				"failed to configure FLEX authorization recovery controller",
+				"error",
+				err,
+			)
+			return 1
+		}
+
+		// This deferred barrier also protects early startup failures.
+		// It runs before the deferred PostgreSQL pool closure.
+		defer func() {
+			if err := waitForFlexShutdown(
+				recoveryController,
+				30*time.Second,
+			); err != nil {
+				log.Error(
+					"FLEX authorization recovery cleanup encountered an error",
+					"error",
+					err,
+				)
+				exitCode = 1
+			}
+		}()
+
+		if err := recoveryController.Start(
+			context.Background(),
+			flexauthorization.AuthorizationRecoverySchedulerOptions{
+				Interval: 30 * time.Second,
+				OnError: func(err error) {
+					log.Error(
+						"FLEX authorization recovery cycle error",
+						"error",
+						err,
+					)
+				},
+			},
+			func(err error) {
+				log.Error(
+					"FLEX authorization recovery worker exited unexpectedly",
+					"error",
+					err,
+				)
+
+				select {
+				case recoveryWorkerFailure <- err:
+				default:
+				}
+			},
+		); err != nil {
+			log.Error(
+				"failed to start FLEX authorization recovery worker",
+				"error",
+				err,
+			)
+			return 1
+		}
+
+		log.Info("FLEX authorization recovery worker enabled")
+	} else {
+		log.Info("FLEX authorization recovery worker disabled")
 	}
 
 	// ----------------------------------------------------------------------
@@ -903,9 +1022,10 @@ func run() (exitCode int) {
 	defer signal.Stop(quit)
 
 	// Pauses execution stream here until a cancellation signal arrives.
-	shutdown := waitForShutdownDecision(
+	shutdown := waitForSupervisedShutdownDecision(
 		quit,
 		flexWorkerFailure,
+		recoveryWorkerFailure,
 		serverFailure,
 	)
 
@@ -941,6 +1061,11 @@ func run() (exitCode int) {
 		shutdownFlexWorker = flexController
 	}
 
+	var shutdownRecoveryWorker flexShutdownWaiter
+	if recoveryController != nil {
+		shutdownRecoveryWorker = recoveryController
+	}
+
 	// Complete all shutdown barriers before deferred database cleanup.
 	shutdownErr := coordinateShutdown(shutdownDependencies{
 		HTTPServer:          server,
@@ -948,6 +1073,8 @@ func run() (exitCode int) {
 		HTTPTimeout:         10 * time.Second,
 		FlexWorker:          shutdownFlexWorker,
 		FlexTimeout:         30 * time.Second,
+		RecoveryWorker:      shutdownRecoveryWorker,
+		RecoveryTimeout:     30 * time.Second,
 		CancelRedispatch:    cancelRedispatch,
 		RedispatchDone:      redispatchDone,
 		CancelStalePresence: cancelStalePresence,
