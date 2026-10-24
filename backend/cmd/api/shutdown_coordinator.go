@@ -17,6 +17,11 @@ type shutdownDependencies struct {
 	FlexWorker  flexShutdownWaiter
 	FlexTimeout time.Duration
 
+	// RecoveryWorker is independently supervised and must
+	// complete before PostgreSQL resources are released.
+	RecoveryWorker  flexShutdownWaiter
+	RecoveryTimeout time.Duration
+
 	CancelRedispatch    func()
 	RedispatchDone      <-chan struct{}
 	CancelStalePresence func()
@@ -63,6 +68,18 @@ func coordinateShutdown(
 			shutdownErrors = append(
 				shutdownErrors,
 				fmt.Errorf("FLEX shutdown: %w", err),
+			)
+		}
+	}
+
+	if deps.RecoveryWorker != nil {
+		if err := waitForFlexShutdown(
+			deps.RecoveryWorker,
+			deps.RecoveryTimeout,
+		); err != nil {
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("FLEX authorization recovery shutdown: %w", err),
 			)
 		}
 	}
