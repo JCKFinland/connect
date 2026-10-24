@@ -71,5 +71,11 @@ func Validate(cfg *Config) error {
 		return err
 	}
 
+	if err := ValidateFlexAuthorizationRecoveryWorkerConfiguration(
+		cfg,
+	); err != nil {
+		return err
+	}
+
 	return nil
 }

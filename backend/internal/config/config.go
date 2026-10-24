@@ -57,17 +57,18 @@ type StripeConfig struct {
 
 // Config represents the application's configuration.
 type Config struct {
-	App                  AppConfig
-	Database             DatabaseConfig
-	JWT                  JWTConfig
-	Presence             PresenceConfig
-	RideRequest          RideRequestConfig
-	Booking              BookingConfig
-	Routing              RoutingConfig
-	Stripe               StripeConfig
-	FlexSettlementWorker FlexSettlementWorkerConfig
-	DocumentStorage      DocumentStorageConfig
-	Log                  LogConfig
+	App                             AppConfig
+	Database                        DatabaseConfig
+	JWT                             JWTConfig
+	Presence                        PresenceConfig
+	RideRequest                     RideRequestConfig
+	Booking                         BookingConfig
+	Routing                         RoutingConfig
+	Stripe                          StripeConfig
+	FlexSettlementWorker            FlexSettlementWorkerConfig
+	FlexAuthorizationRecoveryWorker FlexAuthorizationRecoveryWorkerConfig
+	DocumentStorage                 DocumentStorageConfig
+	Log                             LogConfig
 }
 
 // PresenceConfig contains real-time driver presence configuration.
@@ -214,6 +215,13 @@ func Load() (*Config, error) {
 		FlexSettlementWorker: FlexSettlementWorkerConfig{
 			EnabledRaw: GetEnv(
 				"FLEX_SETTLEMENT_WORKER_ENABLED",
+				"false",
+			),
+		},
+
+		FlexAuthorizationRecoveryWorker: FlexAuthorizationRecoveryWorkerConfig{
+			EnabledRaw: GetEnv(
+				"FLEX_AUTHORIZATION_RECOVERY_WORKER_ENABLED",
 				"false",
 			),
 		},
