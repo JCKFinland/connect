@@ -67,8 +67,9 @@ type AuthorizationRecoveryWorker struct {
 }
 
 const (
-	defaultAuthorizationRecoveryRetryCooldown = 5 * time.Minute
-	maxAuthorizationRecoveryCooldownEntries   = 1000
+	defaultAuthorizationRecoveryRetryCooldown  = 5 * time.Minute
+	defaultAuthorizationRecoveryAttemptTimeout = 30 * time.Second
+	maxAuthorizationRecoveryCooldownEntries    = 1000
 )
 
 func NewAuthorizationRecoveryWorker(
@@ -202,10 +203,31 @@ func (w *AuthorizationRecoveryWorker) RunOnce(
 			delete(w.cooldowns, candidate.AuthorizationID)
 		}
 
-		_, err := w.executor.RecoverAndReconcile(
+		attemptCtx, cancel := context.WithTimeout(
 			ctx,
+			defaultAuthorizationRecoveryAttemptTimeout,
+		)
+
+		_, err := w.executor.RecoverAndReconcile(
+			attemptCtx,
 			candidate.AuthorizationID,
 		)
+
+		// Capture the attempt deadline before releasing resources.
+		attemptErr := attemptCtx.Err()
+		cancel()
+
+		// A cancelled parent terminates the entire recovery cycle.
+		if parentErr := ctx.Err(); parentErr != nil {
+			return parentErr
+		}
+
+		// An executor that returns nil after its deadline must not
+		// cause the attempt to be treated as successful.
+		if err == nil && attemptErr != nil {
+			err = attemptErr
+		}
+
 		if err != nil {
 			w.recordCooldown(
 				candidate.AuthorizationID,
