@@ -59,7 +59,17 @@ type AuthorizationRecoveryWorker struct {
 	// The buffered execution gate serializes RunOnce calls and
 	// permits waiting callers to stop on context cancellation.
 	runGate chan struct{}
+
+	// Access is serialized by runGate.
+	// Cooldowns only throttle repeated verification attempts.
+	cooldowns map[string]time.Time
+	now       func() time.Time
 }
+
+const (
+	defaultAuthorizationRecoveryRetryCooldown = 5 * time.Minute
+	maxAuthorizationRecoveryCooldownEntries   = 1000
+)
 
 func NewAuthorizationRecoveryWorker(
 	discovery AuthorizationRecoveryDiscovery,
@@ -99,6 +109,8 @@ func NewAuthorizationRecoveryWorker(
 		staleAfter: staleAfter,
 		batchSize:  batchSize,
 		runGate:    make(chan struct{}, 1),
+		cooldowns:  make(map[string]time.Time),
+		now:        time.Now,
 	}, nil
 }
 
@@ -180,18 +192,75 @@ func (w *AuthorizationRecoveryWorker) RunOnce(
 			continue
 		}
 
+		now := w.now()
+
+		if retryAfter, exists := w.cooldowns[candidate.AuthorizationID]; exists {
+			if now.Before(retryAfter) {
+				continue
+			}
+
+			delete(w.cooldowns, candidate.AuthorizationID)
+		}
+
 		_, err := w.executor.RecoverAndReconcile(
 			ctx,
 			candidate.AuthorizationID,
 		)
-		if err != nil && onError != nil {
-			onError(fmt.Errorf(
-				"recover FLEX authorization %s: %w",
+		if err != nil {
+			w.recordCooldown(
 				candidate.AuthorizationID,
-				err,
-			))
+				w.now().Add(defaultAuthorizationRecoveryRetryCooldown),
+			)
+
+			if onError != nil {
+				onError(fmt.Errorf(
+					"recover FLEX authorization %s: %w",
+					candidate.AuthorizationID,
+					err,
+				))
+			}
+
+			continue
 		}
+
+		delete(w.cooldowns, candidate.AuthorizationID)
 	}
 
 	return nil
+}
+
+// recordCooldown bounds in-memory retry state.
+//
+// Entries with the earliest retry deadline are evicted first.
+// Eviction affects only throttling and never changes financial state.
+//
+// This method must only be called while RunOnce holds runGate.
+func (w *AuthorizationRecoveryWorker) recordCooldown(
+	authorizationID string,
+	retryAfter time.Time,
+) {
+	if w.cooldowns == nil {
+		w.cooldowns = make(map[string]time.Time)
+	}
+
+	if _, exists := w.cooldowns[authorizationID]; !exists &&
+		len(w.cooldowns) >= maxAuthorizationRecoveryCooldownEntries {
+		var oldestID string
+		var oldestTime time.Time
+
+		for id, deadline := range w.cooldowns {
+			if oldestID == "" ||
+				deadline.Before(oldestTime) ||
+				(deadline.Equal(oldestTime) && id < oldestID) {
+				oldestID = id
+				oldestTime = deadline
+			}
+		}
+
+		if oldestID != "" {
+			delete(w.cooldowns, oldestID)
+		}
+	}
+
+	w.cooldowns[authorizationID] = retryAfter
 }
