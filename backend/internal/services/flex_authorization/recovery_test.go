@@ -10,6 +10,24 @@ import (
 	stripego "github.com/stripe/stripe-go/v86"
 )
 
+// recoveryFixtureRetriever narrows the existing authorization test
+// fake to the retrieval-only recovery dependency contract.
+type recoveryFixtureRetriever struct {
+	adapter interface {
+		ExecuteFlexAuthorization(
+			context.Context,
+			stripepayment.FlexAuthorizationRequest,
+		) (*stripepayment.FlexAuthorizationResult, error)
+	}
+}
+
+func (r recoveryFixtureRetriever) RetrieveFlexAuthorization(
+	ctx context.Context,
+	request stripepayment.FlexAuthorizationRequest,
+) (*stripepayment.FlexAuthorizationResult, error) {
+	return r.adapter.ExecuteFlexAuthorization(ctx, request)
+}
+
 func setupKnownProviderRecoveryTest(t *testing.T) (
 	*authorizationServiceFixture,
 	string,
@@ -72,7 +90,7 @@ func TestFlexAuthorizationRecoveryReadOnly(t *testing.T) {
 		Authorized:              true,
 	}
 
-	service := NewRecoveryService(f.DB, f.adapter)
+	service := NewRecoveryService(f.DB, recoveryFixtureRetriever{adapter: f.adapter})
 
 	var beforeStatus string
 	var beforeProviderID string
@@ -145,7 +163,7 @@ func TestFlexAuthorizationRecoveryRejectsProviderMismatch(t *testing.T) {
 		Authorized:              true,
 	}
 
-	service := NewRecoveryService(f.DB, f.adapter)
+	service := NewRecoveryService(f.DB, recoveryFixtureRetriever{adapter: f.adapter})
 
 	result, err := service.Recover(
 		context.Background(),
@@ -171,7 +189,7 @@ func TestFlexAuthorizationRecoveryRejectsInvalidProviderFlags(t *testing.T) {
 		Authorized:              false,
 	}
 
-	service := NewRecoveryService(f.DB, f.adapter)
+	service := NewRecoveryService(f.DB, recoveryFixtureRetriever{adapter: f.adapter})
 
 	result, err := service.Recover(
 		context.Background(),
@@ -215,7 +233,7 @@ func TestFlexAuthorizationRecoveryRejectsUnknownProvider(t *testing.T) {
 		)
 	}
 
-	service := NewRecoveryService(f.DB, f.adapter)
+	service := NewRecoveryService(f.DB, recoveryFixtureRetriever{adapter: f.adapter})
 
 	result, err := service.Recover(ctx, authorization.ID)
 
@@ -250,7 +268,7 @@ func TestFlexAuthorizationRecoveryRejectsTerminalState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	service := NewRecoveryService(f.DB, f.adapter)
+	service := NewRecoveryService(f.DB, recoveryFixtureRetriever{adapter: f.adapter})
 
 	result, err := service.Recover(
 		context.Background(),

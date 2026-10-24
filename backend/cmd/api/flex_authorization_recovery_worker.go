@@ -16,7 +16,7 @@ import (
 //
 // Construction does not contact Stripe or authorize capture.
 type flexAuthorizationRecoveryDependencies struct {
-	Authorization stripepayment.FlexAuthorizationAdapter
+	Authorization stripepayment.FlexAuthorizationRetriever
 }
 
 // newFlexAuthorizationRecoveryDependencies constructs an
@@ -30,7 +30,7 @@ func newFlexAuthorizationRecoveryDependencies(
 		)
 	}
 
-	adapter, err := stripepayment.NewFlexAuthorizationAdapter(
+	adapter, err := stripepayment.NewFlexAuthorizationRetriever(
 		secretKey,
 	)
 	if err != nil {

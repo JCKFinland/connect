@@ -12,7 +12,7 @@ import (
 
 type recoveryBuilderFakeAuthorizationAdapter struct{}
 
-func (recoveryBuilderFakeAuthorizationAdapter) ExecuteFlexAuthorization(
+func (recoveryBuilderFakeAuthorizationAdapter) RetrieveFlexAuthorization(
 	ctx context.Context,
 	req stripepayment.FlexAuthorizationRequest,
 ) (*stripepayment.FlexAuthorizationResult, error) {

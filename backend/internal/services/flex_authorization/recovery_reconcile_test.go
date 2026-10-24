@@ -27,7 +27,7 @@ type recoveryReconcileAdapter struct {
 	) (*stripepayment.FlexAuthorizationResult, error)
 }
 
-func (a recoveryReconcileAdapter) ExecuteFlexAuthorization(
+func (a recoveryReconcileAdapter) RetrieveFlexAuthorization(
 	ctx context.Context,
 	request stripepayment.FlexAuthorizationRequest,
 ) (*stripepayment.FlexAuthorizationResult, error) {

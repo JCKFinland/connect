@@ -30,12 +30,12 @@ type RecoveryResult struct {
 // capture funds, or reconcile financial state.
 type RecoveryService struct {
 	db      *pgxpool.Pool
-	adapter stripepayment.FlexAuthorizationAdapter
+	adapter stripepayment.FlexAuthorizationRetriever
 }
 
 func NewRecoveryService(
 	db *pgxpool.Pool,
-	adapter stripepayment.FlexAuthorizationAdapter,
+	adapter stripepayment.FlexAuthorizationRetriever,
 ) *RecoveryService {
 	return &RecoveryService{
 		db:      db,
@@ -106,10 +106,10 @@ func (s *RecoveryService) Recover(
 		ProviderAuthorizationID: providerID,
 	}
 
-	// A nonempty provider ID forces the production Stripe
-	// adapter down its Retrieve path rather than Create.
+	// The retrieval-only adapter verifies the existing Stripe
+	// PaymentIntent without exposing creation or capture.
 	verification, err :=
-		s.adapter.ExecuteFlexAuthorization(ctx, request)
+		s.adapter.RetrieveFlexAuthorization(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"verify existing FLEX Stripe authorization: %w",
