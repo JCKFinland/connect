@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CONNECT isolated PostgreSQL backend regression runner."""
 
+import json
 import os
 import subprocess
 import sys
@@ -168,6 +169,9 @@ def run_test_group(name, packages, log_directory):
         "-count=1",
     ]
 
+    if name == "settlement":
+        command.append("-json")
+
     with log_path.open("w", encoding="utf-8") as log:
         result = run_command(
             command,
@@ -176,7 +180,114 @@ def run_test_group(name, packages, log_directory):
             stderr=subprocess.STDOUT,
         )
 
-    return name, result.returncode, log_path
+    status = result.returncode
+
+    if name == "settlement" and status == 0:
+        try:
+            verify_settlement_execution(log_path, packages)
+        except (RuntimeError, ValueError) as error:
+            with log_path.open("a", encoding="utf-8") as log:
+                log.write(
+                    "\nSETTLEMENT COVERAGE FAILURE: "
+                    + str(error)
+                    + "\n"
+                )
+            status = 1
+
+    return name, status, log_path
+
+
+def verify_settlement_execution(log_path, packages):
+    started = set()
+    passed = set()
+    skipped = set()
+    package_passed = set()
+    package_failed = set()
+
+    with log_path.open(
+        "r",
+        encoding="utf-8",
+        errors="replace",
+    ) as log:
+        for line in log:
+            if not line.strip():
+                continue
+
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(
+                    "invalid settlement JSON test output"
+                ) from error
+
+            action = event.get("Action")
+            package = event.get("Package")
+            test = event.get("Test")
+
+            if not isinstance(package, str):
+                continue
+
+            if test:
+                identity = (package, test)
+
+                if action == "run":
+                    started.add(identity)
+                elif action == "pass":
+                    passed.add(identity)
+                elif action == "skip":
+                    skipped.add(identity)
+                elif action == "fail":
+                    package_failed.add(package)
+
+            elif action == "pass":
+                package_passed.add(package)
+            elif action == "fail":
+                package_failed.add(package)
+
+    expected = {
+        "github.com/JCKFinland/connect/backend/"
+        + package.removeprefix("./")
+        for package in packages
+    }
+
+    if package_failed:
+        raise RuntimeError(
+            "settlement test failures: "
+            + repr(sorted(package_failed))
+        )
+
+    if package_passed != expected:
+        raise RuntimeError(
+            "settlement package coverage mismatch: "
+            + repr(sorted(expected - package_passed))
+        )
+
+    if not started:
+        raise RuntimeError(
+            "no settlement test execution records"
+        )
+
+    if skipped:
+        raise RuntimeError(
+            "unexpected skipped settlement tests: "
+            + repr(sorted(skipped)[:20])
+        )
+
+    missing = started - passed
+
+    if missing:
+        raise RuntimeError(
+            "settlement tests without pass results: "
+            + repr(sorted(missing)[:20])
+        )
+
+    print(
+        "Settlement coverage verified: "
+        f"{len(started)} started, "
+        f"{len(passed)} passed, "
+        "0 skipped",
+        flush=True,
+    )
 
 
 def print_result(name, status, log_path):
