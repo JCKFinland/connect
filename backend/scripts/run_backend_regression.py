@@ -4,7 +4,6 @@
 import os
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -19,7 +18,16 @@ DISPATCH_PACKAGE = (
 DATABASES = {
     "dispatch": "connect_dispatch_test",
     "remaining_backend": "connect_integration_test",
+    "settlement": "connect_settlement_test",
 }
+
+SETTLEMENT_PACKAGES = (
+    "./internal/api",
+    "./internal/repository/postgres",
+    "./internal/services/flex_authorization",
+    "./internal/services/flex_settlement",
+    "./internal/services/trip",
+)
 
 
 def run_command(command, **kwargs):
@@ -49,8 +57,12 @@ def controlled_database_environment(database_name):
     environment["DB_PORT"] = "5432"
     environment["DB_USER"] = "postgres"
     environment["DB_NAME"] = database_name
+    environment["APP_ENV"] = "test"
     environment["FLEX_SETTLEMENT_WORKER_ENABLED"] = "false"
-    environment["CONNECT_REQUIRE_SETTLEMENT_TEST_DB"] = "0"
+    environment["FLEX_AUTHORIZATION_RECOVERY_WORKER_ENABLED"] = "false"
+    environment["CONNECT_REQUIRE_SETTLEMENT_TEST_DB"] = (
+        "1" if database_name == "connect_settlement_test" else "0"
+    )
 
     return environment
 
@@ -106,14 +118,38 @@ def discover_packages():
             "Dispatch package missing or duplicated."
         )
 
+    settlement_packages = {
+        f"github.com/JCKFinland/connect/backend/{package[2:]}"
+        for package in SETTLEMENT_PACKAGES
+    }
+
+    missing = settlement_packages.difference(packages)
+
+    if missing:
+        raise RuntimeError(
+            f"Settlement packages missing: {sorted(missing)}"
+        )
+
     remaining = [
         package
         for package in packages
         if package != DISPATCH_PACKAGE
+        and package not in settlement_packages
     ]
 
     if not remaining:
         raise RuntimeError("No remaining backend packages.")
+
+    assigned = (
+        set(remaining)
+        | settlement_packages
+        | {DISPATCH_PACKAGE}
+    )
+
+    if assigned != set(packages):
+        raise RuntimeError(
+            "Regression package coverage mismatch."
+        )
 
     return remaining
 
@@ -202,18 +238,14 @@ def main():
     jobs = [
         ("dispatch", [DISPATCH_PACKAGE], log_directory),
         ("remaining_backend", remaining, log_directory),
+        ("settlement", list(SETTLEMENT_PACKAGES), log_directory),
     ]
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [
-            executor.submit(run_test_group, *job)
-            for job in jobs
-        ]
+    results = []
 
-        results = [
-            future.result()
-            for future in futures
-        ]
+    for job in jobs:
+        print(f"Running isolated group: {job[0]}", flush=True)
+        results.append(run_test_group(*job))
 
     tests_passed = True
 
