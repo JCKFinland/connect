@@ -177,7 +177,8 @@ func TestPassengerFlexSelectionSuccessAndReplayProtection(
 			return
 		}
 
-		if databaseName != "connect_settlement_test" {
+		if databaseName != "connect_settlement_test" &&
+			databaseName != "connect_integration_test" {
 			t.Errorf(
 				"refusing selected-offer cleanup in database %q",
 				databaseName,
