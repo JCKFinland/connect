@@ -32,6 +32,9 @@ type PostgresPayoutRecoveryWorker struct {
 	staleAfter time.Duration
 	batchSize  int
 	runGate    chan struct{}
+	// beforeLeaseValidation is a test-only synchronization hook.
+	// It is nil during normal operation.
+	beforeLeaseValidation func()
 }
 
 func NewPostgresPayoutRecoveryWorker(
@@ -203,6 +206,9 @@ func (w *PostgresPayoutRecoveryWorker) RunOnce(
 		} else if err := lookupCtx.Err(); err != nil {
 			lookupErr = err
 		} else {
+			if w.beforeLeaseValidation != nil {
+				w.beforeLeaseValidation()
+			}
 			owned, ownershipErr :=
 				postgresrepo.ValidateDriverPayoutRecoveryLease(
 					lookupCtx,
