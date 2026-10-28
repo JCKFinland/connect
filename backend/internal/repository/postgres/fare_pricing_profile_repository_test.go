@@ -11,6 +11,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
 func TestFarePricingProfileRepositoryResolveEffective(
@@ -42,10 +43,24 @@ func TestFarePricingProfileRepositoryResolveEffective(
 	}
 	defer db.Close()
 
-	const companyID = "345c5e3e-b07a-4e16-837d-e5d32254d6f3"
+	driverFixture, cleanupDriverFixture, err :=
+		testutil.CreateDriverFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated driver fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupDriverFixture(
+			context.Background(),
+		); err != nil {
+			t.Errorf(
+				"cleanup isolated driver fixture: %v",
+				err,
+			)
+		}
+	}()
 
-	branchID :=
-		"186f7570-6902-41a2-a1f9-d509a4d90fcb"
+	companyID := driverFixture.CompanyID
+	branchID := driverFixture.BranchID
 
 	categoryRepo :=
 		NewServiceCategoryRepository(db)
@@ -72,23 +87,31 @@ func TestFarePricingProfileRepositoryResolveEffective(
 	}
 
 	defer func() {
-		_, _ = db.Exec(
-			context.Background(),
-			`
-				DELETE FROM fare_pricing_profiles
-				WHERE service_category_id = $1
-			`,
-			category.ID,
-		)
+		cleanupCtx := context.Background()
 
-		_, _ = db.Exec(
-			context.Background(),
-			`
-				DELETE FROM service_categories
-				WHERE id = $1
-			`,
+		if _, err := db.Exec(
+			cleanupCtx,
+			`DELETE FROM fare_pricing_profiles
+			 WHERE service_category_id = $1`,
 			category.ID,
-		)
+		); err != nil {
+			t.Errorf(
+				"cleanup pricing profiles: %v",
+				err,
+			)
+		}
+
+		if _, err := db.Exec(
+			cleanupCtx,
+			`DELETE FROM service_categories
+			 WHERE id = $1`,
+			category.ID,
+		); err != nil {
+			t.Errorf(
+				"cleanup service category: %v",
+				err,
+			)
+		}
 	}()
 
 	now := time.Now().UTC()

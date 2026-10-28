@@ -11,6 +11,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -43,7 +44,17 @@ func TestBeginStandardDispatchPersistsAndPreservesMarker(t *testing.T) {
 	rideID := uuid.NewString()
 	now := time.Now().UTC()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	_, err = db.Exec(ctx, `
 		INSERT INTO ride_requests (
@@ -183,7 +194,17 @@ func TestBeginStandardDispatchRejectsIneligibleRequests(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	tests := []struct {
 		name         string
@@ -331,7 +352,17 @@ func TestDispatchRidePreservesMarkerWhenNoDriversAvailable(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	rideID := uuid.NewString()
 	now := time.Now().UTC()
@@ -471,7 +502,17 @@ func TestCreateOfferPreservesMarkerWhenNoDriversAvailable(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	rideID := uuid.NewString()
 	now := time.Now().UTC()
@@ -614,7 +655,17 @@ func TestCreateOfferExpiresRideWhenExpiryChangesAfterPreflight(t *testing.T) {
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	rideID := uuid.NewString()
 	now := time.Now().UTC()

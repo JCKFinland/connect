@@ -56,7 +56,16 @@ func TestDriverEarningRepositoryCreateFromPaidPayment(t *testing.T) {
 		}
 	}()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	driverFixture, cleanupDriverFixture, err :=
 		testutil.CreateDriverFixture(
@@ -347,6 +356,16 @@ func TestDriverEarningRepositoryCreateFromPaidPayment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create driver earning from paid payment: %v", err)
 	}
+
+	defer func() {
+		if _, cleanupErr := db.Exec(
+			context.Background(),
+			`DELETE FROM driver_earnings WHERE id = $1`,
+			earning.ID,
+		); cleanupErr != nil {
+			t.Errorf("cleanup driver earning: %v", cleanupErr)
+		}
+	}()
 
 	if earning.ID == "" {
 		t.Fatal("expected driver earning ID")

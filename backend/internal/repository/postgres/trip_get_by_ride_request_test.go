@@ -66,13 +66,23 @@ func TestTripRepositoryGetIDByRideRequestID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin test transaction: %v", err)
 	}
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		_ = tx.Rollback(context.Background())
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
+
 	defer func() {
 		_ = tx.Rollback(context.Background())
 	}()
 
 	repo := NewTripRepositoryWithDB(tx)
-
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
 	requestID := uuid.NewString()
 	tripID := uuid.NewString()
 	now := time.Now().UTC()

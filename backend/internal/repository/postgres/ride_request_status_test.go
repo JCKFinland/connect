@@ -12,6 +12,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/repository"
+	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
 func TestRideRequestRepositoryUpdateStatusRequiresExpectedCurrentStatus(
@@ -55,7 +56,16 @@ func TestRideRequestRepositoryUpdateStatusRequiresExpectedCurrentStatus(
 	}
 	defer db.Close()
 
-	const customerID = "49c61249-8b7d-4afd-a559-6d54567ee164"
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
 
 	rideRequestID := uuid.NewString()
 	now := time.Now().UTC()

@@ -11,6 +11,7 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/config"
 	"github.com/JCKFinland/connect/backend/internal/database"
 	"github.com/JCKFinland/connect/backend/internal/models"
+	"github.com/JCKFinland/connect/backend/internal/testutil"
 )
 
 func TestRideRequestRepositoryMatchingModeReadPaths(t *testing.T) {
@@ -39,6 +40,17 @@ func TestRideRequestRepositoryMatchingModeReadPaths(t *testing.T) {
 	}
 	defer db.Close()
 
+	customerID, cleanupCustomer, err :=
+		testutil.CreateCustomerFixture(ctx, db)
+	if err != nil {
+		t.Fatalf("create isolated customer fixture: %v", err)
+	}
+	defer func() {
+		if err := cleanupCustomer(context.Background()); err != nil {
+			t.Errorf("cleanup isolated customer fixture: %v", err)
+		}
+	}()
+
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin transaction: %v", err)
@@ -58,7 +70,7 @@ func TestRideRequestRepositoryMatchingModeReadPaths(t *testing.T) {
 			CreatedAt: now,
 			UpdatedAt: now,
 		},
-		CustomerID:           "49c61249-8b7d-4afd-a559-6d54567ee164",
+		CustomerID:           customerID,
 		PickupAddress:        "Matching Mode Test Pickup",
 		PickupLatitude:       60.2055,
 		PickupLongitude:      24.6559,
