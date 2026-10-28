@@ -1,0 +1,257 @@
+package driver_payout
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const (
+	postgresRecoveryLeaseDuration = 45 * time.Second
+	postgresRecoveryCooldown      = 5 * time.Minute
+	postgresRecoveryLookupTimeout = 30 * time.Second
+)
+
+// PostgresPayoutRecoveryWorker performs explicitly invoked,
+// lookup-only recovery using durable PostgreSQL coordination.
+//
+// It is never automatically scheduled.
+//
+// Acquiring a lease authorizes only a provider lookup.
+// It never authorizes transfer initiation or payout finalization.
+type PostgresPayoutRecoveryWorker struct {
+	db         *pgxpool.Pool
+	inspector  PayoutRecoveryLookup
+	owner      string
+	staleAfter time.Duration
+	batchSize  int
+	runGate    chan struct{}
+}
+
+func NewPostgresPayoutRecoveryWorker(
+	db *pgxpool.Pool,
+	inspector PayoutRecoveryLookup,
+	staleAfter time.Duration,
+	batchSize int,
+) (*PostgresPayoutRecoveryWorker, error) {
+	if db == nil ||
+		inspector == nil ||
+		staleAfter <= 0 ||
+		batchSize < 1 ||
+		batchSize > maxPayoutRecoveryBatchSize {
+		return nil, ErrInvalidRecovery
+	}
+
+	return &PostgresPayoutRecoveryWorker{
+		db:         db,
+		inspector:  inspector,
+		owner:      uuid.NewString(),
+		staleAfter: staleAfter,
+		batchSize:  batchSize,
+		runGate:    make(chan struct{}, 1),
+	}, nil
+}
+
+// RunOnce performs one bounded discovery and lookup-only cycle.
+//
+// PostgreSQL leases coordinate independent worker processes.
+// Cooldown begins at acquisition and survives worker restarts.
+func (w *PostgresPayoutRecoveryWorker) RunOnce(
+	ctx context.Context,
+	onError func(error),
+) error {
+	if w == nil ||
+		w.db == nil ||
+		w.inspector == nil ||
+		w.owner == "" ||
+		w.runGate == nil ||
+		w.staleAfter <= 0 ||
+		w.batchSize < 1 ||
+		w.batchSize > maxPayoutRecoveryBatchSize ||
+		ctx == nil {
+		return ErrInvalidRecovery
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	select {
+	case w.runGate <- struct{}{}:
+		defer func() {
+			<-w.runGate
+		}()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	candidates, err := w.inspector.DiscoverCandidates(
+		ctx,
+		time.Now().UTC().Add(-w.staleAfter),
+		w.batchSize,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"discover payout recovery candidates: %w",
+			err,
+		)
+	}
+
+	if len(candidates) > w.batchSize {
+		return errors.New(
+			"payout recovery discovery exceeded batch limit",
+		)
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+
+	for _, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		if candidate.PayoutID == "" ||
+			candidate.IdempotencyKey == "" {
+			if onError != nil {
+				onError(errors.New(
+					"incomplete payout recovery identity",
+				))
+			}
+			continue
+		}
+
+		if _, exists := seen[candidate.PayoutID]; exists {
+			continue
+		}
+		seen[candidate.PayoutID] = struct{}{}
+
+		lease, acquired, err :=
+			postgresrepo.AcquireDriverPayoutRecoveryLease(
+				ctx,
+				w.db,
+				candidate.PayoutID,
+				w.owner,
+				postgresRecoveryLeaseDuration,
+				postgresRecoveryCooldown,
+			)
+
+		if err != nil {
+			if onError != nil {
+				onError(fmt.Errorf(
+					"acquire recovery lease %s: %w",
+					candidate.PayoutID,
+					err,
+				))
+			}
+			continue
+		}
+
+		if !acquired {
+			continue
+		}
+
+		if lease == nil {
+			if onError != nil {
+				onError(errors.New(
+					"recovery lease acquired without token",
+				))
+			}
+			continue
+		}
+
+		// The lease is longer than the provider lookup timeout.
+		// No financial state is changed by this operation.
+		lookupCtx, cancel := context.WithTimeout(
+			ctx,
+			postgresRecoveryLookupTimeout,
+		)
+
+		// Revalidate the complete authoritative execution identity
+		// after lease acquisition and before provider contact.
+		// A mismatch must never reach the provider.
+		identityErr := postgresrepo.ValidateDriverPayoutRecoveryIdentity(
+			lookupCtx,
+			w.db,
+			candidate,
+		)
+
+		var observation RecoveryObservation
+		var lookupErr error
+
+		if identityErr != nil {
+			lookupErr = fmt.Errorf(
+				"validate payout recovery identity: %w",
+				identityErr,
+			)
+		} else {
+			observation, lookupErr =
+				w.inspector.InspectCandidate(
+					lookupCtx,
+					candidate,
+				)
+		}
+
+		lookupCtxErr := lookupCtx.Err()
+		cancel()
+
+		// Release must not depend on a canceled lookup context.
+		releaseCtx, releaseCancel := context.WithTimeout(
+			context.Background(),
+			5*time.Second,
+		)
+
+		released, releaseErr :=
+			postgresrepo.ReleaseDriverPayoutRecoveryLease(
+				releaseCtx,
+				w.db,
+				candidate.PayoutID,
+				lease.Token,
+			)
+
+		releaseCancel()
+
+		if releaseErr != nil && onError != nil {
+			onError(fmt.Errorf(
+				"release recovery lease %s: %w",
+				candidate.PayoutID,
+				releaseErr,
+			))
+		}
+
+		if releaseErr == nil && !released && onError != nil {
+			onError(fmt.Errorf(
+				"recovery lease ownership expired or changed: %s",
+				candidate.PayoutID,
+			))
+		}
+
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		if lookupErr == nil && lookupCtxErr != nil {
+			lookupErr = lookupCtxErr
+		}
+
+		if lookupErr == nil {
+			lookupErr = observation.LookupError
+		}
+
+		if lookupErr != nil && onError != nil {
+			onError(fmt.Errorf(
+				"investigate driver payout %s: %w",
+				candidate.PayoutID,
+				lookupErr,
+			))
+		}
+
+		// Provider observations are never financial finalization.
+	}
+
+	return nil
+}

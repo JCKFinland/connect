@@ -66,6 +66,34 @@ func CreateDriverPayoutExecution(
 
 	var result *DriverPayoutExecution
 
+	// Legacy execution creation is permitted only before destination
+	// binding becomes part of the database schema.
+	//
+	// Once migration 00074 is installed, callers must use the
+	// destination-aware creation path.
+	var destinationColumnExists bool
+
+	schemaErr := db.QueryRow(ctx, `
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'driver_payout_executions'
+              AND column_name = 'destination_id'
+        )
+    `).Scan(&destinationColumnExists)
+
+	if schemaErr != nil {
+		return nil, fmt.Errorf(
+			"check payout destination schema: %w",
+			schemaErr,
+		)
+	}
+
+	if destinationColumnExists {
+		return nil, ErrDriverPayoutExecutionConflict
+	}
+
 	err = RunInTransaction(ctx, db, func(tx pgx.Tx) error {
 		var amount string
 		var currency string
