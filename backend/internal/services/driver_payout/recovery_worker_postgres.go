@@ -15,6 +15,7 @@ const (
 	postgresRecoveryLeaseDuration = 45 * time.Second
 	postgresRecoveryCooldown      = 5 * time.Minute
 	postgresRecoveryLookupTimeout = 30 * time.Second
+	postgresRecoveryLeaseMargin   = 5 * time.Second
 )
 
 // PostgresPayoutRecoveryWorker performs explicitly invoked,
@@ -164,11 +165,15 @@ func (w *PostgresPayoutRecoveryWorker) RunOnce(
 			continue
 		}
 
-		// The lease is longer than the provider lookup timeout.
-		// No financial state is changed by this operation.
-		lookupCtx, cancel := context.WithTimeout(
+		// Reserve enough time for identity validation and the
+		// provider lookup. Never contact the provider after the
+		// authoritative lease deadline has become too close.
+		leaseDeadline := lease.ExpiresAt.Add(
+			-postgresRecoveryLeaseMargin,
+		)
+		lookupCtx, cancel := context.WithDeadline(
 			ctx,
-			postgresRecoveryLookupTimeout,
+			leaseDeadline,
 		)
 
 		// Revalidate the complete authoritative execution identity
@@ -188,12 +193,51 @@ func (w *PostgresPayoutRecoveryWorker) RunOnce(
 				"validate payout recovery identity: %w",
 				identityErr,
 			)
+		} else if !recoveryLeaseAllowsLookup(
+			leaseDeadline,
+			time.Now(),
+		) {
+			lookupErr = errors.New(
+				"insufficient recovery lease lifetime for provider lookup",
+			)
+		} else if err := lookupCtx.Err(); err != nil {
+			lookupErr = err
 		} else {
-			observation, lookupErr =
-				w.inspector.InspectCandidate(
+			owned, ownershipErr :=
+				postgresrepo.ValidateDriverPayoutRecoveryLease(
 					lookupCtx,
-					candidate,
+					w.db,
+					candidate.PayoutID,
+					lease.Token,
+					postgresRecoveryLookupTimeout+
+						postgresRecoveryLeaseMargin,
 				)
+
+			if ownershipErr != nil {
+				lookupErr = fmt.Errorf(
+					"validate recovery lease ownership: %w",
+					ownershipErr,
+				)
+			} else if !owned {
+				lookupErr = errors.New(
+					"recovery lease ownership expired or changed",
+				)
+			} else if err := lookupCtx.Err(); err != nil {
+				lookupErr = err
+			} else if !recoveryLeaseAllowsLookup(
+				leaseDeadline,
+				time.Now(),
+			) {
+				lookupErr = errors.New(
+					"insufficient recovery lease lifetime for provider lookup",
+				)
+			} else {
+				observation, lookupErr =
+					w.inspector.InspectCandidate(
+						lookupCtx,
+						candidate,
+					)
+			}
 		}
 
 		lookupCtxErr := lookupCtx.Err()
@@ -254,4 +298,16 @@ func (w *PostgresPayoutRecoveryWorker) RunOnce(
 	}
 
 	return nil
+}
+
+// recoveryLeaseAllowsLookup permits a provider lookup only when
+// sufficient time remains before the lease safety deadline.
+// The caller must also respect context cancellation.
+func recoveryLeaseAllowsLookup(
+	deadline time.Time,
+	now time.Time,
+) bool {
+	return !now.Add(
+		postgresRecoveryLookupTimeout,
+	).After(deadline)
 }
