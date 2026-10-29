@@ -100,9 +100,9 @@ func (h *TripHandler) CreateTrip(c *gin.Context) {
 			return
 		}
 
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": err.Error(),
+			"message": "Failed to create trip",
 		})
 		return
 	}
