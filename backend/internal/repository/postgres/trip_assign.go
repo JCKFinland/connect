@@ -26,6 +26,31 @@ func (r *TripRepository) AssignDriver(
 		  AND deleted_at IS NULL
 		  AND is_active = TRUE
 		  AND status = 'ASSIGNED'
+		  AND EXISTS (
+		      SELECT 1
+		      FROM drivers AS d
+		      JOIN vehicles AS v
+		        ON v.id = $2
+		       AND v.company_id = d.company_id
+		       AND v.branch_id = d.branch_id
+		       AND v.is_active = TRUE
+		       AND v.deleted_at IS NULL
+		      JOIN driver_assignments AS da
+		        ON da.driver_id = d.user_id
+		       AND da.vehicle_id = v.id
+		       AND da.company_id = d.company_id
+		       AND da.branch_id = d.branch_id
+		       AND da.fleet_id = v.fleet_id
+		       AND da.unassigned_at IS NULL
+		      WHERE d.user_id = $1
+		        AND d.company_id = trips.company_id
+		        AND d.branch_id = trips.branch_id
+		        AND v.fleet_id = trips.fleet_id
+		        AND d.is_active = TRUE
+		        AND d.is_verified = TRUE
+		        AND d.status = 'ACTIVE'
+		        AND d.deleted_at IS NULL
+		  )
 	`
 
 	result, err := r.db.Exec(
