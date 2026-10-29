@@ -48,11 +48,16 @@ func (s *tripService) ListEvents(
 		)
 	}
 
-	if !canViewTripEvents(
+	allowed, err := s.canViewTripAuthorized(
+		ctx,
 		roles,
 		userID,
 		trip,
-	) {
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
 		return nil, ErrTripEventAccessDenied
 	}
 

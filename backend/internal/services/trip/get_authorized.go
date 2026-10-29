@@ -47,11 +47,16 @@ func (s *tripService) GetByIDAuthorized(
 		)
 	}
 
-	if !canViewTrip(
+	allowed, err := s.canViewTripAuthorized(
+		ctx,
 		roles,
 		userID,
 		result,
-	) {
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
 		return nil, ErrTripAccessDenied
 	}
 
@@ -91,4 +96,28 @@ func canViewTrip(
 	}
 
 	return false
+}
+
+// canViewTripAuthorized preserves customer and assigned-driver access
+// while restricting operational roles to their company membership.
+func (s *tripService) canViewTripAuthorized(
+	ctx context.Context,
+	roles []string,
+	userID string,
+	result *models.Trip,
+) (bool, error) {
+	if result == nil || userID == "" {
+		return false, nil
+	}
+
+	if result.DriverID == userID || result.CustomerID == userID {
+		return true, nil
+	}
+
+	return s.hasOperationalCompanyAuthority(
+		ctx,
+		userID,
+		result.CompanyID,
+		roles,
+	)
 }
