@@ -527,7 +527,6 @@ func (h *TripHandler) DeleteTrip(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "Failed to delete trip",
-			"error":   err.Error(),
 		})
 		return
 	}
