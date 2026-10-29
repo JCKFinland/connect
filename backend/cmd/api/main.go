@@ -326,15 +326,16 @@ func run() (exitCode int) {
 
 	tripService := tripservice.NewService(
 		tripservice.Dependencies{
-			DB:                db,
-			Trips:             tripRepo,
-			RideRequests:      rideRequestRepo,
-			RideRequestAccess: rideRequestService,
-			Presence:          driverPresenceRepo,
-			TripEvents:        tripEventRepo,
-			UserRoles:         userRoleRepo,
-			TripLocations:     tripLocationRepo,
-			FareCalculator:    fareservice.NewService(),
+			DB:                 db,
+			CompanyMemberships: companyMembershipRepo,
+			Trips:              tripRepo,
+			RideRequests:       rideRequestRepo,
+			RideRequestAccess:  rideRequestService,
+			Presence:           driverPresenceRepo,
+			TripEvents:         tripEventRepo,
+			UserRoles:          userRoleRepo,
+			TripLocations:      tripLocationRepo,
+			FareCalculator:     fareservice.NewService(),
 		},
 	)
 
