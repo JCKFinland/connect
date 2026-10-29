@@ -13,7 +13,10 @@ import (
 	"github.com/JCKFinland/connect/backend/internal/services/trip"
 )
 
-const tripStreamHeartbeatInterval = 15 * time.Second
+const (
+	tripStreamHeartbeatInterval     = 15 * time.Second
+	tripStreamAuthorizationInterval = 15 * time.Second
+)
 
 type TripStreamHandler struct {
 	trips    trip.Service
@@ -152,6 +155,21 @@ func (h *TripStreamHandler) Stream(c *gin.Context) {
 	)
 	defer heartbeat.Stop()
 
+	authorizationTicker := time.NewTicker(
+		tripStreamAuthorizationInterval,
+	)
+	defer authorizationTicker.Stop()
+
+	// Fail closed if authorization is revoked or unavailable.
+	revalidate := func() bool {
+		_, err := h.trips.GetByIDAuthorized(
+			c.Request.Context(),
+			tripID,
+			user.ID,
+		)
+		return err == nil
+	}
+
 	c.SSEvent(
 		"connected",
 		gin.H{
@@ -169,11 +187,21 @@ func (h *TripStreamHandler) Stream(c *gin.Context) {
 			return
 
 		case event := <-events:
+			// Never forward an event without current authorization.
+			if !revalidate() {
+				return
+			}
+
 			c.SSEvent(
 				event.Type,
 				event.Data,
 			)
 			c.Writer.Flush()
+
+		case <-authorizationTicker.C:
+			if !revalidate() {
+				return
+			}
 
 		case <-heartbeat.C:
 			c.SSEvent(
