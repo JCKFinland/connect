@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
 // Create creates a new trip after applying basic business validation.
@@ -93,6 +95,13 @@ func (s *tripService) CreateAuthorized(
 	userID string,
 ) error {
 
+	if trip == nil {
+		return fmt.Errorf("trip is required")
+	}
+	if trip.CompanyID == "" {
+		return fmt.Errorf("company ID is required")
+	}
+
 	if err := s.authorizeOperationalMutation(
 		ctx,
 		userID,
@@ -100,8 +109,43 @@ func (s *tripService) CreateAuthorized(
 		return err
 	}
 
-	return s.Create(
+	roles, err := s.userRoles.GetUserRoles(
 		ctx,
-		trip,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"get user roles for trip creation: %w",
+			err,
+		)
+	}
+
+	if s.db == nil {
+		return fmt.Errorf("trip database is not configured")
+	}
+
+	return postgresrepo.RunInTransaction(
+		ctx,
+		s.db,
+		func(tx pgx.Tx) error {
+			allowed, err := s.hasOperationalCompanyAuthorityForUpdate(
+				ctx,
+				tx,
+				userID,
+				trip.CompanyID,
+				roles,
+			)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return ErrTripMutationAccessDenied
+			}
+
+			transactionService := *s
+			transactionService.repo = postgresrepo.NewTripRepositoryWithDB(tx)
+
+			return transactionService.Create(ctx, trip)
+		},
 	)
 }

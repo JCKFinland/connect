@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/JCKFinland/connect/backend/internal/models"
+	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
 // Update updates editable trip information.
@@ -49,16 +51,46 @@ func (s *tripService) UpdateAuthorized(
 		return err
 	}
 
-	// Confirm the trip exists before attempting the update.
-	if _, err := s.repo.GetByID(
-		ctx,
-		trip.ID,
-	); err != nil {
-		return err
+	// Authorize against the persisted company while holding the trip
+	// row lock. Update through the same transaction.
+	if s.db == nil {
+		return fmt.Errorf("trip database is not configured")
 	}
 
-	return s.repo.Update(
+	roles, err := s.userRoles.GetUserRoles(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get user roles for trip update: %w", err)
+	}
+
+	return postgresrepo.RunInTransaction(
 		ctx,
-		trip,
+		s.db,
+		func(tx pgx.Tx) error {
+			trips := postgresrepo.NewTripRepositoryWithDB(tx)
+
+			currentTrip, err := trips.GetByIDForUpdate(ctx, trip.ID)
+			if err != nil {
+				return fmt.Errorf("get trip for update: %w", err)
+			}
+
+			allowed, err := s.hasOperationalCompanyAuthorityForUpdate(
+				ctx,
+				tx, userID,
+				currentTrip.CompanyID,
+				roles,
+			)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return ErrTripMutationAccessDenied
+			}
+
+			if err := trips.Update(ctx, trip); err != nil {
+				return fmt.Errorf("update authorized trip: %w", err)
+			}
+
+			return nil
+		},
 	)
 }

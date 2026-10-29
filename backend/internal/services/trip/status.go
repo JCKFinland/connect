@@ -145,11 +145,16 @@ func (s *tripService) UpdateStatus(
 				)
 			}
 
-			if !canUpdateTripStatus(
-				roles,
+			allowed, err := s.canUpdateTripStatusAuthorizedForUpdate(
+				ctx,
+				tx, roles,
 				performedByUserID,
 				currentTrip,
-			) {
+			)
+			if err != nil {
+				return err
+			}
+			if !allowed {
 				return ErrTripStatusAccessDenied
 			}
 

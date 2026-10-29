@@ -69,6 +69,29 @@ func (s *tripService) DeleteAuthorized(
 					err,
 				)
 			}
+			roles, err := s.userRoles.GetUserRoles(
+				ctx,
+				userID,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"get user roles for trip deletion: %w",
+					err,
+				)
+			}
+
+			allowed, err := s.hasOperationalCompanyAuthorityForUpdate(
+				ctx,
+				tx, userID,
+				currentTrip.CompanyID,
+				roles,
+			)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return ErrTripMutationAccessDenied
+			}
 
 			if currentTrip.Status != StatusCompleted &&
 				currentTrip.Status != StatusCancelled {

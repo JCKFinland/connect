@@ -84,6 +84,43 @@ func (r *CompanyMembershipRepository) Exists(
 	return exists, err
 }
 
+// ExistsForShare checks membership while acquiring a PostgreSQL row lock.
+//
+// The repository must be constructed with a transaction-bound DBTX.
+// The FOR SHARE lock remains held until that transaction commits or rolls back,
+// preventing concurrent membership deletion from overtaking the mutation.
+func (r *CompanyMembershipRepository) ExistsForShare(
+	ctx context.Context,
+	userID string,
+	companyID string,
+) (bool, error) {
+	const query = `
+        SELECT user_id
+        FROM company_memberships
+        WHERE user_id = $1
+          AND company_id = $2
+        FOR SHARE
+    `
+
+	var lockedUserID string
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		userID,
+		companyID,
+	).Scan(&lockedUserID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
 func (r *CompanyMembershipRepository) ListByUserID(
 	ctx context.Context,
 	userID string,
