@@ -459,9 +459,9 @@ func (h *TripHandler) UpdateTrip(c *gin.Context) {
 			return
 		}
 
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": err.Error(),
+			"message": "Failed to update trip",
 		})
 		return
 	}

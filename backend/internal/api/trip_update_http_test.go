@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -108,6 +109,22 @@ func TestTripUpdateHTTPAuthorizationBoundary(t *testing.T) {
 			authenticated: true,
 			updateErr:     trip.ErrTripMutationAccessDenied,
 			wantStatus:    http.StatusForbidden,
+			wantLookups:   1,
+			wantUpdates:   1,
+		},
+		{
+			name:          "internal mutation failure",
+			authenticated: true,
+			updateErr:     errors.New(secret),
+			wantStatus:    http.StatusInternalServerError,
+			wantLookups:   1,
+			wantUpdates:   1,
+		},
+		{
+			name:          "wrapped internal mutation failure",
+			authenticated: true,
+			updateErr:     fmt.Errorf("update transaction failed: %w", errors.New(secret)),
+			wantStatus:    http.StatusInternalServerError,
 			wantLookups:   1,
 			wantUpdates:   1,
 		},
