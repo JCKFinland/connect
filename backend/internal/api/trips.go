@@ -345,9 +345,9 @@ func (h *TripHandler) ListTripEvents(c *gin.Context) {
 			return
 		}
 
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": err.Error(),
+			"message": "Failed to retrieve trip events",
 		})
 		return
 	}
