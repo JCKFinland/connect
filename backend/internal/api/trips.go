@@ -390,11 +390,20 @@ func (h *TripHandler) UpdateTrip(c *gin.Context) {
 		return
 	}
 
-	existingTrip, err := h.service.GetByID(
+	existingTrip, err := h.service.GetByIDAuthorized(
 		c.Request.Context(),
 		id,
+		user.ID,
 	)
 	if err != nil {
+		if errors.Is(err, trip.ErrTripAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not authorized to view this trip",
+			})
+			return
+		}
+
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -406,7 +415,6 @@ func (h *TripHandler) UpdateTrip(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "Failed to retrieve trip",
-			"error":   err.Error(),
 		})
 		return
 	}
