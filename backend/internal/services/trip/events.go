@@ -74,33 +74,3 @@ func (s *tripService) ListEvents(
 
 	return events, nil
 }
-
-func canViewTripEvents(
-	roles []string,
-	userID string,
-	trip *models.Trip,
-) bool {
-
-	if trip == nil {
-		return false
-	}
-
-	for _, role := range roles {
-		switch role {
-		case "SYSTEM_ADMIN",
-			"COMPANY_ADMIN",
-			"DISPATCHER":
-			return true
-		}
-	}
-
-	if trip.DriverID == userID {
-		return true
-	}
-
-	if trip.CustomerID == userID {
-		return true
-	}
-
-	return false
-}
