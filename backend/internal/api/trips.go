@@ -739,9 +739,17 @@ func (h *TripHandler) AssignDriver(c *gin.Context) {
 			return
 		}
 
-		c.JSON(http.StatusBadRequest, gin.H{
+		if errors.Is(err, trip.ErrTripAssignmentValidation) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Invalid trip driver assignment",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": err.Error(),
+			"message": "Failed to assign driver to trip",
 		})
 		return
 	}

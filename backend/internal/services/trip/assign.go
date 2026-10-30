@@ -2,10 +2,17 @@ package trip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	postgresrepo "github.com/JCKFinland/connect/backend/internal/repository/postgres"
 	"github.com/jackc/pgx/v5"
+)
+
+// ErrTripAssignmentValidation identifies invalid driver-assignment
+// input or a disallowed trip lifecycle state.
+var ErrTripAssignmentValidation = errors.New(
+	"invalid trip assignment operation",
 )
 
 // AssignDriver assigns a driver and vehicle to a trip.
@@ -17,15 +24,15 @@ func (s *tripService) AssignDriver(
 ) error {
 
 	if id == "" {
-		return fmt.Errorf("trip ID is required")
+		return fmt.Errorf("%w: trip ID is required", ErrTripAssignmentValidation)
 	}
 
 	if driverID == "" {
-		return fmt.Errorf("driver ID is required")
+		return fmt.Errorf("%w: driver ID is required", ErrTripAssignmentValidation)
 	}
 
 	if vehicleID == "" {
-		return fmt.Errorf("vehicle ID is required")
+		return fmt.Errorf("%w: vehicle ID is required", ErrTripAssignmentValidation)
 	}
 
 	currentTrip, err := s.repo.GetByID(
@@ -41,7 +48,8 @@ func (s *tripService) AssignDriver(
 
 	if currentTrip.Status != StatusAssigned {
 		return fmt.Errorf(
-			"cannot assign driver to trip in status %s",
+			"%w: cannot assign driver to trip in status %s",
+			ErrTripAssignmentValidation,
 			currentTrip.Status,
 		)
 	}
@@ -64,13 +72,13 @@ func (s *tripService) AssignDriverAuthorized(
 	userID string,
 ) error {
 	if id == "" {
-		return fmt.Errorf("trip ID is required")
+		return fmt.Errorf("%w: trip ID is required", ErrTripAssignmentValidation)
 	}
 	if driverID == "" {
-		return fmt.Errorf("driver ID is required")
+		return fmt.Errorf("%w: driver ID is required", ErrTripAssignmentValidation)
 	}
 	if vehicleID == "" {
-		return fmt.Errorf("vehicle ID is required")
+		return fmt.Errorf("%w: vehicle ID is required", ErrTripAssignmentValidation)
 	}
 
 	if err := s.authorizeOperationalMutation(
@@ -121,7 +129,8 @@ func (s *tripService) AssignDriverAuthorized(
 
 			if currentTrip.Status != StatusAssigned {
 				return fmt.Errorf(
-					"cannot assign driver to trip in status %s",
+					"%w: cannot assign driver to trip in status %s",
+					ErrTripAssignmentValidation,
 					currentTrip.Status,
 				)
 			}
