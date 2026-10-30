@@ -3,6 +3,7 @@ package trip
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,6 +16,12 @@ import (
 
 // CompleteTrip atomically finalizes operational trip measurements,
 // fare calculation, lifecycle state, audit event, and driver release.
+// ErrTripCompletionValidation identifies a client-correctable
+// completion precondition failure.
+var ErrTripCompletionValidation = errors.New(
+	"trip completion precondition failed",
+)
+
 func (s *tripService) CompleteTrip(
 	ctx context.Context,
 	id string,
@@ -127,7 +134,8 @@ func (s *tripService) CompleteTrip(
 			// operational IN_PROGRESS state.
 			if currentTrip.Status != StatusInProgress {
 				return fmt.Errorf(
-					"trip must be IN_PROGRESS before completion: current status %s",
+					"%w: trip must be IN_PROGRESS before completion: current status %s",
+					ErrTripCompletionValidation,
 					currentTrip.Status,
 				)
 			}
@@ -245,7 +253,8 @@ func (s *tripService) CompleteTrip(
 
 			if measurement.AcceptedSamples < 2 {
 				return fmt.Errorf(
-					"insufficient trip location evidence: accepted samples %d",
+					"%w: insufficient trip location evidence: accepted samples %d",
+					ErrTripCompletionValidation,
 					measurement.AcceptedSamples,
 				)
 			}

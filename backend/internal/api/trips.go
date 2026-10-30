@@ -661,9 +661,17 @@ func (h *TripHandler) Complete(c *gin.Context) {
 			return
 		}
 
-		c.JSON(http.StatusBadRequest, gin.H{
+		if errors.Is(err, trip.ErrTripCompletionValidation) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Trip is not ready for completion",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": err.Error(),
+			"message": "Failed to complete trip",
 		})
 		return
 	}
