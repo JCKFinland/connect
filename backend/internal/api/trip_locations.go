@@ -134,7 +134,7 @@ func (h *TripHandler) RecordTripLocation(c *gin.Context) {
 		):
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
-				"message": err.Error(),
+				"message": "Invalid trip location",
 			})
 			return
 
@@ -144,7 +144,7 @@ func (h *TripHandler) RecordTripLocation(c *gin.Context) {
 		):
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
-				"message": err.Error(),
+				"message": "Invalid trip location timestamp",
 			})
 			return
 
