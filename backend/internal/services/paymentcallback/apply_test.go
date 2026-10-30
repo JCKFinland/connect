@@ -12,6 +12,10 @@ import (
 )
 
 type fakePaymentTransactionRepository struct {
+	getByID func(
+		ctx context.Context,
+		id string,
+	) (*models.PaymentTransaction, error)
 	getByProviderTransactionID func(
 		ctx context.Context,
 		provider string,
@@ -27,10 +31,14 @@ func (f *fakePaymentTransactionRepository) Create(
 }
 
 func (f *fakePaymentTransactionRepository) GetByID(
-	context.Context,
-	string,
+	ctx context.Context,
+	id string,
 ) (*models.PaymentTransaction, error) {
-	panic("unexpected GetByID call")
+	if f.getByID == nil {
+		panic("unexpected GetByID call")
+	}
+
+	return f.getByID(ctx, id)
 }
 
 func (f *fakePaymentTransactionRepository) GetByReference(
