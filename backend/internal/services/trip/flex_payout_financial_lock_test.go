@@ -126,6 +126,14 @@ func TestFlexPayoutPreparationWaitsForFinancialBoundaryLock(t *testing.T) {
 		t.Fatalf("acquire payment financial lock: %v", err)
 	}
 
+	var lockHolderPID int
+	if err := lockTx.QueryRow(
+		ctx,
+		"SELECT pg_backend_pid()",
+	).Scan(&lockHolderPID); err != nil {
+		t.Fatalf("identify financial lock holder: %v", err)
+	}
+
 	type payoutOutcome struct {
 		payout *postgresrepo.PreparedDriverPayout
 		err    error
@@ -154,17 +162,46 @@ func TestFlexPayoutPreparationWaitsForFinancialBoundaryLock(t *testing.T) {
 
 	<-started
 
-	// A payout must not complete while its payment-scoped
-	// financial boundary lock remains held.
-	select {
-	case outcome := <-result:
-		t.Fatalf(
-			"payout completed before financial lock release: payout=%+v err=%v",
-			outcome.payout, outcome.err,
-		)
-	case <-time.After(300 * time.Millisecond):
-	case <-ctx.Done():
-		t.Fatalf("timed out while holding financial lock: %v", ctx.Err())
+	// Verify the actual PostgreSQL advisory-lock wait.
+	// The waiting backend must be blocked by our lock holder.
+	observedBlocked := false
+	deadline := time.Now().Add(5 * time.Second)
+
+	for time.Now().Before(deadline) {
+		var waiting int
+
+		if err := db.QueryRow(ctx, `
+            SELECT COUNT(*)
+            FROM pg_stat_activity
+            WHERE pid <> $1
+              AND datname = current_database()
+              AND state = 'active'
+              AND wait_event_type = 'Lock'
+              AND $1 = ANY(pg_blocking_pids(pid))
+              AND query LIKE '%pg_advisory_xact_lock%'
+        `, lockHolderPID).Scan(&waiting); err != nil {
+			t.Fatalf("inspect financial lock waiters: %v", err)
+		}
+
+		if waiting > 0 {
+			observedBlocked = true
+			break
+		}
+
+		select {
+		case outcome := <-result:
+			t.Fatalf(
+				"payout completed before financial lock release: payout=%+v err=%v",
+				outcome.payout, outcome.err,
+			)
+		case <-time.After(25 * time.Millisecond):
+		case <-ctx.Done():
+			t.Fatalf("timed out observing financial lock: %v", ctx.Err())
+		}
+	}
+
+	if !observedBlocked {
+		t.Fatal("payout never waited on the payment financial boundary lock")
 	}
 
 	var payoutCount int
