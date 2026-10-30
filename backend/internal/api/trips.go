@@ -162,7 +162,6 @@ func (h *TripHandler) GetTrip(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "Failed to retrieve trip",
-			"error":   err.Error(),
 		})
 		return
 	}
@@ -284,9 +283,9 @@ func (h *TripHandler) ListTrips(c *gin.Context) {
 			return
 		}
 
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": err.Error(),
+			"message": "Failed to retrieve trips",
 		})
 		return
 	}
