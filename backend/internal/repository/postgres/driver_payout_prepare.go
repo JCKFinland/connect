@@ -145,6 +145,51 @@ func PrepareFlexDriverPayout(
 				err,
 			)
 		}
+		// Acquire payment-scoped locks before earning row locks.
+		// Sorting guarantees a consistent order for multi-payment payouts.
+		paymentRows, err := tx.Query(ctx, `
+                SELECT DISTINCT e.payment_id::text
+                FROM driver_earnings e
+                WHERE e.driver_id = $1
+                  AND e.company_id = $2
+                  AND e.payment_id IS NOT NULL
+                  AND e.calculated_at >= $3
+                  AND e.calculated_at < $4
+                ORDER BY e.payment_id::text
+            `,
+			params.DriverID,
+			params.CompanyID,
+			params.PeriodStart,
+			params.PeriodEnd,
+		)
+		if err != nil {
+			return fmt.Errorf("list payout payment locks: %w", err)
+		}
+
+		paymentIDs := make([]string, 0)
+		for paymentRows.Next() {
+			var paymentID string
+			if err := paymentRows.Scan(&paymentID); err != nil {
+				paymentRows.Close()
+				return err
+			}
+			paymentIDs = append(paymentIDs, paymentID)
+		}
+		if err := paymentRows.Err(); err != nil {
+			paymentRows.Close()
+			return err
+		}
+		paymentRows.Close()
+
+		for _, paymentID := range paymentIDs {
+			if err := AcquireTransactionAdvisoryLock(
+				ctx,
+				tx,
+				"payment-financial-boundary:"+paymentID,
+			); err != nil {
+				return fmt.Errorf("lock payout financial boundary: %w", err)
+			}
+		}
 
 		earnings := make([]payoutEligibleEarning, 0)
 
@@ -170,7 +215,18 @@ func PrepareFlexDriverPayout(
 			  AND t.status = 'COMPLETED'
 			  AND t.deleted_at IS NULL
 			  AND rr.matching_mode = 'FLEX'
-			  AND p.status = 'PAID'
+                    AND p.status = 'PAID'
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM payment_transactions refund_tx
+                        WHERE refund_tx.payment_id = p.id
+                          AND refund_tx.transaction_type = 'REFUND'
+                          AND refund_tx.status IN (
+                              'PENDING',
+                              'PROCESSING',
+                              'SUCCESS'
+                          )
+                    )
 			  AND p.trip_id = t.id
 			  AND p.currency = e.currency
 			  AND p.amount = e.gross_amount

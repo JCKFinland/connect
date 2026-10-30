@@ -72,6 +72,17 @@ func (s *paymentTransactionService) InitiateOperation(
 				postgresrepo.NewPaymentTransactionRepositoryWithDB(
 					tx,
 				)
+			// Serialize refund initiation with payout preparation
+			// before either workflow acquires row locks.
+			if req.TransactionType == TypeRefund {
+				if err := postgresrepo.AcquireTransactionAdvisoryLock(
+					ctx,
+					tx,
+					"payment-financial-boundary:"+req.PaymentID,
+				); err != nil {
+					return fmt.Errorf("lock refund financial boundary: %w", err)
+				}
+			}
 
 			// Serialize all financial operations belonging to the
 			// same logical payment.
@@ -155,8 +166,27 @@ func (s *paymentTransactionService) InitiateOperation(
 			}
 
 			amount := currentPayment.Amount
-
 			if req.TransactionType == TypeRefund {
+				var payoutCommitted bool
+				if err := tx.QueryRow(ctx, `
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM driver_earnings e
+                                JOIN driver_payout_items i ON i.earning_id = e.id
+                                JOIN driver_payouts p ON p.id = i.payout_id
+                                WHERE e.payment_id = $1
+                                  AND p.payout_status IN ('PENDING', 'PROCESSING', 'PAID')
+                            )
+                        `, currentPayment.ID).Scan(&payoutCommitted); err != nil {
+					return fmt.Errorf("check refund payout commitment: %w", err)
+				}
+				if payoutCommitted {
+					return fmt.Errorf(
+						"%w: driver payout already committed",
+						ErrInvalidPaymentOperation,
+					)
+				}
+
 				if err := transactions.ValidateRefundAmount(
 					ctx,
 					currentPayment.ID,
