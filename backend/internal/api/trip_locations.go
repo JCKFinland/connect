@@ -162,7 +162,6 @@ func (h *TripHandler) RecordTripLocation(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
 				"message": "Failed to record trip location",
-				"error":   err.Error(),
 			})
 			return
 		}
@@ -244,7 +243,6 @@ func (h *TripHandler) ListTripLocations(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
 				"message": "Failed to retrieve trip locations",
-				"error":   err.Error(),
 			})
 			return
 		}
