@@ -33,6 +33,11 @@ var ErrTripStatusAccessDenied = errors.New(
 	"trip status access denied",
 )
 
+// ErrTripStatusValidation identifies invalid status input or lifecycle transitions.
+var ErrTripStatusValidation = errors.New(
+	"invalid trip status operation",
+)
+
 // UpdateStatus validates and atomically applies a trip lifecycle transition.
 //
 // Terminal transitions perform the related operational cleanup in the same
@@ -74,7 +79,8 @@ func (s *tripService) UpdateStatus(
 
 	if !isValidStatus(newStatus) {
 		return fmt.Errorf(
-			"invalid trip status: %s",
+			"%w: invalid trip status: %s",
+			ErrTripStatusValidation,
 			newStatus,
 		)
 	}
@@ -306,7 +312,8 @@ func validateStatusTransition(
 
 	if currentStatus == newStatus {
 		return fmt.Errorf(
-			"trip is already in status %s",
+			"%w: trip is already in status %s",
+			ErrTripStatusValidation,
 			currentStatus,
 		)
 	}
@@ -348,7 +355,8 @@ func validateStatusTransition(
 	}
 
 	return fmt.Errorf(
-		"invalid trip status transition: %s -> %s",
+		"%w: invalid trip status transition: %s -> %s",
+		ErrTripStatusValidation,
 		currentStatus,
 		newStatus,
 	)
