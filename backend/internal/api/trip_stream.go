@@ -204,6 +204,10 @@ func (h *TripStreamHandler) Stream(c *gin.Context) {
 			}
 
 		case <-heartbeat.C:
+			// Never emit a heartbeat after trip access is revoked.
+			if !revalidate() {
+				return
+			}
 			c.SSEvent(
 				"heartbeat",
 				gin.H{
