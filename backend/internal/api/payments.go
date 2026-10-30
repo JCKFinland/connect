@@ -88,10 +88,7 @@ func (h *PaymentHandler) CreateForCompletedTrip(
 			)
 
 		default:
-			response.BadRequest(
-				c,
-				err.Error(),
-			)
+			response.InternalServerError(c)
 		}
 
 		return
