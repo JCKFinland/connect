@@ -19,9 +19,10 @@ const (
 )
 
 type TripStreamHandler struct {
-	trips    trip.Service
-	broker   *realtime.Broker
-	shutdown <-chan struct{}
+	trips     trip.Service
+	broker    *realtime.Broker
+	shutdown  <-chan struct{}
+	heartbeat <-chan time.Time
 }
 
 func NewTripStreamHandler(
@@ -150,10 +151,15 @@ func (h *TripStreamHandler) Stream(c *gin.Context) {
 		"no",
 	)
 
-	heartbeat := time.NewTicker(
-		tripStreamHeartbeatInterval,
-	)
-	defer heartbeat.Stop()
+	heartbeatEvents := h.heartbeat
+
+	if heartbeatEvents == nil {
+		heartbeat := time.NewTicker(
+			tripStreamHeartbeatInterval,
+		)
+		defer heartbeat.Stop()
+		heartbeatEvents = heartbeat.C
+	}
 
 	authorizationTicker := time.NewTicker(
 		tripStreamAuthorizationInterval,
@@ -203,7 +209,7 @@ func (h *TripStreamHandler) Stream(c *gin.Context) {
 				return
 			}
 
-		case <-heartbeat.C:
+		case <-heartbeatEvents:
 			// Never emit a heartbeat after trip access is revoked.
 			if !revalidate() {
 				return
