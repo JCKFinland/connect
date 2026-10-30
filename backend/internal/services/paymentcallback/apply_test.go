@@ -140,29 +140,21 @@ func TestApplyProviderCallbackForwardsVerifiedResult(
 
 	repo :=
 		&fakePaymentTransactionRepository{
-			getByProviderTransactionID: func(
+			getByID: func(
 				_ context.Context,
-				provider string,
-				providerTransactionID string,
+				id string,
 			) (*models.PaymentTransaction, error) {
-				if provider != "TEST_PROVIDER" {
-					t.Fatalf(
-						"unexpected provider %q",
-						provider,
-					)
+				if id != "transaction-123" {
+					t.Fatalf("unexpected transaction ID %q", id)
 				}
-
-				if providerTransactionID != "provider-123" {
-					t.Fatalf(
-						"unexpected provider transaction ID %q",
-						providerTransactionID,
-					)
-				}
+				provider := "TEST_PROVIDER"
+				providerTransactionID := "provider-123"
 
 				return &models.PaymentTransaction{
 					BaseModel: models.BaseModel{
 						ID: "transaction-123",
 					},
+					PaymentID: "payment-123",
 
 					Provider: provider,
 
@@ -228,6 +220,8 @@ func TestApplyProviderCallbackForwardsVerifiedResult(
 			ApplyProviderCallbackRequest{
 				Provider: "TEST_PROVIDER",
 
+				TransactionID:         "transaction-123",
+				PaymentID:             "payment-123",
 				ProviderTransactionID: "provider-123",
 
 				ProviderStatus: paymenttransaction.StatusSuccess,
@@ -256,9 +250,8 @@ func TestApplyProviderCallbackNotFound(
 	service := NewService(
 		Dependencies{
 			Transactions: &fakePaymentTransactionRepository{
-				getByProviderTransactionID: func(
+				getByID: func(
 					context.Context,
-					string,
 					string,
 				) (*models.PaymentTransaction, error) {
 					return nil, repository.ErrNotFound
@@ -275,6 +268,8 @@ func TestApplyProviderCallbackNotFound(
 			ApplyProviderCallbackRequest{
 				Provider: "TEST_PROVIDER",
 
+				TransactionID:         "missing-transaction",
+				PaymentID:             "payment-123",
 				ProviderTransactionID: "missing-provider-id",
 
 				ProviderStatus: paymenttransaction.StatusSuccess,

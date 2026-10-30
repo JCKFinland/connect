@@ -50,6 +50,12 @@ func (s *paymentCallbackService) ApplyProviderCallback(
 			ErrInvalidCallback,
 		)
 	}
+	if req.TransactionID == "" || req.PaymentID == "" {
+		return nil, fmt.Errorf(
+			"%w: CONNECT transaction and payment identities are required",
+			ErrInvalidCallback,
+		)
+	}
 
 	if req.ProviderTransactionID == "" {
 		return nil, fmt.Errorf(
@@ -81,27 +87,12 @@ func (s *paymentCallbackService) ApplyProviderCallback(
 		transaction *models.PaymentTransaction
 		err         error
 	)
-
-	// Prefer the provider-authenticated CONNECT transaction identity.
-	//
-	// Stripe PaymentIntent IDs are provider resource identities and may be
-	// reused across AUTHORIZE, CAPTURE, and VOID operations.
-	if req.TransactionID != "" {
-		transaction, err =
-			s.transactions.GetByID(
-				ctx,
-				req.TransactionID,
-			)
-	} else {
-		// Backward-compatible fallback for providers that do not supply a
-		// trusted CONNECT transaction identity.
-		transaction, err =
-			s.transactions.GetByProviderTransactionID(
-				ctx,
-				req.Provider,
-				req.ProviderTransactionID,
-			)
-	}
+	// Resolve only the exact provider-authenticated CONNECT operation.
+	// Provider resource IDs can be shared by multiple operations.
+	transaction, err = s.transactions.GetByID(
+		ctx,
+		req.TransactionID,
+	)
 
 	if errors.Is(
 		err,
@@ -130,8 +121,7 @@ func (s *paymentCallbackService) ApplyProviderCallback(
 
 	// When the provider supplied the CONNECT payment identity, prove that the
 	// resolved operation belongs to exactly that payment.
-	if req.PaymentID != "" &&
-		transaction.PaymentID != req.PaymentID {
+	if transaction.PaymentID != req.PaymentID {
 
 		return nil, ErrInvalidCallback
 	}
