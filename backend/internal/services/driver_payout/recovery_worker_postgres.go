@@ -26,12 +26,13 @@ const (
 // Acquiring a lease authorizes only a provider lookup.
 // It never authorizes transfer initiation or payout finalization.
 type PostgresPayoutRecoveryWorker struct {
-	db         *pgxpool.Pool
-	inspector  PayoutRecoveryLookup
-	owner      string
-	staleAfter time.Duration
-	batchSize  int
-	runGate    chan struct{}
+	db               *pgxpool.Pool
+	inspector        PayoutRecoveryLookup
+	verifiedRecovery *LeaseFencedVerificationService
+	owner            string
+	staleAfter       time.Duration
+	batchSize        int
+	runGate          chan struct{}
 	// beforeLeaseValidation is a test-only synchronization hook.
 	// It is nil during normal operation.
 	beforeLeaseValidation func()
@@ -59,6 +60,23 @@ func NewPostgresPayoutRecoveryWorker(
 		batchSize:  batchSize,
 		runGate:    make(chan struct{}, 1),
 	}, nil
+}
+
+// ConfigureVerifiedRecovery installs an independent, lease-fenced,
+// read-only provider verification path.
+//
+// The existing inspector remains responsible for candidate discovery.
+// This configuration does not schedule or start the worker.
+func (w *PostgresPayoutRecoveryWorker) ConfigureVerifiedRecovery(
+	verifier *LeaseFencedVerificationService,
+) error {
+	if w == nil || w.db == nil || verifier == nil ||
+		verifier.db != w.db {
+		return ErrInvalidRecovery
+	}
+
+	w.verifiedRecovery = verifier
+	return nil
 }
 
 // RunOnce performs one bounded discovery and lookup-only cycle.
@@ -238,11 +256,21 @@ func (w *PostgresPayoutRecoveryWorker) RunOnce(
 					"insufficient recovery lease lifetime for provider lookup",
 				)
 			} else {
-				observation, lookupErr =
-					w.inspector.InspectCandidate(
-						lookupCtx,
-						candidate,
-					)
+				if w.verifiedRecovery != nil {
+					_, lookupErr =
+						w.verifiedRecovery.VerifyExistingTransfer(
+							lookupCtx,
+							candidate.PayoutID,
+							lease.Token,
+							postgresRecoveryLeaseMargin,
+						)
+				} else {
+					observation, lookupErr =
+						w.inspector.InspectCandidate(
+							lookupCtx,
+							candidate,
+						)
+				}
 			}
 		}
 
