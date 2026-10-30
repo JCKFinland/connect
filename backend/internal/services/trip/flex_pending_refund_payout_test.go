@@ -185,4 +185,95 @@ func TestFlexPendingRefundPreventsPayoutPreparation(t *testing.T) {
 	if earningStatus != "PENDING" {
 		t.Fatalf("earning changed despite refund: %s", earningStatus)
 	}
+
+	// A delayed successful refund must not make this earning
+	// eligible for payout after the pending refund blocked it.
+	completedRefund, err := paymenttransaction.NewService(db).ApplyResult(
+		ctx,
+		refund.ID,
+		paymenttransaction.ApplyResultRequest{
+			Status: paymenttransaction.StatusSuccess,
+		},
+	)
+	if err != nil {
+		t.Fatalf("apply delayed refund success: %v", err)
+	}
+	if completedRefund == nil ||
+		completedRefund.Status != paymenttransaction.StatusSuccess {
+		t.Fatalf("expected successful refund, got %+v", completedRefund)
+	}
+
+	var paymentStatus string
+	if err := db.QueryRow(ctx, `
+        SELECT status
+        FROM payments
+        WHERE id = $1
+    `, capture.PaymentID).Scan(&paymentStatus); err != nil {
+		t.Fatalf("read payment after delayed refund: %v", err)
+	}
+	if paymentStatus != "PARTIALLY_REFUNDED" {
+		t.Fatalf("expected PARTIALLY_REFUNDED, got %s", paymentStatus)
+	}
+
+	lateReference := "connect-refund-completed-" + uuid.NewString()
+
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(
+			context.Background(), 10*time.Second,
+		)
+		defer cleanupCancel()
+
+		_, _ = db.Exec(cleanupCtx, `
+            DELETE FROM driver_payout_items
+            WHERE payout_id IN (
+                SELECT id FROM driver_payouts
+                WHERE payout_reference = $1
+            )
+        `, lateReference)
+
+		_, _ = db.Exec(cleanupCtx, `
+            DELETE FROM driver_payouts
+            WHERE payout_reference = $1
+        `, lateReference)
+	})
+
+	latePayout, err := postgresrepo.PrepareFlexDriverPayout(
+		ctx,
+		db,
+		postgresrepo.PrepareDriverPayoutParams{
+			DriverID:        driverID,
+			CompanyID:       companyID,
+			PayoutReference: lateReference,
+			PeriodStart:     now.Add(-24 * time.Hour),
+			PeriodEnd:       now.Add(time.Hour),
+		},
+	)
+	if !errors.Is(err, postgresrepo.ErrDriverPayoutNoEligibleEarnings) {
+		t.Fatalf(
+			"expected successful refund to block payout, payout=%+v err=%v",
+			latePayout, err,
+		)
+	}
+
+	if err := db.QueryRow(ctx, `
+        SELECT COUNT(*)
+        FROM driver_payout_items
+        WHERE earning_id = $1
+    `, earningID).Scan(&payoutItems); err != nil {
+		t.Fatalf("count payout items after refund success: %v", err)
+	}
+	if payoutItems != 0 {
+		t.Fatalf("refunded earning claimed by %d payout items", payoutItems)
+	}
+
+	if err := db.QueryRow(ctx, `
+        SELECT settlement_status
+        FROM driver_earnings
+        WHERE id = $1
+    `, earningID).Scan(&earningStatus); err != nil {
+		t.Fatalf("read earning after refund success: %v", err)
+	}
+	if earningStatus != "PENDING" {
+		t.Fatalf("earning changed after refund success: %s", earningStatus)
+	}
 }
