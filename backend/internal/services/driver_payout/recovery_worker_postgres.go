@@ -18,13 +18,14 @@ const (
 	postgresRecoveryLeaseMargin   = 5 * time.Second
 )
 
-// PostgresPayoutRecoveryWorker performs explicitly invoked,
-// lookup-only recovery using durable PostgreSQL coordination.
+// PostgresPayoutRecoveryWorker performs explicitly invoked
+// payout recovery using durable PostgreSQL coordination.
 //
-// It is never automatically scheduled.
+// It is never automatically scheduled and never initiates transfers.
 //
-// Acquiring a lease authorizes only a provider lookup.
-// It never authorizes transfer initiation or payout finalization.
+// Financial finalization is disabled by default. When explicitly
+// authorized, it requires independently verified provider success
+// and a valid recovery lease.
 type PostgresPayoutRecoveryWorker struct {
 	db                           *pgxpool.Pool
 	inspector                    PayoutRecoveryLookup
@@ -97,7 +98,11 @@ func (w *PostgresPayoutRecoveryWorker) ConfigureFinancialFinalization() error {
 	return nil
 }
 
-// RunOnce performs one bounded discovery and lookup-only cycle.
+// RunOnce performs one bounded recovery cycle.
+//
+// Financial finalization requires explicit authorization and a
+// configured lease-fenced verifier. Invalid authorization fails closed
+// before candidate discovery.
 //
 // PostgreSQL leases coordinate independent worker processes.
 // Cooldown begins at acquisition and survives worker restarts.
@@ -114,6 +119,13 @@ func (w *PostgresPayoutRecoveryWorker) RunOnce(
 		w.batchSize < 1 ||
 		w.batchSize > maxPayoutRecoveryBatchSize ||
 		ctx == nil {
+		return ErrInvalidRecovery
+	}
+
+	if w.financialFinalizationEnabled &&
+		(w.verifiedRecovery == nil ||
+			w.verifiedRecovery.db != w.db ||
+			w.verifiedRecovery.verifier == nil) {
 		return ErrInvalidRecovery
 	}
 
