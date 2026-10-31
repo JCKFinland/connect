@@ -40,7 +40,8 @@ func ValidateProviderCapabilities(
 
 	if strings.TrimSpace(name) == "" ||
 		name != strings.TrimSpace(name) ||
-		len(name) > 100 ||
+		name != strings.ToUpper(name) ||
+		len(name) > 50 ||
 		isNilProviderCapability(capabilities.Submission) ||
 		isNilProviderCapability(capabilities.Details) {
 		return ErrInvalidProviderCapabilities

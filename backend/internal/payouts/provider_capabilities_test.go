@@ -66,6 +66,39 @@ func TestValidateProviderCapabilities(t *testing.T) {
 			},
 		},
 		{
+			name: "lowercase provider",
+			cap: ProviderCapabilities{
+				Name:       "test_bank",
+				Submission: submission,
+				Details:    details,
+			},
+		},
+		{
+			name: "mixed case provider",
+			cap: ProviderCapabilities{
+				Name:       "Test_Bank",
+				Submission: submission,
+				Details:    details,
+			},
+		},
+		{
+			name: "maximum length provider",
+			cap: ProviderCapabilities{
+				Name:       "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				Submission: submission,
+				Details:    details,
+			},
+			ok: true,
+		},
+		{
+			name: "oversized provider",
+			cap: ProviderCapabilities{
+				Name:       "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				Submission: submission,
+				Details:    details,
+			},
+		},
+		{
 			name: "missing submission",
 			cap: ProviderCapabilities{
 				Name:    "TEST_BANK",
