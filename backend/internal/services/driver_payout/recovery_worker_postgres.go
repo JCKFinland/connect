@@ -26,13 +26,14 @@ const (
 // Acquiring a lease authorizes only a provider lookup.
 // It never authorizes transfer initiation or payout finalization.
 type PostgresPayoutRecoveryWorker struct {
-	db               *pgxpool.Pool
-	inspector        PayoutRecoveryLookup
-	verifiedRecovery *LeaseFencedVerificationService
-	owner            string
-	staleAfter       time.Duration
-	batchSize        int
-	runGate          chan struct{}
+	db                           *pgxpool.Pool
+	inspector                    PayoutRecoveryLookup
+	verifiedRecovery             *LeaseFencedVerificationService
+	financialFinalizationEnabled bool
+	owner                        string
+	staleAfter                   time.Duration
+	batchSize                    int
+	runGate                      chan struct{}
 	// beforeLeaseValidation is a test-only synchronization hook.
 	// It is nil during normal operation.
 	beforeLeaseValidation func()
@@ -76,6 +77,23 @@ func (w *PostgresPayoutRecoveryWorker) ConfigureVerifiedRecovery(
 	}
 
 	w.verifiedRecovery = verifier
+	return nil
+}
+
+// ConfigureFinancialFinalization explicitly authorizes the worker
+// to finalize independently verified successful provider transfers.
+//
+// This configuration does not schedule the worker or initiate transfers.
+// The verified recovery service must already be configured.
+//
+// Financial finalization is disabled by default.
+func (w *PostgresPayoutRecoveryWorker) ConfigureFinancialFinalization() error {
+	if w == nil || w.db == nil || w.verifiedRecovery == nil ||
+		w.verifiedRecovery.db != w.db {
+		return ErrInvalidRecovery
+	}
+
+	w.financialFinalizationEnabled = true
 	return nil
 }
 
@@ -257,13 +275,29 @@ func (w *PostgresPayoutRecoveryWorker) RunOnce(
 				)
 			} else {
 				if w.verifiedRecovery != nil {
-					_, lookupErr =
+					verified, verificationErr :=
 						w.verifiedRecovery.VerifyExistingTransfer(
 							lookupCtx,
 							candidate.PayoutID,
 							lease.Token,
 							postgresRecoveryLeaseMargin,
 						)
+					lookupErr = verificationErr
+
+					if lookupErr == nil && w.financialFinalizationEnabled {
+						if verified == nil {
+							lookupErr = ErrAuthoritativeVerificationFailed
+						} else {
+							lookupErr = postgresrepo.FinalizeDriverPayoutRecoverySuccess(
+								lookupCtx,
+								w.db,
+								candidate.PayoutID,
+								candidate.Provider,
+								verified.ProviderReference,
+								lease.Token,
+							)
+						}
+					}
 				} else {
 					observation, lookupErr =
 						w.inspector.InspectCandidate(
