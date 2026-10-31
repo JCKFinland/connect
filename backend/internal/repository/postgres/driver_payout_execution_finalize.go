@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -29,6 +30,37 @@ func FinalizeDriverPayoutExecutionSuccess(
 	provider string,
 	providerReference string,
 ) error {
+	return finalizeDriverPayoutExecutionSuccess(
+		ctx, db, payoutID, provider, providerReference, "",
+	)
+}
+
+// FinalizeDriverPayoutRecoverySuccess requires an active recovery lease.
+// The lease row is locked inside the financial transaction.
+func FinalizeDriverPayoutRecoverySuccess(
+	ctx context.Context,
+	db *pgxpool.Pool,
+	payoutID string,
+	provider string,
+	providerReference string,
+	leaseToken string,
+) error {
+	if uuid.Validate(leaseToken) != nil {
+		return ErrDriverPayoutRecoveryLeaseInvalid
+	}
+	return finalizeDriverPayoutExecutionSuccess(
+		ctx, db, payoutID, provider, providerReference, leaseToken,
+	)
+}
+
+func finalizeDriverPayoutExecutionSuccess(
+	ctx context.Context,
+	db *pgxpool.Pool,
+	payoutID string,
+	provider string,
+	providerReference string,
+	leaseToken string,
+) error {
 	if db == nil {
 		return ErrDriverPayoutExecutionInvalidInput
 	}
@@ -50,6 +82,33 @@ func FinalizeDriverPayoutExecutionSuccess(
 	}
 
 	return RunInTransaction(ctx, db, func(tx pgx.Tx) error {
+		if leaseToken != "" {
+			var lockedToken string
+			err := tx.QueryRow(ctx, `
+				SELECT lease_token::text
+				FROM driver_payout_recovery_leases
+				WHERE payout_id = $1::uuid
+				  AND lease_token = $2::uuid
+				  AND lease_expires_at >
+				      clock_timestamp() +
+				      ($3::bigint * interval '1 microsecond')
+				FOR UPDATE
+			`, payoutID, leaseToken,
+				(5 * time.Second).Microseconds(),
+			).Scan(&lockedToken)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrDriverPayoutRecoveryLeaseInvalid
+			}
+			if err != nil {
+				return fmt.Errorf(
+					"lock recovery finalization lease: %w", err,
+				)
+			}
+			if lockedToken != leaseToken {
+				return ErrDriverPayoutRecoveryLeaseInvalid
+			}
+		}
+
 		var driverID, companyID string
 		var amount, currency, payoutStatus, method string
 		var payoutProvider, payoutProviderReference *string
@@ -370,6 +429,37 @@ func FinalizeDriverPayoutExecutionSuccess(
 		}
 		if tag.RowsAffected() != int64(itemCount) {
 			return ErrDriverPayoutExecutionConflict
+		}
+
+		// The recovery lease may expire while financial rows
+		// are being validated and updated. Recheck its lifetime
+		// before allowing the transaction to commit.
+		//
+		// The lease row remains locked from the initial
+		// SELECT FOR UPDATE until this transaction ends.
+		if leaseToken != "" {
+			var stillValid bool
+			err := tx.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1
+					FROM driver_payout_recovery_leases
+					WHERE payout_id = $1::uuid
+					  AND lease_token = $2::uuid
+					  AND lease_expires_at >
+					      clock_timestamp() +
+					      ($3::bigint * interval '1 microsecond')
+				)
+			`, payoutID, leaseToken,
+				(5 * time.Second).Microseconds(),
+			).Scan(&stillValid)
+			if err != nil {
+				return fmt.Errorf(
+					"revalidate recovery finalization lease: %w", err,
+				)
+			}
+			if !stillValid {
+				return ErrDriverPayoutRecoveryLeaseInvalid
+			}
 		}
 
 		return nil
