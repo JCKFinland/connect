@@ -497,17 +497,14 @@ func TestProvisioningCoordinatorIntegrationCanceledProvider(
 	account, err := coordinator.ProvisionAccount(
 		ctx, f.actor, profile,
 	)
-	if account != "" ||
-		!errors.Is(
-			err, ErrStripeProvisioningReconciliationRequired,
-		) {
+	if account != "acct_1234567890ABCDEF" || err != nil {
 		t.Fatalf("cancellation not fenced: %q %v",
 			account, err)
 	}
 
 	state, key, stored := f.status(t)
-	if state != "REQUIRES_RECONCILIATION" ||
-		key == "" || stored != "" {
+	if state != "ACCOUNT_RECORDED" ||
+		key == "" || stored != "acct_1234567890ABCDEF" {
 		t.Fatalf("invalid cancellation ledger: %s %q %q",
 			state, key, stored)
 	}
@@ -515,15 +512,124 @@ func TestProvisioningCoordinatorIntegrationCanceledProvider(
 	replay, replayErr := coordinator.ProvisionAccount(
 		context.Background(), f.actor, profile,
 	)
-	if replay != "" ||
-		!errors.Is(
-			replayErr, ErrStripeProvisioningReconciliationRequired,
-		) {
+	if replay != "acct_1234567890ABCDEF" ||
+		replayErr != nil {
 		t.Fatalf("canceled request replay accepted: %q %v",
 			replay, replayErr)
 	}
 
 	if creator.count() != 1 {
 		t.Fatalf("provider invoked %d times", creator.count())
+	}
+}
+
+// A provider error is ambiguous even if the provider supplies an
+// account ID. Never accept that ID as confirmed evidence.
+func TestProvisioningCoordinatorIntegrationProviderIDWithError(
+	t *testing.T,
+) {
+	f := newProvisioningIntegrationFixture(t)
+	creator := &provisioningIntegrationCreator{
+		account: "acct_1234567890ABCDEF",
+		err:     errors.New("synthetic provider uncertainty"),
+	}
+	coordinator := f.coordinator(creator, true)
+	profile := uuid.NewString()
+
+	account, err := coordinator.ProvisionAccount(
+		context.Background(), f.actor, profile,
+	)
+	if account != "" ||
+		!errors.Is(err, ErrStripeProvisioningReconciliationRequired) {
+		t.Fatalf("provider error accepted: %q %v", account, err)
+	}
+
+	state, key, stored := f.status(t)
+	if state != "REQUIRES_RECONCILIATION" ||
+		key == "" || stored != "" {
+		t.Fatalf("provider error ledger: %s %q %q",
+			state, key, stored)
+	}
+
+	replay, replayErr := coordinator.ProvisionAccount(
+		context.Background(), f.actor, profile,
+	)
+	if replay != "" ||
+		!errors.Is(replayErr, ErrStripeProvisioningReconciliationRequired) {
+		t.Fatalf("provider error replay: %q %v", replay, replayErr)
+	}
+
+	calls, keys := creator.snapshot()
+	if calls != 1 || len(keys) != 1 || keys[0] != key {
+		t.Fatalf("duplicate provider call: %d %v", calls, keys)
+	}
+}
+
+// The failure trigger lives exclusively inside the fixture's disposable
+// schema. It blocks account recording, but not the reconciliation transition.
+func TestProvisioningCoordinatorIntegrationRecordingFailureFence(
+	t *testing.T,
+) {
+	f := newProvisioningIntegrationFixture(t)
+
+	_, err := f.db.Exec(context.Background(), `
+        CREATE FUNCTION reject_test_account_recording()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $function$
+        BEGIN
+            IF NEW.provisioning_status = 'ACCOUNT_RECORDED' THEN
+                RAISE EXCEPTION 'synthetic recording failure';
+            END IF;
+            RETURN NEW;
+        END;
+        $function$;
+    `)
+	if err != nil {
+		t.Fatalf("install recording failure function: %v", err)
+	}
+
+	_, err = f.db.Exec(context.Background(), `
+        CREATE TRIGGER reject_test_account_recording_trigger
+        BEFORE UPDATE ON stripe_connect_provisioning_intents
+        FOR EACH ROW
+        EXECUTE FUNCTION reject_test_account_recording();
+    `)
+	if err != nil {
+		t.Fatalf("install recording failure trigger: %v", err)
+	}
+
+	creator := &provisioningIntegrationCreator{
+		account: "acct_1234567890ABCDEF",
+	}
+	coordinator := f.coordinator(creator, true)
+	profile := uuid.NewString()
+
+	account, err := coordinator.ProvisionAccount(
+		context.Background(), f.actor, profile,
+	)
+	if account != "" ||
+		!errors.Is(err, ErrStripeProvisioningReconciliationRequired) {
+		t.Fatalf("recording failure accepted: %q %v", account, err)
+	}
+
+	state, key, stored := f.status(t)
+	if state != "REQUIRES_RECONCILIATION" ||
+		key == "" || stored != "" {
+		t.Fatalf("recording failure ledger: %s %q %q",
+			state, key, stored)
+	}
+
+	replay, replayErr := coordinator.ProvisionAccount(
+		context.Background(), f.actor, profile,
+	)
+	if replay != "" ||
+		!errors.Is(replayErr, ErrStripeProvisioningReconciliationRequired) {
+		t.Fatalf("recording failure replay: %q %v", replay, replayErr)
+	}
+
+	calls, keys := creator.snapshot()
+	if calls != 1 || len(keys) != 1 || keys[0] != key {
+		t.Fatalf("duplicate provider call: %d %v", calls, keys)
 	}
 }

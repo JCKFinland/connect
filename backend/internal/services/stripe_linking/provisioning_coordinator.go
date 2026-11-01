@@ -163,14 +163,21 @@ func (c *ProvisioningCoordinator) ProvisionAccount(
 	)
 
 	if providerErr != nil ||
-		ctx.Err() != nil ||
 		!validProvisioningAccountID(accountID) {
 		c.markUncertain(claimedIntent)
 		return "", ErrStripeProvisioningReconciliationRequired
 	}
 
+	// A validated provider result is trusted evidence even when the
+	// originating HTTP request has been canceled. Persist it using a
+	// fresh bounded context; never invoke the provider again here.
+	recordCtx, recordCancel := context.WithTimeout(
+		context.Background(), 5*time.Second,
+	)
+	defer recordCancel()
+
 	recorded, _, recordErr := postgres.RecordStripeProvisioningAccount(
-		ctx, c.deps.DB,
+		recordCtx, c.deps.DB,
 		postgres.RecordStripeProvisioningAccountParams{
 			IntentID:        claimedIntent.ID,
 			ActorUserID:     claimedIntent.ActorUserID,
