@@ -219,3 +219,35 @@ func TestStripeProvisioningRejectsProviderFailure(t *testing.T) {
 		})
 	}
 }
+
+// Cancellation after a successful provider response must not erase
+// trusted evidence that the coordinator can durably record.
+func TestStripeProvisioningPreservesCanceledProviderEvidence(
+	t *testing.T,
+) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	calls := 0
+	provisioner := NewAccountProvisioner(func(
+		requestCtx context.Context,
+		params *stripe.AccountParams,
+	) (*stripe.Account, error) {
+		calls++
+		if requestCtx.Err() != nil || params == nil {
+			t.Fatal("provider called with invalid request")
+		}
+		cancel()
+		return validProvisionAccount(), nil
+	})
+
+	id, err := provisioner.Provision(
+		ctx, provisionActor, provisionDriver, provisionCompany,
+	)
+	if err != nil || id != provisionAccount || calls != 1 {
+		t.Fatalf(
+			"trusted response lost: id=%q err=%v calls=%d",
+			id, err, calls,
+		)
+	}
+}

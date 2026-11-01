@@ -243,10 +243,6 @@ func TestStripeProvisioningAdapterProviderFailurePaths(t *testing.T) {
 				return account, nil
 			},
 		},
-		{
-			name:   "cancellation during provider call",
-			create: nil,
-		},
 	}
 
 	for _, tc := range cases {
@@ -256,15 +252,6 @@ func TestStripeProvisioningAdapterProviderFailurePaths(t *testing.T) {
 
 			calls := 0
 			create := tc.create
-
-			if create == nil {
-				create = func(
-					context.Context, *stripe.AccountParams,
-				) (*stripe.Account, error) {
-					cancel()
-					return validAccount(), nil
-				}
-			}
 
 			adapter := NewStripeProvisioningAdapter(func(
 				requestCtx context.Context,
@@ -300,5 +287,52 @@ func TestStripeProvisioningAdapterProviderFailurePaths(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+// The adapter must pass through validated provider evidence even
+// when the request is canceled during the provider invocation.
+func TestStripeProvisioningAdapterPreservesCanceledProviderEvidence(
+	t *testing.T,
+) {
+	actor := uuid.NewString()
+	driver := uuid.NewString()
+	company := uuid.NewString()
+	key := "connect-stripe-provisioning:" + uuid.NewString()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	calls := 0
+	adapter := NewStripeProvisioningAdapter(func(
+		requestCtx context.Context,
+		params *stripe.AccountParams,
+	) (*stripe.Account, error) {
+		calls++
+		if requestCtx.Err() != nil || params == nil ||
+			params.IdempotencyKey == nil ||
+			*params.IdempotencyKey != key {
+			t.Fatal("invalid provider invocation or idempotency key")
+		}
+
+		cancel()
+		return &stripe.Account{
+			ID:              "acct_1234567890ABCDEF",
+			Country:         "FI",
+			DefaultCurrency: stripe.CurrencyEUR,
+			Type:            stripe.AccountTypeExpress,
+		}, nil
+	})
+
+	accountID, err := adapter.CreateProvisioningAccount(
+		ctx, key, actor, driver, company,
+	)
+	if err != nil ||
+		accountID != "acct_1234567890ABCDEF" ||
+		calls != 1 {
+		t.Fatalf(
+			"trusted adapter response lost: %q %v calls=%d",
+			accountID, err, calls,
+		)
 	}
 }

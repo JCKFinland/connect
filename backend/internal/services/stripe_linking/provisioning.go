@@ -77,7 +77,10 @@ func (p *AccountProvisioner) Provision(
 	}
 
 	account, err := p.create(ctx, params)
-	if err != nil || ctx.Err() != nil || account == nil {
+	// Once the provider returns a valid response without error,
+	// cancellation must not discard that evidence. The coordinator
+	// persists it using its independent bounded database context.
+	if err != nil || account == nil {
 		return "", denied
 	}
 
