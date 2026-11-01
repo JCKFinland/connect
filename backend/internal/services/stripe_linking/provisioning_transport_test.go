@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+
 	stripe "github.com/stripe/stripe-go/v86"
 )
 
@@ -26,6 +28,23 @@ func (f *fakeStripeAccountCreateClient) Create(
 	return f.account, f.err
 }
 
+func validStripeTransportParams() *stripe.AccountParams {
+	params := &stripe.AccountParams{
+		Type:            stripe.String("express"),
+		Country:         stripe.String("FI"),
+		DefaultCurrency: stripe.String("eur"),
+		Metadata: map[string]string{
+			"connect_actor_user_id":  uuid.NewString(),
+			"connect_driver_user_id": uuid.NewString(),
+			"connect_company_id":     uuid.NewString(),
+		},
+	}
+	params.SetIdempotencyKey(
+		"connect-stripe-provisioning:" + uuid.NewString(),
+	)
+	return params
+}
+
 func TestStripeAccountCreateTransportRequest(t *testing.T) {
 	ctx := context.WithValue(
 		context.Background(),
@@ -38,17 +57,7 @@ func TestStripeAccountCreateTransportRequest(t *testing.T) {
 	}
 	create := NewStripeAccountCreateTransport(client)
 
-	original := &stripe.AccountParams{
-		Type:            stripe.String("express"),
-		Country:         stripe.String("FI"),
-		DefaultCurrency: stripe.String("eur"),
-		Metadata: map[string]string{
-			"connect_actor_user_id":  "actor",
-			"connect_driver_user_id": "driver",
-			"connect_company_id":     "company",
-		},
-	}
-	original.SetIdempotencyKey("connect-stripe-provisioning:durable")
+	original := validStripeTransportParams()
 
 	account, err := create(ctx, original)
 	if err != nil {
@@ -69,7 +78,7 @@ func TestStripeAccountCreateTransportRequest(t *testing.T) {
 		t.Fatal("FI/EUR Express parameters changed")
 	}
 	if p.IdempotencyKey == nil ||
-		*p.IdempotencyKey != "connect-stripe-provisioning:durable" {
+		*p.IdempotencyKey != *original.IdempotencyKey {
 		t.Fatal("durable idempotency key not forwarded")
 	}
 	for key, value := range original.Metadata {
@@ -78,7 +87,7 @@ func TestStripeAccountCreateTransportRequest(t *testing.T) {
 		}
 	}
 	p.Metadata["connect_company_id"] = "changed"
-	if original.Metadata["connect_company_id"] != "company" {
+	if original.Metadata["connect_company_id"] == "changed" {
 		t.Fatal("transport aliased original metadata")
 	}
 }
@@ -87,8 +96,7 @@ func TestStripeAccountCreateTransportRejectsUnsafeInput(t *testing.T) {
 	client := &fakeStripeAccountCreateClient{}
 	create := NewStripeAccountCreateTransport(client)
 
-	valid := &stripe.AccountParams{}
-	valid.SetIdempotencyKey("connect-stripe-provisioning:durable")
+	valid := validStripeTransportParams()
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -132,8 +140,7 @@ func TestStripeAccountCreateTransportPreservesProviderEvidence(t *testing.T) {
 	}
 	create := NewStripeAccountCreateTransport(client)
 
-	params := &stripe.AccountParams{}
-	params.SetIdempotencyKey("connect-stripe-provisioning:durable")
+	params := validStripeTransportParams()
 
 	returned, err := create(context.Background(), params)
 	if returned != account || !errors.Is(err, providerErr) {
@@ -141,5 +148,81 @@ func TestStripeAccountCreateTransportPreservesProviderEvidence(t *testing.T) {
 	}
 	if client.calls != 1 {
 		t.Fatal("unexpected provider call count")
+	}
+}
+
+func TestStripeAccountCreateTransportRejectsInvalidContract(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*stripe.AccountParams)
+	}{
+		{"empty key", func(p *stripe.AccountParams) {
+			p.SetIdempotencyKey("")
+		}},
+		{"arbitrary key", func(p *stripe.AccountParams) {
+			p.SetIdempotencyKey("client-key")
+		}},
+		{"invalid key UUID", func(p *stripe.AccountParams) {
+			p.SetIdempotencyKey("connect-stripe-provisioning:invalid")
+		}},
+		{"nil type", func(p *stripe.AccountParams) {
+			p.Type = nil
+		}},
+		{"wrong type", func(p *stripe.AccountParams) {
+			p.Type = stripe.String("standard")
+		}},
+		{"nil country", func(p *stripe.AccountParams) {
+			p.Country = nil
+		}},
+		{"wrong country", func(p *stripe.AccountParams) {
+			p.Country = stripe.String("US")
+		}},
+		{"nil currency", func(p *stripe.AccountParams) {
+			p.DefaultCurrency = nil
+		}},
+		{"wrong currency", func(p *stripe.AccountParams) {
+			p.DefaultCurrency = stripe.String("usd")
+		}},
+		{"nil metadata", func(p *stripe.AccountParams) {
+			p.Metadata = nil
+		}},
+		{"missing actor", func(p *stripe.AccountParams) {
+			delete(p.Metadata, "connect_actor_user_id")
+		}},
+		{"missing driver", func(p *stripe.AccountParams) {
+			delete(p.Metadata, "connect_driver_user_id")
+		}},
+		{"missing company", func(p *stripe.AccountParams) {
+			delete(p.Metadata, "connect_company_id")
+		}},
+		{"invalid actor", func(p *stripe.AccountParams) {
+			p.Metadata["connect_actor_user_id"] = "invalid"
+		}},
+		{"invalid driver", func(p *stripe.AccountParams) {
+			p.Metadata["connect_driver_user_id"] = "invalid"
+		}},
+		{"invalid company", func(p *stripe.AccountParams) {
+			p.Metadata["connect_company_id"] = "invalid"
+		}},
+		{"extra metadata", func(p *stripe.AccountParams) {
+			p.Metadata["unapproved"] = "value"
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeStripeAccountCreateClient{}
+			create := NewStripeAccountCreateTransport(client)
+			params := validStripeTransportParams()
+			tc.mutate(params)
+
+			account, err := create(context.Background(), params)
+			if err == nil || account != nil {
+				t.Fatal("invalid request accepted")
+			}
+			if client.calls != 0 {
+				t.Fatal("invalid request reached Stripe client")
+			}
+		})
 	}
 }

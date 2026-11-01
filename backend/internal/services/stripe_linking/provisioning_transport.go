@@ -3,6 +3,7 @@ package stripelinking
 import (
 	"context"
 	"errors"
+	"strings"
 
 	stripe "github.com/stripe/stripe-go/v86"
 )
@@ -36,9 +37,37 @@ func NewStripeAccountCreateTransport(
 			return nil, err
 		}
 
-		if params.IdempotencyKey == nil ||
-			*params.IdempotencyKey == "" {
+		if params.IdempotencyKey == nil {
 			return nil, ErrStripeAccountTransportUnavailable
+		}
+
+		const prefix = "connect-stripe-provisioning:"
+		suffix, ok := strings.CutPrefix(
+			*params.IdempotencyKey, prefix,
+		)
+		if !ok || !canonicalID(suffix) {
+			return nil, ErrStripeAccountTransportUnavailable
+		}
+
+		if params.Type == nil || *params.Type != "express" ||
+			params.Country == nil || *params.Country != "FI" ||
+			params.DefaultCurrency == nil ||
+			*params.DefaultCurrency != "eur" {
+			return nil, ErrStripeAccountTransportUnavailable
+		}
+
+		required := [...]string{
+			"connect_actor_user_id",
+			"connect_driver_user_id",
+			"connect_company_id",
+		}
+		if len(params.Metadata) != len(required) {
+			return nil, ErrStripeAccountTransportUnavailable
+		}
+		for _, field := range required {
+			if !canonicalID(params.Metadata[field]) {
+				return nil, ErrStripeAccountTransportUnavailable
+			}
 		}
 
 		modern := &stripe.AccountCreateParams{
