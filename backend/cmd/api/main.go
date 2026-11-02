@@ -93,6 +93,18 @@ func run() (exitCode int) {
 		return 1
 	}
 
+	// Reject invalid Stripe Connect provisioning configuration before
+	// initializing the database or opening the HTTP listener.
+	// This does not enable provisioning or register any route.
+	if _, err := cfg.StripeConnectProvisioning.Enabled(); err != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"Stripe Connect provisioning configuration error: %v\n",
+			err,
+		)
+		return 1
+	}
+
 	// Instantiates structured logging matching the current environment (e.g., JSON for Production).
 	log := logger.New(
 		cfg.Log.Level,

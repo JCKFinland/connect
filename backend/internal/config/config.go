@@ -65,6 +65,7 @@ type Config struct {
 	Booking                         BookingConfig
 	Routing                         RoutingConfig
 	Stripe                          StripeConfig
+	StripeConnectProvisioning       StripeConnectProvisioningConfig
 	FlexSettlementWorker            FlexSettlementWorkerConfig
 	FlexAuthorizationRecoveryWorker FlexAuthorizationRecoveryWorkerConfig
 	DocumentStorage                 DocumentStorageConfig
@@ -209,6 +210,13 @@ func Load() (*Config, error) {
 			FlexWebhookSecret: GetEnv(
 				"STRIPE_FLEX_WEBHOOK_SECRET",
 				"",
+			),
+		},
+
+		StripeConnectProvisioning: StripeConnectProvisioningConfig{
+			EnabledRaw: GetEnv(
+				"STRIPE_CONNECT_PROVISIONING_ENABLED",
+				"false",
 			),
 		},
 
