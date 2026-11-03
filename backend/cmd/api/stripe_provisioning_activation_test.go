@@ -1,9 +1,6 @@
 package main
 
-import (
-	"errors"
-	"testing"
-)
+import "testing"
 
 func TestStripeProvisioningActivationDisabledAllowed(t *testing.T) {
 	if err := validateStripeProvisioningActivation(false); err != nil {
@@ -11,9 +8,8 @@ func TestStripeProvisioningActivationDisabledAllowed(t *testing.T) {
 	}
 }
 
-func TestStripeProvisioningActivationEnabledRejected(t *testing.T) {
-	err := validateStripeProvisioningActivation(true)
-	if !errors.Is(err, errStripeProvisioningRouteNotWired) {
-		t.Fatalf("enabled provisioning must fail closed: %v", err)
+func TestStripeProvisioningActivationEnabledAllowed(t *testing.T) {
+	if err := validateStripeProvisioningActivation(true); err != nil {
+		t.Fatalf("validated enabled provisioning must be allowed: %v", err)
 	}
 }

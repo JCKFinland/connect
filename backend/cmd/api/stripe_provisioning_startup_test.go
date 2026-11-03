@@ -11,12 +11,12 @@ import (
 
 const stripeProvisioningStartupHelper = "CONNECT_STRIPE_PROVISIONING_STARTUP_HELPER"
 
-// TestStripeProvisioningStartupRejectsBeforeDatabase exercises the actual
+// TestStripeProvisioningStartupReachesDatabaseAfterValidation exercises the actual
 // application startup function, not only its activation helper.
 //
 // The child receives an isolated .env and a deliberately unreachable database
-// endpoint. The expected error identifies the activation gate specifically.
-func TestStripeProvisioningStartupRejectsBeforeDatabase(t *testing.T) {
+// endpoint. The expected error identifies the isolated database boundary.
+func TestStripeProvisioningStartupReachesDatabaseAfterValidation(t *testing.T) {
 	if os.Getenv(stripeProvisioningStartupHelper) == "1" {
 		os.Exit(run())
 	}
@@ -33,13 +33,13 @@ func TestStripeProvisioningStartupRejectsBeforeDatabase(t *testing.T) {
 
 	command := exec.Command(
 		os.Args[0],
-		"-test.run=^TestStripeProvisioningStartupRejectsBeforeDatabase$",
+		"-test.run=^TestStripeProvisioningStartupReachesDatabaseAfterValidation$",
 	)
 	command.Dir = directory
 
 	// Each required setting is explicitly supplied. In particular, the
 	// synthetic Stripe key must pass provisioning configuration validation
-	// so the actual activation rejection is exercised.
+	// so validated activation proceeds to database initialization.
 	overrides := map[string]string{
 		stripeProvisioningStartupHelper:          "1",
 		"APP_NAME":                               "CONNECT",
@@ -111,20 +111,20 @@ func TestStripeProvisioningStartupRejectsBeforeDatabase(t *testing.T) {
 
 	if !strings.Contains(
 		message,
-		"Stripe provisioning activation unavailable:",
+		"Starting CONNECT Backend",
 	) {
 		t.Fatalf(
-			"startup did not reach activation guard; output=%s",
+			"startup did not pass activation validation; output=%s",
 			message,
 		)
 	}
 
 	if !strings.Contains(
 		message,
-		"production route assembly is not wired",
+		"Database connection failed",
 	) {
 		t.Fatalf(
-			"startup did not report unwired provisioning; output=%s",
+			"startup did not reach isolated database boundary; output=%s",
 			message,
 		)
 	}
@@ -133,10 +133,10 @@ func TestStripeProvisioningStartupRejectsBeforeDatabase(t *testing.T) {
 		"Configuration error:",
 		"FLEX Stripe configuration error:",
 		"Stripe Connect provisioning configuration error:",
-		"Database connection failed",
+		"Stripe provisioning activation unavailable:",
 		"Migration failed",
 		"Stripe provisioning schema not ready",
-		"Starting CONNECT Backend",
+		"production route assembly is not wired",
 	} {
 		if strings.Contains(message, unexpected) {
 			t.Fatalf(
