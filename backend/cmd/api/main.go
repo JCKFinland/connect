@@ -108,6 +108,22 @@ func run() (exitCode int) {
 		return 1
 	}
 
+	// Reject unsupported provisioning activation before opening
+	// the database or running automatic migrations.
+	provisioningEnabled, err := cfg.StripeConnectProvisioning.Enabled()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Stripe provisioning feature gate invalid: %v\n", err)
+		return 1
+	}
+
+	// Provisioning is not operational until its trusted coordinator,
+	// authorization middleware, and HTTP route are wired together.
+	// Fail closed even when configuration and schema checks succeed.
+	if err := validateStripeProvisioningActivation(provisioningEnabled); err != nil {
+		fmt.Fprintf(os.Stderr, "Stripe provisioning activation unavailable: %v\n", err)
+		return 1
+	}
+
 	// Instantiates structured logging matching the current environment (e.g., JSON for Production).
 	log := logger.New(
 		cfg.Log.Level,
@@ -135,14 +151,8 @@ func run() (exitCode int) {
 		return 1
 	}
 
-	// Verify durable Stripe provisioning storage before constructing
-	// repositories or exposing HTTP routes. Disabled provisioning
-	// requires no provisioning schema and performs no readiness query.
-	provisioningEnabled, err := cfg.StripeConnectProvisioning.Enabled()
-	if err != nil {
-		log.Error("Stripe provisioning feature gate invalid", "error", err)
-		return 1
-	}
+	// Verify durable Stripe provisioning storage after migrations.
+	// Disabled provisioning performs no readiness query.
 	if provisioningEnabled {
 		if err := database.VerifyStripeProvisioningSchema(
 			context.Background(), db,
@@ -150,14 +160,6 @@ func run() (exitCode int) {
 			log.Error("Stripe provisioning schema not ready", "error", err)
 			return 1
 		}
-	}
-
-	// Provisioning is not operational until its trusted coordinator,
-	// authorization middleware, and HTTP route are wired together.
-	// Fail closed even when configuration and schema checks succeed.
-	if err := validateStripeProvisioningActivation(provisioningEnabled); err != nil {
-		log.Error("Stripe provisioning activation unavailable", "error", err)
-		return 1
 	}
 
 	// ----------------------------------------------------------------------
