@@ -152,6 +152,14 @@ func run() (exitCode int) {
 		}
 	}
 
+	// Provisioning is not operational until its trusted coordinator,
+	// authorization middleware, and HTTP route are wired together.
+	// Fail closed even when configuration and schema checks succeed.
+	if err := validateStripeProvisioningActivation(provisioningEnabled); err != nil {
+		log.Error("Stripe provisioning activation unavailable", "error", err)
+		return 1
+	}
+
 	// ----------------------------------------------------------------------
 	// Repositories (Data Access Layer)
 	// ----------------------------------------------------------------------
