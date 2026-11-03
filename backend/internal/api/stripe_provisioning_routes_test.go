@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/JCKFinland/connect/backend/internal/middleware"
 )
 
 type routeOnlyProvisioningService struct{}
@@ -193,4 +195,106 @@ func TestStripeProvisioningRoutePermissionEnforcement(t *testing.T) {
 			)
 		}
 	})
+}
+
+// TestStripeProvisioningProductionIntegrationFailClosed proves that
+// incomplete production dependencies cannot expose provisioning.
+func TestStripeProvisioningProductionIntegrationFailClosed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewStripeProvisioningHandler(
+		routeOnlyProvisioningService{},
+	)
+
+	cases := []struct {
+		name    string
+		handler *StripeProvisioningHandler
+	}{
+		{"missing_all_dependencies", nil},
+		{"handler_without_auth_or_rbac", handler},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+
+			if RegisterStripeProvisioningRoutes(
+				router, nil, nil, tc.handler,
+			) {
+				t.Fatal("incomplete dependencies registered route")
+			}
+
+			for _, route := range router.Routes() {
+				if route.Path == "/api/v1/drivers/:id/stripe-provisioning" {
+					t.Fatal("provisioning endpoint exposed")
+				}
+			}
+		})
+	}
+}
+
+// TestStripeProvisioningProductionIntegrationDependencies verifies
+// that each missing dependency independently prevents registration.
+// No real credentials, database writes, or provider calls are used.
+func TestStripeProvisioningProductionIntegrationDependencies(
+	t *testing.T,
+) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewStripeProvisioningHandler(
+		routeOnlyProvisioningService{},
+	)
+	emptyHandler := NewStripeProvisioningHandler(nil)
+
+	// These middleware objects are intentionally not invoked.
+	// Each case must return before middleware construction.
+	auth := &middleware.AuthMiddleware{}
+	rbac := &middleware.RBACMiddleware{}
+
+	cases := []struct {
+		name    string
+		router  *gin.Engine
+		auth    *middleware.AuthMiddleware
+		rbac    *middleware.RBACMiddleware
+		handler *StripeProvisioningHandler
+	}{
+		{
+			name: "missing_router",
+			auth: auth, rbac: rbac, handler: handler,
+		},
+		{
+			name:   "missing_auth",
+			router: gin.New(), rbac: rbac, handler: handler,
+		},
+		{
+			name:   "missing_rbac",
+			router: gin.New(), auth: auth, handler: handler,
+		},
+		{
+			name:   "missing_handler",
+			router: gin.New(), auth: auth, rbac: rbac,
+		},
+		{
+			name:   "missing_service",
+			router: gin.New(), auth: auth, rbac: rbac,
+			handler: emptyHandler,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if RegisterStripeProvisioningRoutes(
+				tc.router, tc.auth, tc.rbac, tc.handler,
+			) {
+				t.Fatal("incomplete dependencies registered route")
+			}
+
+			if tc.router != nil && len(tc.router.Routes()) != 0 {
+				t.Fatalf(
+					"unexpected routes: %+v",
+					tc.router.Routes(),
+				)
+			}
+		})
+	}
 }
