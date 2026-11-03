@@ -96,7 +96,10 @@ func run() (exitCode int) {
 	// Reject invalid Stripe Connect provisioning configuration before
 	// initializing the database or opening the HTTP listener.
 	// This does not enable provisioning or register any route.
-	if _, err := cfg.StripeConnectProvisioning.Enabled(); err != nil {
+	if err := config.ValidateStripeConnectProvisioningStartup(
+		cfg.StripeConnectProvisioning,
+		cfg.Stripe,
+	); err != nil {
 		fmt.Fprintf(
 			os.Stderr,
 			"Stripe Connect provisioning configuration error: %v\n",
