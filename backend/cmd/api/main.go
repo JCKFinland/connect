@@ -1017,6 +1017,27 @@ func run() (exitCode int) {
 	// ----------------------------------------------------------------------
 
 	// Instantiates server properties with custom protective connection timeouts.
+	// Register provisioning only after database schema readiness,
+	// middleware construction, and normal router assembly.
+	// The independent early activation guard remains fail-closed.
+	if provisioningEnabled {
+		if err := assembleStripeProvisioningComposition(
+			cfg.StripeConnectProvisioning,
+			cfg.Stripe,
+			db,
+			router,
+			authMiddleware,
+			rbacMiddleware,
+		); err != nil {
+			log.Error(
+				"Stripe provisioning route assembly failed",
+				"error",
+				err,
+			)
+			return 1
+		}
+	}
+
 	server := &http.Server{
 		Addr:              ":" + cfg.App.Port,
 		Handler:           router,
