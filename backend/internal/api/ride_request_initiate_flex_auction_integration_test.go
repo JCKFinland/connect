@@ -203,16 +203,32 @@ func TestInitiateFlexAuctionHTTPIntegrationSucceeds(
 	db, customerID := setupFlexAuctionHTTPDatabase(t)
 	ctx := context.Background()
 
-	var categoryID string
-	if err := db.QueryRow(ctx, `
-		SELECT id
-		FROM service_categories
-		WHERE is_active = TRUE
-		ORDER BY id
-		LIMIT 1
-	`).Scan(&categoryID); err != nil {
-		t.Fatalf("resolve service category: %v", err)
+	// Create a category owned by this test. An existing active category
+	// may already have an open pricing profile for the same company/branch.
+	categoryID := uuid.NewString()
+	categoryCode := "FLEX_HTTP_" + uuid.NewString()[:8]
+	categoryNow := time.Now().UTC()
+
+	_, err := db.Exec(ctx, `
+		INSERT INTO service_categories (
+			id, code, name, is_active, created_at, updated_at
+		)
+		VALUES ($1, $2, 'FLEX HTTP Integration Test', TRUE, $3, $3)
+	`, categoryID, categoryCode, categoryNow)
+	if err != nil {
+		t.Fatalf("create isolated FLEX HTTP service category: %v", err)
 	}
+
+	// Registered before profile and ride cleanup so it runs last.
+	t.Cleanup(func() {
+		if _, err := db.Exec(
+			context.Background(),
+			`DELETE FROM service_categories WHERE id = $1`,
+			categoryID,
+		); err != nil {
+			t.Errorf("cleanup FLEX HTTP service category: %v", err)
+		}
+	})
 
 	var companyID, branchID string
 	if err := db.QueryRow(ctx, `
@@ -231,7 +247,7 @@ func TestInitiateFlexAuctionHTTPIntegrationSucceeds(
 	version := "flex-http-" + uuid.NewString()[:8]
 	now := time.Now().UTC()
 
-	_, err := db.Exec(ctx, `
+	_, err = db.Exec(ctx, `
 		INSERT INTO fare_pricing_profiles (
 			id, company_id, branch_id,
 			service_category_id, version, currency,
