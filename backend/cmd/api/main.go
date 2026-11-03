@@ -135,6 +135,23 @@ func run() (exitCode int) {
 		return 1
 	}
 
+	// Verify durable Stripe provisioning storage before constructing
+	// repositories or exposing HTTP routes. Disabled provisioning
+	// requires no provisioning schema and performs no readiness query.
+	provisioningEnabled, err := cfg.StripeConnectProvisioning.Enabled()
+	if err != nil {
+		log.Error("Stripe provisioning feature gate invalid", "error", err)
+		return 1
+	}
+	if provisioningEnabled {
+		if err := database.VerifyStripeProvisioningSchema(
+			context.Background(), db,
+		); err != nil {
+			log.Error("Stripe provisioning schema not ready", "error", err)
+			return 1
+		}
+	}
+
 	// ----------------------------------------------------------------------
 	// Repositories (Data Access Layer)
 	// ----------------------------------------------------------------------
