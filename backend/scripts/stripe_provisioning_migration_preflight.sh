@@ -16,6 +16,18 @@ if [ "$APP_ENV" != production ]; then
     exit 1
 fi
 
+if [ "$DB_SSLMODE" != verify-full ]; then
+    echo "STOP: production requires verify-full TLS"
+    exit 1
+fi
+
+: "${PGSSLROOTCERT:?STOP: trusted PostgreSQL CA required}"
+
+test -f "$PGSSLROOTCERT" || {
+    echo "STOP: PostgreSQL CA file not found"
+    exit 1
+}
+
 if [ "$STRIPE_CONNECT_PROVISIONING_ENABLED" != false ]; then
     echo "STOP: provisioning must remain disabled"
     exit 1
