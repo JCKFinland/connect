@@ -113,3 +113,43 @@ func TestStripeConnectProvisioningStartupCredentialGate(t *testing.T) {
 		})
 	}
 }
+
+func TestStripeConnectProvisioningEnvironmentModes(t *testing.T) {
+	cases := []struct {
+		name        string
+		enabled     string
+		environment string
+		key         string
+		wantErr     bool
+	}{
+		{"development_test_key", "true", "development", "sk_test_synthetic", false},
+		{"test_test_key", "true", "test", "sk_test_synthetic", false},
+		{"production_live_key", "true", "production", "sk_live_synthetic", false},
+		{"development_rejects_live", "true", "development", "sk_live_synthetic", true},
+		{"test_rejects_live", "true", "test", "sk_live_synthetic", true},
+		{"production_rejects_test", "true", "production", "sk_test_synthetic", true},
+		{"unknown_environment", "true", "staging", "sk_test_synthetic", true},
+		{"disabled_without_environment", "false", "", "", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateStripeConnectProvisioningEnvironment(
+				StripeConnectProvisioningConfig{EnabledRaw: tc.enabled},
+				StripeConfig{SecretKey: tc.key},
+				tc.environment,
+			)
+
+			if tc.wantErr {
+				if !errors.Is(err, ErrStripeConnectProvisioningConfiguration) {
+					t.Fatalf("expected configuration error, got %v", err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected environment error: %v", err)
+			}
+		})
+	}
+}

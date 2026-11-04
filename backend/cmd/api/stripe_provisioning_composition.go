@@ -21,6 +21,7 @@ import (
 func assembleStripeProvisioningComposition(
 	provisioning config.StripeConnectProvisioningConfig,
 	stripeConfig config.StripeConfig,
+	environment string,
 	db *pgxpool.Pool,
 	router *gin.Engine,
 	auth *middleware.AuthMiddleware,
@@ -41,9 +42,7 @@ func assembleStripeProvisioningComposition(
 		return stripelinking.ErrStripeProvisioningCompositionUnavailable
 	}
 
-	client, err := newStripeProvisioningClient(
-		provisioning, stripeConfig,
-	)
+	client, err := newStripeProvisioningClient(provisioning, stripeConfig, environment)
 	if err != nil {
 		return err
 	}

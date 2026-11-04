@@ -38,3 +38,50 @@ func ValidateStripeConnectProvisioningStartup(
 
 	return nil
 }
+
+// ValidateStripeConnectProvisioningEnvironment enforces the Stripe
+// credential mode appropriate for the application environment.
+// Disabled provisioning does not require credentials or environment checks.
+func ValidateStripeConnectProvisioningEnvironment(
+	provisioning StripeConnectProvisioningConfig,
+	stripe StripeConfig,
+	environment string,
+) error {
+	if err := ValidateStripeConnectProvisioningStartup(
+		provisioning, stripe,
+	); err != nil {
+		return err
+	}
+
+	enabled, err := provisioning.Enabled()
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+
+	switch environment {
+	case "development", "test":
+		if !strings.HasPrefix(stripe.SecretKey, "sk_test_") {
+			return fmt.Errorf(
+				"%w: non-production provisioning requires Stripe test-mode secret key",
+				ErrStripeConnectProvisioningConfiguration,
+			)
+		}
+	case "production":
+		if !strings.HasPrefix(stripe.SecretKey, "sk_live_") {
+			return fmt.Errorf(
+				"%w: production provisioning requires Stripe live-mode secret key",
+				ErrStripeConnectProvisioningConfiguration,
+			)
+		}
+	default:
+		return fmt.Errorf(
+			"%w: unsupported application environment",
+			ErrStripeConnectProvisioningConfiguration,
+		)
+	}
+
+	return nil
+}

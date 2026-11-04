@@ -34,6 +34,7 @@ func TestStripeProvisioningCompositionDisabled(t *testing.T) {
 			EnabledRaw: "false",
 		},
 		config.StripeConfig{},
+		"test",
 		&pgxpool.Pool{},
 		router,
 		&middleware.AuthMiddleware{},
@@ -75,6 +76,7 @@ func TestStripeProvisioningCompositionRejectsInvalidConfiguration(
 				config.StripeConfig{
 					SecretKey: tc.key,
 				},
+				"test",
 				&pgxpool.Pool{},
 				router,
 				&middleware.AuthMiddleware{},
@@ -137,6 +139,7 @@ func TestStripeProvisioningCompositionRejectsMissingDependencies(
 				config.StripeConfig{
 					SecretKey: compositionSyntheticKey,
 				},
+				"test",
 				db, router, auth, rbac,
 			)
 
@@ -167,6 +170,7 @@ func TestStripeProvisioningCompositionRegistersProtectedRoute(
 		config.StripeConfig{
 			SecretKey: compositionSyntheticKey,
 		},
+		"test",
 		&pgxpool.Pool{},
 		router,
 		&middleware.AuthMiddleware{},

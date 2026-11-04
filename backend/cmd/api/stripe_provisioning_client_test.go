@@ -14,6 +14,7 @@ func TestStripeProvisioningClientFactoryDisabled(t *testing.T) {
 			EnabledRaw: "false",
 		},
 		config.StripeConfig{},
+		"test",
 	)
 
 	if client != nil {
@@ -49,6 +50,7 @@ func TestStripeProvisioningClientFactoryRejectsInvalidConfiguration(
 				config.StripeConfig{
 					SecretKey: tc.key,
 				},
+				"test",
 			)
 
 			if client != nil || err == nil {
@@ -73,6 +75,7 @@ func TestStripeProvisioningClientFactoryConstructsWithoutNetwork(
 		config.StripeConfig{
 			SecretKey: "sk_test_connect_synthetic_factory_only",
 		},
+		"test",
 	)
 
 	if err != nil {

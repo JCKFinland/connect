@@ -24,13 +24,8 @@ var errStripeProvisioningClientUnavailable = errors.New(
 //
 // Production startup must independently enforce schema readiness
 // and the fail-closed activation boundary.
-func newStripeProvisioningClient(
-	provisioning config.StripeConnectProvisioningConfig,
-	stripeConfig config.StripeConfig,
-) (stripelinking.StripeAccountCreateClient, error) {
-	if err := config.ValidateStripeConnectProvisioningStartup(
-		provisioning, stripeConfig,
-	); err != nil {
+func newStripeProvisioningClient(provisioning config.StripeConnectProvisioningConfig, stripeConfig config.StripeConfig, environment string) (stripelinking.StripeAccountCreateClient, error) {
+	if err := config.ValidateStripeConnectProvisioningEnvironment(provisioning, stripeConfig, environment); err != nil {
 		return nil, err
 	}
 
