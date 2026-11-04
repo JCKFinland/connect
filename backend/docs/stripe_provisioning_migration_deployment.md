@@ -1,4 +1,4 @@
-# CONNECT ? Stripe Provisioning Migration Deployment
+# CONNECT - Stripe Provisioning Migration Deployment
 
 ## Scope
 
@@ -10,10 +10,10 @@ destination verification, settlement execution, or live Stripe calls.
 
 ## Required migration sequence
 
-1. 00076 ? Payout destination verification permission.
-2. 00077 ? Stripe Connect ownership-binding ledger.
-3. 00078 ? Stripe Connect account-link session ledger.
-4. 00079 ? Stripe Connect provisioning intent ledger.
+1. 00076 - Payout destination verification permission.
+2. 00077 - Stripe Connect ownership-binding ledger.
+3. 00078 - Stripe Connect account-link session ledger.
+4. 00079 - Stripe Connect provisioning intent ledger.
 
 The expected starting migration version is 75.
 
