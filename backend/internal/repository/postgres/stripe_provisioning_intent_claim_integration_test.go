@@ -16,8 +16,8 @@ import (
 )
 
 func TestStripeProvisioningIntentSingleWinnerClaim(t *testing.T) {
-	if os.Getenv("DB_NAME") != "connect_payout_destination_test" ||
-		os.Getenv("CONNECT_REQUIRE_SETTLEMENT_TEST_DB") != "0" ||
+	if os.Getenv("DB_NAME") != "connect_settlement_test" ||
+		os.Getenv("CONNECT_REQUIRE_SETTLEMENT_TEST_DB") != "1" ||
 		os.Getenv("FLEX_SETTLEMENT_WORKER_ENABLED") != "false" {
 		t.Fatal("unsafe integration environment")
 	}
@@ -39,11 +39,18 @@ func TestStripeProvisioningIntentSingleWinnerClaim(t *testing.T) {
 		envOr("DB_HOST", "localhost"),
 		envOr("DB_PORT", "5432"),
 		envOr("DB_USER", "postgres"),
-		"connect_payout_destination_test",
+		"connect_settlement_test",
 	))
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Explicit credentials for the isolated test database.
+	password := os.Getenv("DB_PASSWORD")
+	if password == "" {
+		t.Fatal("isolated database password unavailable")
+	}
+	cfg.ConnConfig.Password = password
 
 	cfg.MaxConns = 5
 	schema := "stripe_provision_test_" +
@@ -65,13 +72,13 @@ func TestStripeProvisioningIntentSingleWinnerClaim(t *testing.T) {
 	}
 	var safe bool
 	err = db.QueryRow(ctx, `
-        SELECT current_database() = 'connect_payout_destination_test'
+        SELECT current_database() = 'connect_settlement_test'
           AND (SELECT MAX(version_id)
                FROM public.goose_db_version
-               WHERE is_applied) = 75
+               WHERE is_applied) = 79
           AND to_regclass(
                'public.stripe_connect_provisioning_intents'
-          ) IS NULL
+          ) IS NOT NULL
     `).Scan(&safe)
 	if err != nil || !safe {
 		t.Fatalf("unsafe database baseline: %v %v", safe, err)
@@ -84,18 +91,58 @@ func TestStripeProvisioningIntentSingleWinnerClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var actorID, driverID, companyID string
+
 	t.Cleanup(func() {
 		defer db.Close()
+
+		var dropErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			// Use a fresh timeout for each schema-drop attempt.
+			dropCtx, stop := context.WithTimeout(
+				context.Background(), 10*time.Second,
+			)
+			_, dropErr = db.Exec(
+				dropCtx, "DROP SCHEMA "+schema+" CASCADE",
+			)
+			stop()
+			if dropErr == nil {
+				break
+			}
+			if attempt < 3 {
+				time.Sleep(200 * time.Millisecond)
+			}
+		}
+		if dropErr != nil {
+			t.Errorf("isolated schema cleanup failed after retries: %v", dropErr)
+			return
+		}
 
 		cleanupCtx, stop := context.WithTimeout(
 			context.Background(), 20*time.Second,
 		)
 		defer stop()
 
-		if _, err := db.Exec(
-			cleanupCtx, "DROP SCHEMA "+schema+" CASCADE",
-		); err != nil {
-			t.Errorf("isolated schema cleanup failed: %v", err)
+		// Remove schema FK references before identities.
+		if companyID != "" {
+			if _, err := db.Exec(cleanupCtx,
+				"DELETE FROM public.companies WHERE id = $1",
+				companyID,
+			); err != nil {
+				t.Errorf("synthetic company cleanup failed: %v", err)
+			}
+		}
+
+		for _, userID := range []string{actorID, driverID} {
+			if userID == "" {
+				continue
+			}
+			if _, err := db.Exec(cleanupCtx,
+				"DELETE FROM public.users WHERE id = $1",
+				userID,
+			); err != nil {
+				t.Errorf("synthetic user cleanup failed: %v", err)
+			}
 		}
 	})
 
@@ -127,22 +174,33 @@ func TestStripeProvisioningIntentSingleWinnerClaim(t *testing.T) {
 		t.Fatalf("apply isolated migration: %v", err)
 	}
 
-	// Existing test identities serve only as FK references.
-	// No production identity or authorization is inferred.
-	var actorID, driverID, companyID string
-	err = db.QueryRow(ctx, `
-        SELECT
-          (SELECT id::text FROM public.users
-           ORDER BY id LIMIT 1),
-          (SELECT id::text FROM public.users
-           ORDER BY id OFFSET 1 LIMIT 1),
-          (SELECT id::text FROM public.companies
-           ORDER BY id LIMIT 1)
-    `).Scan(&actorID, &driverID, &companyID)
+	// Unique synthetic identities for isolated FK constraints.
+	actorID = uuid.NewString()
+	driverID = uuid.NewString()
+	companyID = uuid.NewString()
+
+	_, err = db.Exec(ctx, `
+		INSERT INTO public.users (
+			id, email, password_hash, first_name, last_name
+		) VALUES
+			($1, $2, 'synthetic-test-only', 'Test', 'Actor'),
+			($3, $4, 'synthetic-test-only', 'Test', 'Driver')
+	`,
+		actorID, "claim-"+actorID+"@example.invalid",
+		driverID, "claim-"+driverID+"@example.invalid",
+	)
 	if err != nil {
-		t.Fatalf("test identities unavailable: %v", err)
+		t.Fatalf("insert synthetic users: %v", err)
 	}
 
+	_, err = db.Exec(ctx, `
+		INSERT INTO public.companies (
+			id, name, legal_name, country_code, timezone
+		) VALUES ($1, $2, $2, 'FI', 'Europe/Helsinki')
+	`, companyID, "Claim Test "+companyID)
+	if err != nil {
+		t.Fatalf("insert synthetic company: %v", err)
+	}
 	params := ReserveStripeProvisioningIntentParams{
 		ActorUserID:  actorID,
 		DriverUserID: driverID,
