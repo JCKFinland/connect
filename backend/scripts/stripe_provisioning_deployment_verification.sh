@@ -66,6 +66,39 @@ if [ "$FLEX_AUTHORIZATION_RECOVERY_WORKER_ENABLED" != false ]; then
     exit 1
 fi
 
+# Validate all approved executable contracts before executing any gate.
+# Individual gates independently enforce their own requirements.
+for variable in \
+    CONNECT_DEPLOYMENT_GIT_BIN \
+    CONNECT_DEPLOYMENT_SHA256SUM_BIN \
+    CONNECT_DEPLOYMENT_PSQL_BIN; do
+
+    approved_path="${!variable:-}"
+
+    if [ -z "$approved_path" ]; then
+        printf 'STOP: approved executable required: %s\n' "$variable"
+        exit 1
+    fi
+
+    case "$approved_path" in
+        /*) ;;
+        *)
+            printf 'STOP: approved executable path must be absolute: %s\n' "$variable"
+            exit 1
+            ;;
+    esac
+
+    if [ ! -f "$approved_path" ]; then
+        printf 'STOP: approved executable missing: %s\n' "$variable"
+        exit 1
+    fi
+
+    if [ ! -x "$approved_path" ]; then
+        printf 'STOP: approved executable not executable: %s\n' "$variable"
+        exit 1
+    fi
+done
+
 GATES=(
     scripts/stripe_provisioning_deployment_approval_gate.sh
     scripts/stripe_provisioning_migration_gate.sh
