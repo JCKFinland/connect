@@ -76,15 +76,32 @@ if ! [[ "$CONNECT_DEPLOYMENT_DATABASE_OID" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-command -v psql >/dev/null || {
-    echo "STOP: psql unavailable"
+# Resolve PostgreSQL through an explicitly approved executable path.
+# Never select the SQL verification client from inherited PATH.
+: "${CONNECT_DEPLOYMENT_PSQL_BIN:?STOP: approved psql executable required}"
+
+case "$CONNECT_DEPLOYMENT_PSQL_BIN" in
+    /*) ;;
+    *)
+        echo "STOP: approved psql path must be absolute"
+        exit 1
+        ;;
+esac
+
+test -f "$CONNECT_DEPLOYMENT_PSQL_BIN" || {
+    echo "STOP: approved psql executable missing"
+    exit 1
+}
+
+test -x "$CONNECT_DEPLOYMENT_PSQL_BIN" || {
+    echo "STOP: approved psql executable not executable"
     exit 1
 }
 
 printf '\n===== READ-ONLY DATABASE IDENTITY VERIFICATION =====\n'
 
 PGSSLMODE="$DB_SSLMODE" \
-psql -X -v ON_ERROR_STOP=1 \
+"$CONNECT_DEPLOYMENT_PSQL_BIN" -X -v ON_ERROR_STOP=1 \
     -h "$DB_HOST" \
     -p "$DB_PORT" \
     -U "$DB_USER" \

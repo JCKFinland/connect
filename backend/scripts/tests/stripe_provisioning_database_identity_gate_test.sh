@@ -25,6 +25,26 @@ export PGCONNECT_TIMEOUT=5
 
 : "${PGPASSWORD:?STOP: isolated PostgreSQL password required}"
 
+# Resolve one PostgreSQL client for fixture discovery and gate execution.
+# The approved executable must not be selected again through PATH.
+PSQL_BIN="$(command -v psql)" || {
+    echo "STOP: local PostgreSQL client unavailable"
+    exit 1
+}
+
+case "$PSQL_BIN" in
+    /*) ;;
+    *)
+        echo "STOP: local PostgreSQL client path not absolute"
+        exit 1
+        ;;
+esac
+
+test -f "$PSQL_BIN" && test -x "$PSQL_BIN" || {
+    echo "STOP: local PostgreSQL client not executable"
+    exit 1
+}
+
 test -f "$SOURCE" || {
     echo "STOP: identity gate missing"
     exit 1
@@ -48,14 +68,14 @@ trap 'rm -rf -- "$TMP"' EXIT
 printf '\n===== DATABASE IDENTITY REGRESSION =====\n'
 
 DB_ACTUAL="$(
-    psql -X -w -v ON_ERROR_STOP=1 \
+    "$PSQL_BIN" -X -w -v ON_ERROR_STOP=1 \
         -h 127.0.0.1 -p 55432 \
         -U postgres -d "$TEST_DB" \
         -Atc 'SELECT current_database()'
 )"
 
 CLUSTER="$(
-    psql -X -w -v ON_ERROR_STOP=1 \
+    "$PSQL_BIN" -X -w -v ON_ERROR_STOP=1 \
         -h 127.0.0.1 -p 55432 \
         -U postgres -d "$TEST_DB" \
         -Atc \
@@ -63,7 +83,7 @@ CLUSTER="$(
 )"
 
 OID="$(
-    psql -X -w -v ON_ERROR_STOP=1 \
+    "$PSQL_BIN" -X -w -v ON_ERROR_STOP=1 \
         -h 127.0.0.1 -p 55432 \
         -U postgres -d "$TEST_DB" \
         -Atc \
@@ -124,6 +144,7 @@ run_gate() {
     CONNECT_DEPLOYMENT_DATABASE_NAME="$TEST_DB" \
     CONNECT_DEPLOYMENT_CLUSTER_SYSTEM_IDENTIFIER="$expected_cluster" \
     CONNECT_DEPLOYMENT_DATABASE_OID="$expected_oid" \
+    CONNECT_DEPLOYMENT_PSQL_BIN="$PSQL_BIN" \
     bash "$TMP/identity_gate.sh" > "$output" 2>&1
 }
 
