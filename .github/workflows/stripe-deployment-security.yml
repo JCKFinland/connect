@@ -69,3 +69,94 @@ jobs:
           done
 
           echo "TEN STRIPE DEPLOYMENT SECURITY REGRESSIONS PASSED"
+
+  stripe-database-identity:
+    name: PostgreSQL database identity regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '55432'
+      PGUSER: postgres
+      PGDATABASE: connect_settlement_test
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify PostgreSQL client and Docker
+        run: |
+          set -euo pipefail
+          command -v psql
+          command -v docker
+          bash -n scripts/tests/stripe_provisioning_database_identity_gate_test.sh
+          bash -n scripts/stripe_provisioning_database_identity_gate.sh
+
+      - name: Start isolated PostgreSQL fixture
+        run: |
+          set -euo pipefail
+
+          password="$(openssl rand -hex 32)"
+          echo "::add-mask::$password"
+
+          docker run -d \
+            --name connect-financial-test-postgres \
+            --restart no \
+            --publish 127.0.0.1:55432:5432 \
+            --env POSTGRES_USER=postgres \
+            --env POSTGRES_DB=connect_settlement_test \
+            --env POSTGRES_PASSWORD="$password" \
+            postgres:16 >/dev/null
+
+          echo "PGPASSWORD=$password" >> "$GITHUB_ENV"
+
+      - name: Wait for isolated PostgreSQL
+        run: |
+          set -euo pipefail
+
+          ready=false
+
+          for attempt in $(seq 1 60); do
+            if PGPASSWORD="$PGPASSWORD" \
+              psql -X -w -v ON_ERROR_STOP=1 \
+                -h 127.0.0.1 -p 55432 \
+                -U postgres -d connect_settlement_test \
+                -Atc 'SELECT 1' >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+
+            sleep 1
+          done
+
+          if [ "$ready" != true ]; then
+            echo "STOP: isolated PostgreSQL did not become ready"
+            exit 1
+          fi
+
+          echo "PASS: isolated PostgreSQL ready"
+
+      - name: Run database identity regression
+        run: |
+          set -euo pipefail
+
+          test "$(docker inspect -f '{{.State.Running}}' connect-financial-test-postgres)" = true
+          test "$(docker port connect-financial-test-postgres 5432/tcp)" = 127.0.0.1:55432
+
+          bash scripts/tests/stripe_provisioning_database_identity_gate_test.sh
+
+      - name: Remove isolated PostgreSQL fixture
+        if: always()
+        run: |
+          docker rm -f connect-financial-test-postgres >/dev/null 2>&1 || true
