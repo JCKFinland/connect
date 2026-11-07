@@ -75,6 +75,7 @@ REQUIRED=(
 
 BASE_ENV=(
     "PATH=$MOCK_PATH"
+    "CONNECT_DEPLOYMENT_GIT_BIN=$TMP/bin/git"
     "HOME=$TMP"
     "LC_ALL=C"
     "DB_HOST=db.example.invalid"

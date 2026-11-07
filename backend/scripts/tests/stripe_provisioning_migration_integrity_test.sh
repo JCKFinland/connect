@@ -119,6 +119,23 @@ chmod +x "$TMP/bin/psql" "$TMP/bin/goose" "$TMP/bin/stripe"
 
 FIXTURE="$TMP/backend"
 
+# Resolve the real checksum executable before the isolated PATH is set.
+# The deployment gate must receive an explicit absolute executable path.
+SHA256_BIN="$(command -v sha256sum)"
+
+case "$SHA256_BIN" in
+    /*) ;;
+    *)
+        echo "STOP: checksum executable path is not absolute"
+        exit 1
+        ;;
+esac
+
+test -f "$SHA256_BIN" && test -x "$SHA256_BIN" || {
+    echo "STOP: checksum executable unavailable"
+    exit 1
+}
+
 run_gate() {
     (
         cd "$FIXTURE"
@@ -131,6 +148,7 @@ run_gate() {
             STRIPE_CONNECT_PROVISIONING_ENABLED=false \
             CONNECT_STRIPE_MIGRATION_AUTHORIZED=true \
             CONNECT_STRIPE_MIGRATION_TARGET_VERSION=79 \
+            CONNECT_DEPLOYMENT_SHA256SUM_BIN="$SHA256_BIN" \
             bash scripts/stripe_provisioning_migration_gate.sh
     )
 }

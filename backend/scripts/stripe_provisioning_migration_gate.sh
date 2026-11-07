@@ -44,14 +44,31 @@ test -f "$MANIFEST" || {
     exit 1
 }
 
-command -v sha256sum >/dev/null || {
-    echo "STOP: sha256sum unavailable"
+# Use only the explicitly approved checksum executable.
+# Never resolve migration integrity verification through inherited PATH.
+: "${CONNECT_DEPLOYMENT_SHA256SUM_BIN:?STOP: approved SHA256 executable required}"
+
+case "$CONNECT_DEPLOYMENT_SHA256SUM_BIN" in
+    /*) ;;
+    *)
+        echo "STOP: approved SHA256 path must be absolute"
+        exit 1
+        ;;
+esac
+
+test -f "$CONNECT_DEPLOYMENT_SHA256SUM_BIN" || {
+    echo "STOP: approved SHA256 executable missing"
+    exit 1
+}
+
+test -x "$CONNECT_DEPLOYMENT_SHA256SUM_BIN" || {
+    echo "STOP: approved SHA256 executable not executable"
     exit 1
 }
 
 printf '\n===== VERIFY MIGRATION INTEGRITY =====\n'
 
-sha256sum --check "$MANIFEST"
+"$CONNECT_DEPLOYMENT_SHA256SUM_BIN" --check "$MANIFEST"
 
 printf '\n===== AUTHORIZATION GATE PASSED =====\n'
 printf 'Target migration version: %s\n' "$EXPECTED_TARGET_VERSION"

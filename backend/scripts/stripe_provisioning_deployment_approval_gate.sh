@@ -70,12 +70,29 @@ case "$DB_NAME" in
         ;;
 esac
 
-command -v git >/dev/null || {
-    echo "STOP: git unavailable"
+# Use only the explicitly approved Git executable.
+# Never resolve release identity verification through inherited PATH.
+: "${CONNECT_DEPLOYMENT_GIT_BIN:?STOP: approved Git executable required}"
+
+case "$CONNECT_DEPLOYMENT_GIT_BIN" in
+    /*) ;;
+    *)
+        echo "STOP: approved Git path must be absolute"
+        exit 1
+        ;;
+esac
+
+test -f "$CONNECT_DEPLOYMENT_GIT_BIN" || {
+    echo "STOP: approved Git executable missing"
     exit 1
 }
 
-actual_commit="$(git rev-parse HEAD)"
+test -x "$CONNECT_DEPLOYMENT_GIT_BIN" || {
+    echo "STOP: approved Git executable not executable"
+    exit 1
+}
+
+actual_commit="$("$CONNECT_DEPLOYMENT_GIT_BIN" rev-parse HEAD)"
 
 if [ "$CONNECT_DEPLOYMENT_RELEASE_COMMIT" != "$actual_commit" ]; then
     echo "STOP: approved release commit mismatch"
