@@ -3,7 +3,6 @@ package stripelinking
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -86,39 +85,40 @@ func newProvisioningIntegrationFixture(
 ) *provisioningIntegrationFixture {
 	t.Helper()
 
-	if os.Getenv("DB_NAME") != "connect_payout_destination_test" ||
-		os.Getenv("CONNECT_REQUIRE_SETTLEMENT_TEST_DB") != "0" ||
-		os.Getenv("FLEX_SETTLEMENT_WORKER_ENABLED") != "false" {
+	if os.Getenv("DB_NAME") != "connect_settlement_test" ||
+		os.Getenv("CONNECT_REQUIRE_SETTLEMENT_TEST_DB") != "1" ||
+		os.Getenv("FLEX_SETTLEMENT_WORKER_ENABLED") != "false" ||
+		os.Getenv("DB_HOST") != "127.0.0.1" ||
+		os.Getenv("DB_PORT") != "55432" ||
+		os.Getenv("DB_USER") != "postgres" ||
+		os.Getenv("DB_SSLMODE") != "disable" {
 		t.Fatal("STOP: unsafe integration environment")
 	}
 
-	envOr := func(key, fallback string) string {
-		if v := os.Getenv(key); v != "" {
-			return v
-		}
-		return fallback
+	password := os.Getenv("DB_PASSWORD")
+	if password == "" {
+		t.Fatal("STOP: isolated database password unavailable")
 	}
 
 	ctx, cancel := context.WithTimeout(
-		context.Background(), 60*time.Second,
+		context.Background(), 90*time.Second,
 	)
 	defer cancel()
 
 	schema := "stripe_provision_test_" +
 		strings.ReplaceAll(uuid.NewString(), "-", "")
 
-	cfg, err := pgxpool.ParseConfig(fmt.Sprintf(
-		"host=%s port=%s user=%s dbname=%s sslmode=disable",
-		envOr("DB_HOST", "localhost"),
-		envOr("DB_PORT", "5432"),
-		envOr("DB_USER", "postgres"),
-		"connect_payout_destination_test",
-	))
+	cfg, err := pgxpool.ParseConfig(
+		"host=127.0.0.1 port=55432 user=postgres " +
+			"dbname=connect_settlement_test sslmode=disable",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	cfg.ConnConfig.Password = password
 	cfg.MaxConns = 8
+
 	cfg.AfterConnect = func(
 		ctx context.Context, conn *pgx.Conn,
 	) error {
@@ -135,34 +135,92 @@ func newProvisioningIntegrationFixture(
 
 	var safe bool
 	err = db.QueryRow(ctx, `
-        SELECT current_database() = 'connect_payout_destination_test'
+        SELECT current_database() = 'connect_settlement_test'
           AND (SELECT MAX(version_id)
                FROM public.goose_db_version
-               WHERE is_applied) = 75
+               WHERE is_applied) = 79
           AND to_regclass(
               'public.stripe_connect_provisioning_intents'
-          ) IS NULL
+          ) IS NOT NULL
     `).Scan(&safe)
+
 	if err != nil || !safe {
 		db.Close()
 		t.Fatalf("unsafe database baseline: %v %v", safe, err)
 	}
 
-	if _, err := db.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+	if _, err := db.Exec(
+		ctx, "CREATE SCHEMA "+schema,
+	); err != nil {
 		db.Close()
 		t.Fatal(err)
 	}
 
+	f := &provisioningIntegrationFixture{db: db}
+
 	t.Cleanup(func() {
 		defer db.Close()
+
+		var dropErr error
+
+		for attempt := 1; attempt <= 3; attempt++ {
+			cleanupCtx, stop := context.WithTimeout(
+				context.Background(), 10*time.Second,
+			)
+
+			_, dropErr = db.Exec(
+				cleanupCtx,
+				"DROP SCHEMA "+schema+" CASCADE",
+			)
+			stop()
+
+			if dropErr == nil {
+				break
+			}
+
+			if attempt < 3 {
+				time.Sleep(200 * time.Millisecond)
+			}
+		}
+
+		if dropErr != nil {
+			t.Errorf(
+				"isolated schema cleanup failed: %v",
+				dropErr,
+			)
+			return
+		}
+
 		cleanupCtx, stop := context.WithTimeout(
 			context.Background(), 20*time.Second,
 		)
 		defer stop()
-		if _, err := db.Exec(
-			cleanupCtx, "DROP SCHEMA "+schema+" CASCADE",
-		); err != nil {
-			t.Errorf("isolated schema cleanup: %v", err)
+
+		if f.company != "" {
+			if _, err := db.Exec(
+				cleanupCtx,
+				"DELETE FROM public.companies WHERE id = $1",
+				f.company,
+			); err != nil {
+				t.Errorf("synthetic company cleanup: %v", err)
+			}
+		}
+
+		for _, id := range []string{
+			f.actor,
+			f.driverUser,
+		} {
+			if id == "" {
+				continue
+			}
+
+			if _, err := db.Exec(
+				cleanupCtx,
+				"DELETE FROM public.users WHERE id = $1",
+				id,
+			); err != nil {
+				t.Errorf("synthetic user cleanup: %v", err)
+			}
 		}
 	})
 
@@ -175,6 +233,7 @@ func newProvisioningIntegrationFixture(
 	}
 
 	text := string(migration)
+
 	if strings.Count(text, "-- +goose Up") != 1 ||
 		strings.Count(text, "-- +goose Down") != 1 {
 		t.Fatal("invalid migration sections")
@@ -184,8 +243,13 @@ func newProvisioningIntegrationFixture(
 		strings.SplitN(text, "-- +goose Up", 2)[1],
 		"-- +goose Down", 2,
 	)[0]
-	up = strings.ReplaceAll(up, "-- +goose StatementBegin", "")
-	up = strings.ReplaceAll(up, "-- +goose StatementEnd", "")
+
+	up = strings.ReplaceAll(
+		up, "-- +goose StatementBegin", "",
+	)
+	up = strings.ReplaceAll(
+		up, "-- +goose StatementEnd", "",
+	)
 
 	if _, err := db.Exec(
 		ctx, up, pgx.QueryExecModeSimpleProtocol,
@@ -193,19 +257,40 @@ func newProvisioningIntegrationFixture(
 		t.Fatalf("isolated migration: %v", err)
 	}
 
-	f := &provisioningIntegrationFixture{db: db}
-	err = db.QueryRow(ctx, `
-        SELECT
-          (SELECT id::text FROM public.users
-           ORDER BY id LIMIT 1),
-          (SELECT id::text FROM public.users
-           ORDER BY id OFFSET 1 LIMIT 1),
-          (SELECT id::text FROM public.companies
-           ORDER BY id LIMIT 1)
-    `).Scan(&f.actor, &f.driverUser, &f.company)
+	f.actor = uuid.NewString()
+	f.driverUser = uuid.NewString()
+	f.company = uuid.NewString()
+
+	_, err = db.Exec(ctx, `
+        INSERT INTO public.users (
+            id, email, password_hash, first_name, last_name
+        ) VALUES
+            ($1, $2, 'synthetic-test-only', 'Test', 'Actor'),
+            ($3, $4, 'synthetic-test-only', 'Test', 'Driver')
+    `,
+		f.actor,
+		"coordinator-"+f.actor+"@example.invalid",
+		f.driverUser,
+		"coordinator-"+f.driverUser+"@example.invalid",
+	)
 	if err != nil {
-		t.Fatalf("missing fixture identities: %v", err)
+		t.Fatalf("synthetic users: %v", err)
 	}
+
+	_, err = db.Exec(ctx, `
+        INSERT INTO public.companies (
+            id, name, legal_name, country_code, timezone
+        ) VALUES (
+            $1, $2, $2, 'FI', 'Europe/Helsinki'
+        )
+    `,
+		f.company,
+		"Coordinator Test "+f.company,
+	)
+	if err != nil {
+		t.Fatalf("synthetic company: %v", err)
+	}
+
 	return f
 }
 
