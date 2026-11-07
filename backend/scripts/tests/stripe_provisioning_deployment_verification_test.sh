@@ -144,4 +144,133 @@ if "DEPLOYMENT VERIFICATION COMPLETE" not in output:
 print("PASS: success-path gate order")
 PY
 
+
+printf '\n===== PRODUCTION SAFETY FLAG REGRESSION =====\n'
+
+SAFETY_VARS=(
+    APP_ENV
+    STRIPE_CONNECT_PROVISIONING_ENABLED
+    FLEX_SETTLEMENT_WORKER_ENABLED
+    FLEX_AUTHORIZATION_RECOVERY_WORKER_ENABLED
+)
+
+SAFETY_PASS_COUNT=0
+
+for TARGET_VAR in "${SAFETY_VARS[@]}"; do
+    for CASE in missing unsafe; do
+
+        ENV_ARGS=(
+            PATH=/usr/bin:/bin
+            HOME="$TMP"
+            APP_ENV=production
+            STRIPE_CONNECT_PROVISIONING_ENABLED=false
+            FLEX_SETTLEMENT_WORKER_ENABLED=false
+            FLEX_AUTHORIZATION_RECOVERY_WORKER_ENABLED=false
+            CONNECT_DEPLOYMENT_GIT_BIN="$BASH"
+            CONNECT_DEPLOYMENT_SHA256SUM_BIN="$BASH"
+            CONNECT_DEPLOYMENT_PSQL_BIN="$BASH"
+            FAIL_GATE=0
+        )
+
+        FILTERED=()
+
+        for ENTRY in "${ENV_ARGS[@]}"; do
+            case "$ENTRY" in
+                "$TARGET_VAR="*)
+                    if [ "$CASE" = missing ]; then
+                        continue
+                    fi
+
+                    if [ "$TARGET_VAR" = APP_ENV ]; then
+                        FILTERED+=("$TARGET_VAR=development")
+                    else
+                        FILTERED+=("$TARGET_VAR=true")
+                    fi
+                    ;;
+                *)
+                    FILTERED+=("$ENTRY")
+                    ;;
+            esac
+        done
+
+        case "$TARGET_VAR:$CASE" in
+            APP_ENV:missing)
+                EXPECTED='STOP: APP_ENV required'
+                ;;
+            APP_ENV:unsafe)
+                EXPECTED='STOP: production environment required'
+                ;;
+            STRIPE_CONNECT_PROVISIONING_ENABLED:missing)
+                EXPECTED='STOP: provisioning flag required'
+                ;;
+            STRIPE_CONNECT_PROVISIONING_ENABLED:unsafe)
+                EXPECTED='STOP: Stripe provisioning must remain disabled'
+                ;;
+            FLEX_SETTLEMENT_WORKER_ENABLED:missing)
+                EXPECTED='STOP: settlement worker flag required'
+                ;;
+            FLEX_SETTLEMENT_WORKER_ENABLED:unsafe)
+                EXPECTED='STOP: settlement worker must remain disabled'
+                ;;
+            FLEX_AUTHORIZATION_RECOVERY_WORKER_ENABLED:missing)
+                EXPECTED='STOP: recovery worker flag required'
+                ;;
+            FLEX_AUTHORIZATION_RECOVERY_WORKER_ENABLED:unsafe)
+                EXPECTED='STOP: authorization recovery worker must remain disabled'
+                ;;
+        esac
+
+        set +e
+
+        timeout 15s env -i "${FILTERED[@]}" \
+            bash "$FIXTURE" > "$TMP/safety_output" 2>&1
+
+        RESULT=$?
+
+        set -e
+
+        if [ "$RESULT" -eq 0 ] || [ "$RESULT" -eq 124 ]; then
+            echo "FAIL: unsafe safety flag accepted or timed out"
+            echo "VARIABLE: $TARGET_VAR"
+            echo "CASE: $CASE"
+            cat "$TMP/safety_output"
+            exit 1
+        fi
+
+        if ! grep -Fq "$EXPECTED" "$TMP/safety_output"; then
+            echo "FAIL: expected safety rejection missing"
+            echo "VARIABLE: $TARGET_VAR"
+            echo "CASE: $CASE"
+            echo "EXPECTED: $EXPECTED"
+            cat "$TMP/safety_output"
+            exit 1
+        fi
+
+        if grep -Fq 'GATE_EXECUTED:' "$TMP/safety_output"; then
+            echo "FAIL: deployment gate executed for unsafe flag"
+            cat "$TMP/safety_output"
+            exit 1
+        fi
+
+        if grep -Fq 'DEPLOYMENT VERIFICATION COMPLETE' \
+            "$TMP/safety_output"; then
+            echo "FAIL: false deployment verification success"
+            cat "$TMP/safety_output"
+            exit 1
+        fi
+
+        printf 'PASS: %-45s %-8s rejected\n' \
+            "$TARGET_VAR" "$CASE"
+
+        SAFETY_PASS_COUNT=$((SAFETY_PASS_COUNT + 1))
+    done
+done
+
+test "$SAFETY_PASS_COUNT" -eq 8 || {
+    echo "FAIL: incomplete safety regression matrix"
+    exit 1
+}
+
+echo "EIGHT PRODUCTION SAFETY FLAG REGRESSIONS PASSED"
+
 echo "DEPLOYMENT ORCHESTRATOR REGRESSION PASSED"
