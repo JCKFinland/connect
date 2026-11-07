@@ -26,9 +26,15 @@ cp "$GATE" "$TMP/approval_gate.sh"
 
 cat > "$TMP/bin/git" <<'SH'
 #!/usr/bin/env bash
-if [ "$#" -eq 2 ] &&
-   [ "$1" = rev-parse ] &&
-   [ "$2" = HEAD ]; then
+# Match the approved, isolated release-identity Git invocation.
+# Reject legacy or unexpected Git operations.
+if [ "$#" -eq 6 ] &&
+   [ "$1" = --no-optional-locks ] &&
+   [ "$2" = -C ] &&
+   [ -n "$3" ] &&
+   [ "$4" = rev-parse ] &&
+   [ "$5" = --verify ] &&
+   [ "$6" = 'HEAD^{commit}' ]; then
     printf '%s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     exit 0
 fi

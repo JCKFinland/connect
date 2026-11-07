@@ -47,9 +47,11 @@ printf 'SHADOW_SHA256_EXECUTED\n' >> "$CONNECT_SHADOW_AUDIT_LOG"
 exit 0
 FAKESHA
 
-cat > "$TMP/approved-git" <<'APPROVEDGIT'
+# The approved Git executable is launched with env -i.
+# Its audit marker must not depend on inherited environment.
+cat > "$TMP/approved-git" <<APPROVEDGIT
 #!/bin/sh
-printf 'APPROVED_GIT_EXECUTED\n' >> "$CONNECT_APPROVED_AUDIT_LOG"
+printf 'APPROVED_GIT_EXECUTED\\n' >> "$TMP/approved.log"
 exit 99
 APPROVEDGIT
 

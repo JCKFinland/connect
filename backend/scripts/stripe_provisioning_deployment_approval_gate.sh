@@ -92,7 +92,20 @@ test -x "$CONNECT_DEPLOYMENT_GIT_BIN" || {
     exit 1
 }
 
-actual_commit="$("$CONNECT_DEPLOYMENT_GIT_BIN" rev-parse HEAD)"
+# Resolve release identity from the intended checkout without
+# inheriting Git repository, configuration or executable overrides.
+#
+# -C binds the lookup to the current checkout directory.
+# env -i removes inherited GIT_DIR, GIT_WORK_TREE, GIT_CONFIG_*
+# and other process-environment overrides.
+# --no-optional-locks prevents unnecessary optional Git locks.
+actual_commit="$(
+    env -i PATH=/usr/bin:/bin \
+        "$CONNECT_DEPLOYMENT_GIT_BIN" \
+        --no-optional-locks \
+        -C "$PWD" \
+        rev-parse --verify HEAD^{commit}
+)"
 
 if [ "$CONNECT_DEPLOYMENT_RELEASE_COMMIT" != "$actual_commit" ]; then
     echo "STOP: approved release commit mismatch"
