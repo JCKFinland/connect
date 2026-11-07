@@ -5,6 +5,7 @@ on:
     paths:
       - 'backend/scripts/**'
       - 'backend/migrations/**'
+      - 'backend/docs/stripe_provisioning_migration_manifest.sha256'
       - '.github/workflows/stripe-deployment-security.yml'
   push:
     branches:
@@ -13,6 +14,7 @@ on:
     paths:
       - 'backend/scripts/**'
       - 'backend/migrations/**'
+      - 'backend/docs/stripe_provisioning_migration_manifest.sha256'
       - '.github/workflows/stripe-deployment-security.yml'
   workflow_dispatch:
 
