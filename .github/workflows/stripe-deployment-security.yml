@@ -1,0 +1,69 @@
+name: Stripe Deployment Security
+
+on:
+  pull_request:
+    paths:
+      - 'backend/scripts/**'
+      - 'backend/migrations/**'
+      - '.github/workflows/stripe-deployment-security.yml'
+  push:
+    branches:
+      - main
+      - feat/driver-operations
+    paths:
+      - 'backend/scripts/**'
+      - 'backend/migrations/**'
+      - '.github/workflows/stripe-deployment-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stripe-deployment-security:
+    name: Stripe deployment security regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify regression syntax
+        run: |
+          set -euo pipefail
+
+          for test in scripts/tests/stripe_provisioning_*_test.sh; do
+            bash -n "$test"
+          done
+
+      - name: Run deployment security regressions
+        run: |
+          set -euo pipefail
+
+          tests=(
+            stripe_provisioning_deployment_approval_gate_test.sh
+            stripe_provisioning_deployment_verification_test.sh
+            stripe_provisioning_executable_contract_test.sh
+            stripe_provisioning_executable_shadowing_test.sh
+            stripe_provisioning_git_sha256_shadowing_test.sh
+            stripe_provisioning_git_environment_isolation_test.sh
+            stripe_provisioning_psql_environment_isolation_test.sh
+            stripe_provisioning_psql_shadowing_test.sh
+            stripe_provisioning_migration_integrity_test.sh
+            stripe_provisioning_sha256_environment_isolation_test.sh
+          )
+
+          for test in "${tests[@]}"; do
+            echo "===== RUNNING: $test ====="
+            bash "scripts/tests/$test"
+          done
+
+          echo "TEN STRIPE DEPLOYMENT SECURITY REGRESSIONS PASSED"
