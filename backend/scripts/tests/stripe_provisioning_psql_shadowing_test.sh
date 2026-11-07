@@ -39,10 +39,38 @@ SHADOW
 
 cat > "$TMP/approved-psql" <<'APPROVED'
 #!/bin/sh
-printf 'APPROVED_EXECUTED\n' >> "$CONNECT_PSQL_APPROVED_LOG"
+printf 'APPROVED_EXECUTED\n' >> '__APPROVED_LOG_PATH__'
 cat > /dev/null
 exit 99
 APPROVED
+
+python - "$TMP/approved-psql" "$TMP" <<'PYTHON'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+tmp = Path(sys.argv[2])
+
+source = path.read_text(encoding="utf-8")
+
+if source.count("__APPROVED_LOG_PATH__") != 1:
+    raise SystemExit("STOP: unexpected approved log placeholder")
+
+# The approved client receives no logging variable from the
+# production environment. The fixture path is embedded instead.
+log_path = str(tmp / "approved-invocation.log")
+
+if "'" in log_path or "\n" in log_path:
+    raise SystemExit("STOP: unsafe fixture log path")
+
+source = source.replace(
+    "__APPROVED_LOG_PATH__",
+    log_path,
+    1,
+)
+
+path.write_text(source, encoding="utf-8")
+PYTHON
 
 chmod +x "$TMP/bin/psql" "$TMP/approved-psql"
 
@@ -62,7 +90,7 @@ for GATE in identity preflight; do
 
     for CASE in missing relative nonexistent nonexecutable approved; do
         SHADOW_LOG="$TMP/${GATE}-${CASE}-shadow.log"
-        APPROVED_LOG="$TMP/${GATE}-${CASE}-approved.log"
+        APPROVED_LOG="$TMP/approved-invocation.log"
         OUTPUT="$TMP/${GATE}-${CASE}-output"
 
         rm -f "$SHADOW_LOG" "$APPROVED_LOG"

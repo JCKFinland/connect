@@ -71,7 +71,30 @@ printf 'SSL mode: %s\n' "$DB_SSLMODE"
 
 printf '\n===== 2. READ-ONLY SCHEMA PREFLIGHT =====\n'
 
-PGSSLMODE="$DB_SSLMODE" \
+# Isolate libpq from inherited connection and session overrides.
+# Preserve only explicitly approved authentication and TLS inputs.
+PSQL_ENV=(
+    "PATH=/usr/bin:/bin"
+    "PGSSLMODE=$DB_SSLMODE"
+)
+
+if [ -n "${PGSSLROOTCERT:-}" ]; then
+    PSQL_ENV+=("PGSSLROOTCERT=$PGSSLROOTCERT")
+fi
+
+if [ -n "${PGPASSWORD:-}" ]; then
+    PSQL_ENV+=("PGPASSWORD=$PGPASSWORD")
+fi
+
+if [ -n "${PGPASSFILE:-}" ]; then
+    PSQL_ENV+=("PGPASSFILE=$PGPASSFILE")
+fi
+
+if [ -n "${PGCONNECT_TIMEOUT:-}" ]; then
+    PSQL_ENV+=("PGCONNECT_TIMEOUT=$PGCONNECT_TIMEOUT")
+fi
+
+env -i "${PSQL_ENV[@]}" \
 "$CONNECT_DEPLOYMENT_PSQL_BIN" -X -v ON_ERROR_STOP=1 \
     -h "$DB_HOST" \
     -p "$DB_PORT" \
