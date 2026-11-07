@@ -55,9 +55,11 @@ printf 'APPROVED_GIT_EXECUTED\\n' >> "$TMP/approved.log"
 exit 99
 APPROVEDGIT
 
-cat > "$TMP/approved-sha256sum" <<'APPROVEDSHA'
+# The approved SHA256 executable runs with env -i.
+# Its audit marker must not depend on inherited environment.
+cat > "$TMP/approved-sha256sum" <<APPROVEDSHA
 #!/bin/sh
-printf 'APPROVED_SHA256_EXECUTED\n' >> "$CONNECT_APPROVED_AUDIT_LOG"
+printf 'APPROVED_SHA256_EXECUTED\\n' >> "$TMP/approved.log"
 exit 99
 APPROVEDSHA
 

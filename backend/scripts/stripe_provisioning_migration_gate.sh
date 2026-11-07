@@ -68,7 +68,11 @@ test -x "$CONNECT_DEPLOYMENT_SHA256SUM_BIN" || {
 
 printf '\n===== VERIFY MIGRATION INTEGRITY =====\n'
 
-"$CONNECT_DEPLOYMENT_SHA256SUM_BIN" --check "$MANIFEST"
+# Run the approved checksum executable without inherited
+# process-environment overrides. The manifest and migration
+# paths remain relative to the verified backend directory.
+env -i PATH=/usr/bin:/bin LC_ALL=C \
+    "$CONNECT_DEPLOYMENT_SHA256SUM_BIN" --check "$MANIFEST"
 
 printf '\n===== AUTHORIZATION GATE PASSED =====\n'
 printf 'Target migration version: %s\n' "$EXPECTED_TARGET_VERSION"
