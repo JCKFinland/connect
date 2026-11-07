@@ -16,6 +16,31 @@ BACKEND_DIR="$(
 
 cd "$BACKEND_DIR"
 
+# Execute every deployment gate with the interpreter running this
+# orchestrator, rather than resolving another Bash through PATH.
+#
+# BASH is maintained by Bash and identifies the active interpreter.
+# An inherited PATH must not select the gate interpreter.
+TRUSTED_BASH="$BASH"
+
+case "$TRUSTED_BASH" in
+    /*) ;;
+    *)
+        echo "STOP: trusted Bash interpreter path unavailable"
+        exit 1
+        ;;
+esac
+
+test -f "$TRUSTED_BASH" || {
+    echo "STOP: trusted Bash interpreter missing"
+    exit 1
+}
+
+test -x "$TRUSTED_BASH" || {
+    echo "STOP: trusted Bash interpreter not executable"
+    exit 1
+}
+
 : "${APP_ENV:?STOP: APP_ENV required}"
 : "${STRIPE_CONNECT_PROVISIONING_ENABLED:?STOP: provisioning flag required}"
 : "${FLEX_SETTLEMENT_WORKER_ENABLED:?STOP: settlement worker flag required}"
@@ -54,23 +79,23 @@ for gate in "${GATES[@]}"; do
         exit 1
     }
 
-    bash -n "$gate" || {
+    "$TRUSTED_BASH" -n "$gate" || {
         printf 'STOP: invalid gate syntax: %s\n' "$gate"
         exit 1
     }
 done
 
 printf '\n===== 1. DEPLOYMENT APPROVAL EVIDENCE =====\n'
-bash "${GATES[0]}"
+"$TRUSTED_BASH" "${GATES[0]}"
 
 printf '\n===== 2. MIGRATION AUTHORIZATION AND INTEGRITY =====\n'
-bash "${GATES[1]}"
+"$TRUSTED_BASH" "${GATES[1]}"
 
 printf '\n===== 3. POSTGRESQL DATABASE IDENTITY =====\n'
-bash "${GATES[2]}"
+"$TRUSTED_BASH" "${GATES[2]}"
 
 printf '\n===== 4. READ-ONLY DATABASE SCHEMA PREFLIGHT =====\n'
-bash "${GATES[3]}"
+"$TRUSTED_BASH" "${GATES[3]}"
 
 printf '\n===== DEPLOYMENT VERIFICATION COMPLETE =====\n'
 printf 'Approval evidence gate passed\n'
