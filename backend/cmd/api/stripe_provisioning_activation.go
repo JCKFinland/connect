@@ -1,9 +1,34 @@
 package main
 
-// validateStripeProvisioningActivation preserves the startup activation
-// boundary. Configuration validation precedes this call; schema readiness
-// and protected route assembly remain mandatory when provisioning is enabled.
-// No database access, route registration, or Stripe request occurs here.
-func validateStripeProvisioningActivation(enabled bool) error {
+import (
+	"errors"
+	"os"
+)
+
+var errStripeProductionActivationUnauthorized = errors.New(
+	"production Stripe provisioning activation is not authorized",
+)
+
+// validateStripeProvisioningActivation is an early startup safety boundary.
+// It runs before database initialization and automatic migrations.
+//
+// Disabled provisioning and non-production provisioning preserve their
+// existing behavior. Production provisioning requires an explicit,
+// independent activation authorization.
+//
+// This guard does not connect to a database, create a Stripe client,
+// register routes, or perform any Stripe request.
+func validateStripeProvisioningActivation(
+	enabled bool,
+	environment string,
+) error {
+	if !enabled || environment != "production" {
+		return nil
+	}
+
+	if os.Getenv("CONNECT_STRIPE_PROVISIONING_PRODUCTION_AUTHORIZED") != "true" {
+		return errStripeProductionActivationUnauthorized
+	}
+
 	return nil
 }

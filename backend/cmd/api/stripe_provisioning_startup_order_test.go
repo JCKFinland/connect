@@ -21,7 +21,7 @@ func TestStripeProvisioningProductionStartupOrder(t *testing.T) {
 	source := string(data)
 
 	markers := []string{
-		"validateStripeProvisioningActivation(provisioningEnabled)",
+		"validateStripeProvisioningActivation(provisioningEnabled, cfg.App.Env)",
 		"database.Connect(cfg)",
 		"database.RunMigrations(cfg, log)",
 		"database.VerifyStripeProvisioningSchema(",

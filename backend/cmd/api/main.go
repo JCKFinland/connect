@@ -116,7 +116,7 @@ func run() (exitCode int) {
 	// Provisioning is not operational until its trusted coordinator,
 	// authorization middleware, and HTTP route are wired together.
 	// Fail closed even when configuration and schema checks succeed.
-	if err := validateStripeProvisioningActivation(provisioningEnabled); err != nil {
+	if err := validateStripeProvisioningActivation(provisioningEnabled, cfg.App.Env); err != nil {
 		fmt.Fprintf(os.Stderr, "Stripe provisioning activation unavailable: %v\n", err)
 		return 1
 	}
