@@ -87,7 +87,12 @@ for line in manifest.read_text(encoding="utf-8").splitlines():
 
     target = destination / relative
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, target)
+    # Normalize only the disposable fixture copy.
+    # Preserve the protected migration and checksum manifest.
+    # Non-line-ending content tampering must still fail SHA256.
+    target.write_bytes(
+        source.read_bytes().replace(b"\r\n", b"\n")
+    )
 
     found.add(relative.name)
 
