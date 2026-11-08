@@ -6,6 +6,9 @@ on:
       - 'backend/scripts/**'
       - 'backend/migrations/**'
       - 'backend/docs/stripe_provisioning_migration_manifest.sha256'
+      - 'backend/internal/database/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
       - '.github/workflows/stripe-deployment-security.yml'
   push:
     branches:
@@ -15,6 +18,9 @@ on:
       - 'backend/scripts/**'
       - 'backend/migrations/**'
       - 'backend/docs/stripe_provisioning_migration_manifest.sha256'
+      - 'backend/internal/database/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
       - '.github/workflows/stripe-deployment-security.yml'
   workflow_dispatch:
 
@@ -160,3 +166,100 @@ jobs:
         if: always()
         run: |
           docker rm -f connect-financial-test-postgres >/dev/null 2>&1 || true
+
+  stripe-full-migration-readiness:
+    name: PostgreSQL 16 full migration and CONNECT readiness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '55433'
+      PGUSER: postgres
+      PGDATABASE: connect_stripe_ci_regression
+      PGSSLMODE: disable
+      CONNECT_STRIPE_FULL_MIGRATION_CI: '1'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Verify isolated fixture tools
+        run: |
+          set -euo pipefail
+          command -v docker
+          command -v psql
+          command -v openssl
+          go version
+
+      - name: Start isolated PostgreSQL 16
+        run: |
+          set -euo pipefail
+
+          password="$(openssl rand -hex 32)"
+          echo "::add-mask::$password"
+
+          docker run -d \
+            --name connect-stripe-full-migration-ci \
+            --restart no \
+            --publish 127.0.0.1:55433:5432 \
+            --env POSTGRES_USER=postgres \
+            --env POSTGRES_DB=connect_stripe_ci_regression \
+            --env POSTGRES_PASSWORD="$password" \
+            postgres:16 >/dev/null
+
+          echo "PGPASSWORD=$password" >> "$GITHUB_ENV"
+
+      - name: Verify authenticated PostgreSQL readiness
+        run: |
+          set -euo pipefail
+
+          test "$(docker inspect -f '{{.State.Running}}' connect-stripe-full-migration-ci)" = true
+          test "$(docker port connect-stripe-full-migration-ci 5432/tcp)" = 127.0.0.1:55433
+
+          ready=false
+
+          for attempt in $(seq 1 60); do
+            if result="$(psql -X -w -v ON_ERROR_STOP=1 -Atc 'SELECT 1' 2>/dev/null)" &&
+               [ "$result" = 1 ]; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" != true ]; then
+            echo "STOP: isolated PostgreSQL did not become ready"
+            exit 1
+          fi
+
+          echo "PASS: authenticated PostgreSQL 16 host connection"
+
+      - name: Run full migration and CONNECT readiness regression
+        run: |
+          set -euo pipefail
+
+          go test ./internal/database \
+            -run '^TestStripeProvisioningFullMigrationReadinessCI$' \
+            -count=1 -v -timeout=5m
+
+      - name: Remove isolated PostgreSQL fixture
+        if: always()
+        run: |
+          docker rm -f connect-stripe-full-migration-ci >/dev/null 2>&1 || true
