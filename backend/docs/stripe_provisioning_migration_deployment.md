@@ -107,6 +107,53 @@ Before declaring deployment complete:
 - Record the deployment operator, release commit, time,
   database identity, and validation results.
 
+## Mandatory post-migration verification procedure
+
+After migrations 76 through 79 have been executed under a separately
+reviewed and explicitly authorized deployment work order, run:
+
+`scripts/stripe_provisioning_post_migration_verify.sh`
+
+This verification must run before the migration deployment is declared
+complete. It is not a migration executor and must not be included in
+the pre-migration verification orchestrator.
+
+The authorized operator must explicitly supply the approved production
+database connection and identity settings:
+
+- `APP_ENV=production`
+- `DB_HOST`, `DB_PORT`, `DB_USER`, and `DB_NAME`
+- `DB_SSLMODE=verify-full` and a trusted `PGSSLROOTCERT`
+- `CONNECT_DEPLOYMENT_DATABASE_NAME`
+- `CONNECT_DEPLOYMENT_CLUSTER_SYSTEM_IDENTIFIER`
+- `CONNECT_DEPLOYMENT_DATABASE_OID`
+- `CONNECT_DEPLOYMENT_PSQL_BIN`, pointing to the approved executable
+- `STRIPE_CONNECT_PROVISIONING_ENABLED=false`
+- `FLEX_SETTLEMENT_WORKER_ENABLED=false`
+- `FLEX_AUTHORIZATION_RECOVERY_WORKER_ENABLED=false`
+
+The operator must provide approved PostgreSQL authentication using
+the deployment environment's established secret-handling procedure.
+Do not place passwords, connection secrets, or production identity
+values in this runbook or commit them to source control.
+
+The verifier independently checks the approved database identity
+before executing its schema verification in a read-only transaction.
+It requires migration version 79, migrations 76 through 79 applied,
+the three Stripe ledger tables, fourteen required constraints, and
+three correctly configured protective triggers.
+
+If the verifier fails, stop the deployment completion process.
+Preserve logs and database evidence, keep provisioning and financial
+workers disabled, and escalate under the approved incident procedure.
+Do not automatically retry migrations, run Goose Down, or activate
+Stripe provisioning.
+
+Record the verification result, approved release commit, database
+identity evidence, authorized operator, execution time, and incident
+reference if applicable. Successful post-migration verification does
+not authorize Stripe activation, settlement, payouts, or live calls.
+
 ## Rollback and incident handling
 
 The Down sections of migrations 77, 78, and 79 drop
