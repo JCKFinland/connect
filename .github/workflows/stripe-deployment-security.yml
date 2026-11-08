@@ -216,7 +216,8 @@ jobs:
           echo "::add-mask::$password"
 
           docker run -d \
-            --name connect-stripe-full-migration-ci \
+            --name connect-stripe-postmigration-regression \
+            --label connect.test-suite=postmigration-regression \
             --restart no \
             --publish 127.0.0.1:55433:5432 \
             --env POSTGRES_USER=postgres \
@@ -230,8 +231,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          test "$(docker inspect -f '{{.State.Running}}' connect-stripe-full-migration-ci)" = true
-          test "$(docker port connect-stripe-full-migration-ci 5432/tcp)" = 127.0.0.1:55433
+          test "$(docker inspect -f '{{.State.Running}}' connect-stripe-postmigration-regression)" = true
+          test "$(docker port connect-stripe-postmigration-regression 5432/tcp)" = 127.0.0.1:55433
 
           ready=false
 
@@ -259,7 +260,15 @@ jobs:
             -run '^TestStripeProvisioningFullMigrationReadinessCI$' \
             -count=1 -v -timeout=5m
 
+      - name: Run post-migration SQL schema regression
+        env:
+          CONNECT_POSTMIGRATION_SQL_TEST: '1'
+        run: |
+          set -euo pipefail
+
+          bash scripts/tests/stripe_provisioning_post_migration_sql_test.sh
+
       - name: Remove isolated PostgreSQL fixture
         if: always()
         run: |
-          docker rm -f connect-stripe-full-migration-ci >/dev/null 2>&1 || true
+          docker rm -f connect-stripe-postmigration-regression >/dev/null 2>&1 || true
