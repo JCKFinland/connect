@@ -7,6 +7,7 @@ on:
       - 'backend/migrations/**'
       - 'backend/docs/stripe_provisioning_migration_manifest.sha256'
       - 'backend/internal/database/**'
+      - 'backend/cmd/api/**'
       - 'backend/go.mod'
       - 'backend/go.sum'
       - '.github/workflows/stripe-deployment-security.yml'
@@ -19,6 +20,7 @@ on:
       - 'backend/migrations/**'
       - 'backend/docs/stripe_provisioning_migration_manifest.sha256'
       - 'backend/internal/database/**'
+      - 'backend/cmd/api/**'
       - 'backend/go.mod'
       - 'backend/go.sum'
       - '.github/workflows/stripe-deployment-security.yml'
@@ -28,6 +30,36 @@ permissions:
   contents: read
 
 jobs:
+  stripe-activation-guard:
+    name: Stripe production activation guard regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Run API activation and startup regressions
+        run: |
+          set -euo pipefail
+          go test ./cmd/api -count=1 -timeout=5m
+
   stripe-deployment-security:
     name: Stripe deployment security regressions
     runs-on: ubuntu-24.04
