@@ -1,0 +1,4 @@
+/00076_add_payout_destination_verification_permission.sql text eol=lf
+/00077_create_stripe_connect_ownership_bindings.sql text eol=lf
+/00078_create_stripe_connect_account_link_sessions.sql text eol=lf
+/00079_create_stripe_connect_provisioning_intents.sql text eol=lf
